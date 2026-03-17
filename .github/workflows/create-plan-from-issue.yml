@@ -1,0 +1,84 @@
+name: Create Plan from Issue
+
+on:
+  issues:
+    types: [assigned, labeled]
+
+concurrency:
+  group: create-plan-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  create_plan:
+    if: (github.event.action == 'assigned' && github.event.assignee.login == 'oz-agent' && contains(github.event.issue.labels.*.name, 'ready-to-plan')) || (github.event.action == 'labeled' && github.event.label.name == 'ready-to-plan' && contains(github.event.issue.assignees.*.login, 'oz-agent'))
+    name: Create plan PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Construct prompt
+        id: prompt
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const issue = context.payload.issue;
+            const labels = issue.labels.map(label => label.name).join(', ') || 'None';
+            const assignees = issue.assignees.map(assignee => assignee.login).join(', ') || 'None';
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              per_page: 100,
+            });
+
+            let commentsNote = 'There are no previous comments on this issue.';
+            if (comments.length) {
+              const commentsText = comments
+                .map(comment => `- ${comment.user?.login || 'unknown'} (${comment.created_at}): ${comment.body}`)
+                .join('\n');
+              fs.writeFileSync('issue_comments.txt', commentsText, 'utf8');
+              commentsNote = 'Previous issue comments are available in `issue_comments.txt`.';
+            }
+
+            const prompt = `Create a draft planning pull request for GitHub Issue #${issue.number}.
+
+            Issue Details:
+            - Title: ${issue.title}
+            - Labels: ${labels}
+            - Assignees: ${assignees}
+            - Description: ${issue.body || 'No description provided.'}
+
+            Previous Issue Comments:
+            - ${commentsNote}
+
+            Additional Instructions:
+            - Use the repository's local \`create-plan\` skill as the base workflow.
+            - Store the resulting plan in the repository's \`plans/\` directory.
+            - Research the codebase enough to produce a grounded implementation plan.
+            - Treat \`issue_comments.txt\` as temporary context only and do not include it in committed changes.
+            - Do not implement the feature itself in this run; produce a plan-only PR.`;
+
+            core.setOutput('prompt', prompt);
+
+      - name: Run Oz Agent
+        id: agent
+        uses: warpdotdev/oz-agent-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          skill: create-plan
+          prompt: ${{ steps.prompt.outputs.prompt }}
+          name: Create plan for issue #${{ github.event.issue.number }}
+          profile: ${{ vars.WARP_AGENT_PROFILE || '' }}
+          warp_api_key: ${{ secrets.WARP_API_KEY }}
+
