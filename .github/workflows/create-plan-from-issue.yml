@@ -41,13 +41,17 @@ jobs:
               per_page: 100,
             });
 
-            let commentsNote = 'There are no previous comments on this issue.';
-            if (comments.length) {
-              const commentsText = comments
+            const orgMemberComments = comments.filter(comment =>
+              ['MEMBER', 'OWNER'].includes(comment.author_association)
+            );
+
+            let commentsNote = 'There are no previous comments from organization members on this issue.';
+            if (orgMemberComments.length) {
+              const commentsText = orgMemberComments
                 .map(comment => `- ${comment.user?.login || 'unknown'} (${comment.created_at}): ${comment.body}`)
                 .join('\n');
               fs.writeFileSync('issue_comments.txt', commentsText, 'utf8');
-              commentsNote = 'Previous issue comments are available in `issue_comments.txt`.';
+              commentsNote = 'Previous issue comments from organization members are available in `issue_comments.txt`.';
             }
 
             const prompt = `Create a draft planning pull request for GitHub Issue #${issue.number}.
