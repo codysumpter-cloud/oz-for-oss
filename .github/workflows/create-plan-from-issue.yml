@@ -11,7 +11,7 @@ concurrency:
 jobs:
   create_plan:
     if: (github.event.action == 'assigned' && github.event.assignee.login == 'oz-agent' && contains(github.event.issue.labels.*.name, 'ready-to-plan')) || (github.event.action == 'labeled' && github.event.label.name == 'ready-to-plan' && contains(github.event.issue.assignees.*.login, 'oz-agent'))
-    name: Create plan PR
+    name: Create plan diff
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -28,6 +28,7 @@ jobs:
         id: prompt
         uses: actions/github-script@v7
         with:
+          github-token: ${{ github.token }}
           script: |
             const fs = require('fs');
             const issue = context.payload.issue;
@@ -54,7 +55,7 @@ jobs:
               commentsNote = 'Previous issue comments from organization members are available in `issue_comments.txt`.';
             }
 
-            const prompt = `Create a draft planning pull request for GitHub Issue #${issue.number}.
+            const prompt = `Create a plan-only diff for GitHub Issue #${issue.number}.
 
             Issue Details:
             - Title: ${issue.title}
@@ -70,7 +71,8 @@ jobs:
             - Store the resulting plan in the repository's \`plans/\` directory.
             - Research the codebase enough to produce a grounded implementation plan.
             - Treat \`issue_comments.txt\` as temporary context only and do not include it in committed changes.
-            - Do not implement the feature itself in this run; produce a plan-only PR.`;
+            - Do not implement the feature itself in this run.
+            - Do not create a branch, commit, push, or open a pull request. Only produce the repository diff and a concise summary of the plan.`;
 
             core.setOutput('prompt', prompt);
 
@@ -101,4 +103,46 @@ jobs:
           name: Create plan for issue #${{ github.event.issue.number }}
           profile: ${{ vars.WARP_AGENT_PROFILE || '' }}
           warp_api_key: ${{ secrets.WARP_API_KEY }}
+      - name: Create PR from plan diff
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          AGENT_OUTPUT: ${{ steps.agent.outputs.agent_output }}
+        run: |
+          rm -f issue_comments.txt
+
+          if [[ -z $(git status --porcelain) ]]; then
+            echo "No changes made by Oz Agent."
+            gh issue comment "$ISSUE_NUMBER" --body "I analyzed this issue but did not produce a plan diff.\n\n**Agent Summary**:\n$AGENT_OUTPUT"
+            exit 0
+          fi
+
+          BRANCH_NAME="oz-agent/plan-issue-$ISSUE_NUMBER"
+
+          git config user.name "Oz Agent"
+          git config user.email "oz-agent@warp.dev"
+
+          git checkout -B "$BRANCH_NAME"
+          git add plans
+          git commit -m "Add plan for issue #$ISSUE_NUMBER" -m "Co-Authored-By: Oz <oz-agent@warp.dev>"
+          git push origin "$BRANCH_NAME" --force
+
+          {
+            printf 'This PR adds an implementation plan for Issue #%s.\n\n' "$ISSUE_NUMBER"
+            printf '**Agent Summary**:\n%s\n\n' "$AGENT_OUTPUT"
+            printf 'Refs #%s\n\n' "$ISSUE_NUMBER"
+            printf 'Co-Authored-By: Oz <oz-agent@warp.dev>\n'
+          } > pr_body.md
+
+          PR_URL=$(gh pr create \
+            --draft \
+            --title "Plan issue #$ISSUE_NUMBER: $ISSUE_TITLE" \
+            --body-file pr_body.md \
+            --base "$DEFAULT_BRANCH" \
+            --head "$BRANCH_NAME")
+
+          gh issue comment "$ISSUE_NUMBER" --body "I created a draft plan PR for this issue: $PR_URL"
 
