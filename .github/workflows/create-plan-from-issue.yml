@@ -102,6 +102,9 @@ jobs:
           prompt: ${{ steps.prompt.outputs.prompt }}
           name: Create plan for issue #${{ github.event.issue.number }}
           profile: ${{ vars.WARP_AGENT_PROFILE || '' }}
+          output_format: text
+          model: ${{ vars.WARP_AGENT_MODEL || '' }}
+          mcp: ${{ vars.WARP_AGENT_MCP || '' }}
           warp_api_key: ${{ secrets.WARP_API_KEY }}
       - name: Create PR from plan diff
         if: success()
