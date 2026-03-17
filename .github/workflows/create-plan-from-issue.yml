@@ -74,6 +74,22 @@ jobs:
 
             core.setOutput('prompt', prompt);
 
+      - name: Validate Warp API key
+        env:
+          WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
+        run: |
+          if [ -z "$WARP_API_KEY" ]; then
+            echo "::error::Missing WARP_API_KEY GitHub Actions secret."
+            exit 1
+          fi
+
+          case "$WARP_API_KEY" in
+            wk-*) ;;
+            *)
+              echo "::error::WARP_API_KEY appears malformed. Expected a Warp API key starting with 'wk-'."
+              exit 1
+              ;;
+          esac
       - name: Run Oz Agent
         id: agent
         uses: warpdotdev/oz-agent-action@v1
