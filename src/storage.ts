@@ -19,13 +19,6 @@ export function loadTodos(): Todo[] {
 }
 
 export function saveTodos(todos: Todo[]): void {
-  const replacer = (key: string, value: unknown): unknown => {
-    if (key === "completed") {
-      return undefined;
-    }
-    return value;
-  };
-
-  const data = JSON.stringify(todos, replacer, 2);
+  const data = JSON.stringify(todos, null, 2);
   fs.writeFileSync(DATA_FILE, data, "utf-8");
 }
