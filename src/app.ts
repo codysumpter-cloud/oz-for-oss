@@ -25,7 +25,7 @@ export function listTodos(): void {
   console.log("\nYour Todos:");
   console.log("-".repeat(50));
 
-  const displayTodos = todos.reverse();
+  const displayTodos = [...todos];
 
   displayTodos.forEach((todo, index) => {
     const status = todo.completed ? "✓" : " ";
