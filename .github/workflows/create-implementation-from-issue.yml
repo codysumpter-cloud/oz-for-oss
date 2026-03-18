@@ -10,7 +10,7 @@ concurrency:
 
 jobs:
   create_implementation:
-    if: (github.event.action == 'assigned' && github.event.assignee.login == 'oz-agent' && contains(github.event.issue.labels.*.name, 'ready-for-implementation')) || (github.event.action == 'labeled' && github.event.label.name == 'ready-for-implementation' && contains(github.event.issue.assignees.*.login, 'oz-agent'))
+    if: (github.event.action == 'assigned' && github.event.assignee.login == 'oz-agent' && contains(github.event.issue.labels.*.name, 'ready-to-implement')) || (github.event.action == 'labeled' && github.event.label.name == 'ready-to-implement' && contains(github.event.issue.assignees.*.login, 'oz-agent'))
     name: Create implementation diff
     runs-on: ubuntu-latest
     permissions:
