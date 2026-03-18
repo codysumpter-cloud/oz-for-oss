@@ -69,10 +69,11 @@ jobs:
             Additional Instructions:
             - Use the repository's local \`create-plan\` skill as the base workflow.
             - Store the resulting plan in the repository's \`plans/\` directory.
+            - Write a concise markdown summary for the eventual pull request body to \`plan_summary.md\` in the repository root.
             - Research the codebase enough to produce a grounded implementation plan.
-            - Treat \`issue_comments.txt\` as temporary context only and do not include it in committed changes.
+            - Treat \`issue_comments.txt\` and \`plan_summary.md\` as temporary context only and do not include them in committed changes.
             - Do not implement the feature itself in this run.
-            - Do not create a branch, commit, push, or open a pull request. Only produce the repository diff and a concise summary of the plan.`;
+            - Do not create a branch, commit, push, or open a pull request. Only produce the repository diff, the summary file, and a concise summary of the plan.`;
 
             core.setOutput('prompt', prompt);
 
@@ -114,18 +115,27 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          AGENT_OUTPUT: ${{ steps.agent.outputs.agent_output }}
+          SUMMARY_FILE: plan_summary.md
         run: |
           rm -f issue_comments.txt
 
-          if [[ -z $(git status --porcelain) ]]; then
+          if [[ -z $(git status --porcelain -- plans) ]]; then
             echo "No changes made by Oz Agent."
-            gh issue comment "$ISSUE_NUMBER" --body "I analyzed this issue but did not produce a plan diff.\n\n**Agent Summary**:\n$AGENT_OUTPUT"
+            if [[ -f "$SUMMARY_FILE" ]]; then
+              {
+                printf 'I analyzed this issue but did not produce a plan diff.\n\n'
+                cat "$SUMMARY_FILE"
+              } > no_diff_comment.md
+              gh issue comment "$ISSUE_NUMBER" --body-file no_diff_comment.md
+            else
+              gh issue comment "$ISSUE_NUMBER" --body "I analyzed this issue but did not produce a plan diff."
+            fi
             echo "should_create_pr=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           BRANCH_NAME="oz-agent/plan-issue-$ISSUE_NUMBER"
+
 
           git config user.name "Oz Agent"
           git config user.email "oz-agent@warp.dev"
@@ -145,26 +155,31 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          AGENT_OUTPUT: ${{ steps.agent.outputs.agent_output }}
           BRANCH_NAME: ${{ steps.prepare_pr.outputs.branch_name }}
+          SUMMARY_FILE: plan_summary.md
         with:
           github-token: ${{ github.token }}
           script: |
+            const fs = require('fs');
             const issueNumber = Number(process.env.ISSUE_NUMBER);
             const issueTitle = process.env.ISSUE_TITLE;
             const defaultBranch = process.env.DEFAULT_BRANCH;
             const branchName = process.env.BRANCH_NAME;
-            const agentOutput = process.env.AGENT_OUTPUT || '';
-            const prBody = [
-              `This PR adds an implementation plan for Issue #${issueNumber}.`,
-              '',
-              '**Agent Summary**:',
-              agentOutput,
-              '',
-              `Refs #${issueNumber}`,
-              '',
-              'Co-Authored-By: Oz <oz-agent@warp.dev>',
-            ].join('\n');
+            const summaryFile = process.env.SUMMARY_FILE;
+            const summaryBody = fs.existsSync(summaryFile)
+              ? fs.readFileSync(summaryFile, 'utf8').trim()
+              : '';
+            const prBody = summaryBody
+              ? [
+                  `This PR adds an implementation plan for Issue #${issueNumber}.`,
+                  '',
+                  summaryBody,
+                  '',
+                  `Refs #${issueNumber}`,
+                  '',
+                  'Co-Authored-By: Oz <oz-agent@warp.dev>',
+                ].join('\n')
+              : undefined;
 
             try {
               const { data: pr } = await github.rest.pulls.create({
