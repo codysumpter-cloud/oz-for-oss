@@ -77,6 +77,52 @@ jobs:
 
             core.setOutput('prompt', prompt);
 
+      - name: Create or update issue status comment
+        id: status_comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issueNumber = context.payload.issue.number;
+            const metadata = `<!-- oz-agent-metadata: {"type":"issue-status","workflow":"create-plan-from-issue","issue":${issueNumber}} -->`;
+            const body = [
+              'Oz Agent is starting work on an implementation plan for this issue.',
+              '',
+              metadata,
+            ].join('\n');
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: issueNumber,
+              per_page: 100,
+            });
+
+            const existingComment = comments.find(comment =>
+              typeof comment.body === 'string' && comment.body.includes(metadata)
+            );
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existingComment.id,
+                body,
+              });
+              core.setOutput('comment_id', String(existingComment.id));
+              return;
+            }
+
+            const { data: comment } = await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: issueNumber,
+              body,
+            });
+
+            core.setOutput('comment_id', String(comment.id));
       - name: Validate Warp API key
         env:
           WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
@@ -111,25 +157,12 @@ jobs:
         if: success()
         id: prepare_pr
         env:
-          GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
-          ISSUE_TITLE: ${{ github.event.issue.title }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          SUMMARY_FILE: plan_summary.md
         run: |
           rm -f issue_comments.txt
 
           if [[ -z $(git status --porcelain -- plans) ]]; then
             echo "No changes made by Oz Agent."
-            if [[ -f "$SUMMARY_FILE" ]]; then
-              {
-                printf 'I analyzed this issue but did not produce a plan diff.\n\n'
-                cat "$SUMMARY_FILE"
-              } > no_diff_comment.md
-              gh issue comment "$ISSUE_NUMBER" --body-file no_diff_comment.md
-            else
-              gh issue comment "$ISSUE_NUMBER" --body "I analyzed this issue but did not produce a plan diff."
-            fi
             echo "should_create_pr=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -146,12 +179,53 @@ jobs:
           git push origin "$BRANCH_NAME" --force
           echo "should_create_pr=true" >> "$GITHUB_OUTPUT"
           echo "branch_name=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
+      - name: Update issue comment when no plan diff is produced
+        if: success() && steps.prepare_pr.outputs.should_create_pr == 'false'
+        uses: actions/github-script@v7
+        env:
+          COMMENT_ID: ${{ steps.status_comment.outputs.comment_id }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          SUMMARY_FILE: plan_summary.md
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issueNumber = Number(process.env.ISSUE_NUMBER);
+            const commentId = Number(process.env.COMMENT_ID);
+            const summaryFile = process.env.SUMMARY_FILE;
+            const metadata = `<!-- oz-agent-metadata: {"type":"issue-status","workflow":"create-plan-from-issue","issue":${issueNumber}} -->`;
+            const summaryBody = fs.existsSync(summaryFile)
+              ? fs.readFileSync(summaryFile, 'utf8').trim()
+              : '';
+            const body = summaryBody
+              ? [
+                  'I analyzed this issue but did not produce a plan diff.',
+                  '',
+                  summaryBody,
+                  '',
+                  metadata,
+                ].join('\n')
+              : [
+                  'I analyzed this issue but did not produce a plan diff.',
+                  '',
+                  metadata,
+                ].join('\n');
+
+            await github.rest.issues.updateComment({
+              owner,
+              repo,
+              comment_id: commentId,
+              body,
+            });
 
       - name: Create PR from plan diff
         if: steps.prepare_pr.outputs.should_create_pr == 'true'
         id: create_pr
         uses: actions/github-script@v7
         env:
+          COMMENT_ID: ${{ steps.status_comment.outputs.comment_id }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -165,7 +239,9 @@ jobs:
             const issueTitle = process.env.ISSUE_TITLE;
             const defaultBranch = process.env.DEFAULT_BRANCH;
             const branchName = process.env.BRANCH_NAME;
+            const commentId = Number(process.env.COMMENT_ID);
             const summaryFile = process.env.SUMMARY_FILE;
+            const metadata = `<!-- oz-agent-metadata: {"type":"issue-status","workflow":"create-plan-from-issue","issue":${issueNumber}} -->`;
             const summaryBody = fs.existsSync(summaryFile)
               ? fs.readFileSync(summaryFile, 'utf8').trim()
               : '';
@@ -189,14 +265,20 @@ jobs:
                 head: branchName,
                 base: defaultBranch,
                 body: prBody,
-                draft: true,
+                draft: false,
               });
 
-              await github.rest.issues.createComment({
+              const commentBody = [
+                `I created a plan PR for this issue: ${pr.html_url}`,
+                '',
+                metadata,
+              ].join('\n');
+
+              await github.rest.issues.updateComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: issueNumber,
-                body: `I created a draft plan PR for this issue: ${pr.html_url}`,
+                comment_id: commentId,
+                body: commentBody,
               });
 
               core.setOutput('pr_url', pr.html_url);
@@ -204,6 +286,33 @@ jobs:
               const message = error?.message || String(error);
 
 
-              core.setFailed(`Failed to create draft PR: ${message}`);
+              core.setFailed(`Failed to create plan PR: ${message}`);
             }
+
+      - name: Update issue comment on failure
+        if: failure() && steps.status_comment.outputs.comment_id != ''
+        uses: actions/github-script@v7
+        env:
+          COMMENT_ID: ${{ steps.status_comment.outputs.comment_id }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issueNumber = Number(process.env.ISSUE_NUMBER);
+            const commentId = Number(process.env.COMMENT_ID);
+            const metadata = `<!-- oz-agent-metadata: {"type":"issue-status","workflow":"create-plan-from-issue","issue":${issueNumber}} -->`;
+            const body = [
+              'I started working on a plan for this issue, but the workflow failed before completion.',
+              '',
+              metadata,
+            ].join('\n');
+
+            await github.rest.issues.updateComment({
+              owner,
+              repo,
+              comment_id: commentId,
+              body,
+            });
 
