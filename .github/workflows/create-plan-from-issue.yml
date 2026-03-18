@@ -106,8 +106,9 @@ jobs:
           model: ${{ vars.WARP_AGENT_MODEL || '' }}
           mcp: ${{ vars.WARP_AGENT_MCP || '' }}
           warp_api_key: ${{ secrets.WARP_API_KEY }}
-      - name: Create PR from plan diff
+      - name: Prepare plan branch
         if: success()
+        id: prepare_pr
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
@@ -120,6 +121,7 @@ jobs:
           if [[ -z $(git status --porcelain) ]]; then
             echo "No changes made by Oz Agent."
             gh issue comment "$ISSUE_NUMBER" --body "I analyzed this issue but did not produce a plan diff.\n\n**Agent Summary**:\n$AGENT_OUTPUT"
+            echo "should_create_pr=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -132,20 +134,61 @@ jobs:
           git add plans
           git commit -m "Add plan for issue #$ISSUE_NUMBER" -m "Co-Authored-By: Oz <oz-agent@warp.dev>"
           git push origin "$BRANCH_NAME" --force
+          echo "should_create_pr=true" >> "$GITHUB_OUTPUT"
+          echo "branch_name=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
 
-          {
-            printf 'This PR adds an implementation plan for Issue #%s.\n\n' "$ISSUE_NUMBER"
-            printf '**Agent Summary**:\n%s\n\n' "$AGENT_OUTPUT"
-            printf 'Refs #%s\n\n' "$ISSUE_NUMBER"
-            printf 'Co-Authored-By: Oz <oz-agent@warp.dev>\n'
-          } > pr_body.md
+      - name: Create PR from plan diff
+        if: steps.prepare_pr.outputs.should_create_pr == 'true'
+        id: create_pr
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          AGENT_OUTPUT: ${{ steps.agent.outputs.agent_output }}
+          BRANCH_NAME: ${{ steps.prepare_pr.outputs.branch_name }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const issueNumber = Number(process.env.ISSUE_NUMBER);
+            const issueTitle = process.env.ISSUE_TITLE;
+            const defaultBranch = process.env.DEFAULT_BRANCH;
+            const branchName = process.env.BRANCH_NAME;
+            const agentOutput = process.env.AGENT_OUTPUT || '';
+            const prBody = [
+              `This PR adds an implementation plan for Issue #${issueNumber}.`,
+              '',
+              '**Agent Summary**:',
+              agentOutput,
+              '',
+              `Refs #${issueNumber}`,
+              '',
+              'Co-Authored-By: Oz <oz-agent@warp.dev>',
+            ].join('\n');
 
-          PR_URL=$(gh pr create \
-            --draft \
-            --title "Plan issue #$ISSUE_NUMBER: $ISSUE_TITLE" \
-            --body-file pr_body.md \
-            --base "$DEFAULT_BRANCH" \
-            --head "$BRANCH_NAME")
+            try {
+              const { data: pr } = await github.rest.pulls.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Plan issue #${issueNumber}: ${issueTitle}`,
+                head: branchName,
+                base: defaultBranch,
+                body: prBody,
+                draft: true,
+              });
 
-          gh issue comment "$ISSUE_NUMBER" --body "I created a draft plan PR for this issue: $PR_URL"
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: `I created a draft plan PR for this issue: ${pr.html_url}`,
+              });
+
+              core.setOutput('pr_url', pr.html_url);
+            } catch (error) {
+              const message = error?.message || String(error);
+
+
+              core.setFailed(`Failed to create draft PR: ${message}`);
+            }
 
