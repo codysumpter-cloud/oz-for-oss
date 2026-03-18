@@ -1,0 +1,406 @@
+name: Create Implementation from Issue
+
+on:
+  issues:
+    types: [assigned, labeled]
+
+concurrency:
+  group: create-implementation-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  create_implementation:
+    if: (github.event.action == 'assigned' && github.event.assignee.login == 'oz-agent' && contains(github.event.issue.labels.*.name, 'ready-for-implementation')) || (github.event.action == 'labeled' && github.event.label.name == 'ready-for-implementation' && contains(github.event.issue.assignees.*.login, 'oz-agent'))
+    name: Create implementation diff
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine issue context
+        id: context
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue = context.payload.issue;
+            const defaultBranch = context.payload.repository.default_branch;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: issue.number,
+              per_page: 100,
+            });
+
+            const orgMemberComments = comments.filter(comment =>
+              ['MEMBER', 'OWNER'].includes(comment.author_association)
+            );
+
+            if (orgMemberComments.length) {
+              const commentsText = orgMemberComments
+                .map(comment => `- ${comment.user?.login || 'unknown'} (${comment.created_at}): ${comment.body}`)
+                .join('\n');
+              fs.writeFileSync('issue_comments.txt', commentsText, 'utf8');
+            }
+
+            const timelineEvents = await github.paginate(github.rest.issues.listEventsForTimeline, {
+              owner,
+              repo,
+              issue_number: issue.number,
+              per_page: 100,
+            });
+
+            const linkedPrNumbers = new Set();
+
+            for (const event of timelineEvents) {
+              if (event.event === 'cross-referenced') {
+                const sourceIssue = event.source?.issue;
+                if (sourceIssue?.pull_request && typeof sourceIssue.number === 'number') {
+                  linkedPrNumbers.add(sourceIssue.number);
+                }
+              }
+
+              if (event.event === 'connected') {
+                const subject = event.subject;
+                if (subject?.type === 'pull_request' && typeof subject.number === 'number') {
+                  linkedPrNumbers.add(subject.number);
+                }
+              }
+            }
+
+            const linkedPlanPrs = [];
+
+            for (const prNumber of linkedPrNumbers) {
+              const { data: pr } = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: prNumber,
+              });
+
+              const labels = pr.labels
+                .map(label => typeof label === 'string' ? label : label.name)
+                .filter(Boolean);
+
+              if (!labels.includes('plan-approved')) {
+                continue;
+              }
+
+              linkedPlanPrs.push({
+                number: pr.number,
+                url: pr.html_url,
+                updatedAt: pr.updated_at,
+                headRefName: pr.head.ref,
+                headRepoFullName: pr.head.repo?.full_name || '',
+              });
+            }
+
+            linkedPlanPrs.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+            const selectedPlanPr = linkedPlanPrs[0] || null;
+
+            if (selectedPlanPr && selectedPlanPr.headRepoFullName !== `${owner}/${repo}`) {
+              core.setFailed(`Linked approved plan PR #${selectedPlanPr.number} uses branch ${selectedPlanPr.headRepoFullName}:${selectedPlanPr.headRefName}, which this workflow cannot push to with the repository token.`);
+              return;
+            }
+
+            let planFiles = [];
+            if (selectedPlanPr) {
+              const files = await github.paginate(github.rest.pulls.listFiles, {
+                owner,
+                repo,
+                pull_number: selectedPlanPr.number,
+                per_page: 100,
+              });
+
+              planFiles = files
+                .map(file => file.filename)
+                .filter(filename => filename.startsWith('plans/'));
+            }
+
+            core.setOutput('default_branch', defaultBranch);
+            core.setOutput('has_plan_pr', selectedPlanPr ? 'true' : 'false');
+            core.setOutput('plan_pr_number', selectedPlanPr ? String(selectedPlanPr.number) : '');
+            core.setOutput('plan_pr_url', selectedPlanPr ? selectedPlanPr.url : '');
+            core.setOutput('target_branch', selectedPlanPr ? selectedPlanPr.headRefName : `oz-agent/implement-issue-${issue.number}`);
+            core.setOutput('plan_file_paths_json', JSON.stringify(planFiles));
+
+      - name: Validate Warp API key
+        env:
+          WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
+        run: |
+          if [ -z "$WARP_API_KEY" ]; then
+            echo "::error::Missing WARP_API_KEY GitHub Actions secret."
+            exit 1
+          fi
+
+          case "$WARP_API_KEY" in
+            wk-*) ;;
+            *)
+              echo "::error::WARP_API_KEY appears malformed. Expected a Warp API key starting with 'wk-'."
+              exit 1
+              ;;
+          esac
+
+      - name: Prepare working branch
+        env:
+          DEFAULT_BRANCH: ${{ steps.context.outputs.default_branch }}
+          HAS_PLAN_PR: ${{ steps.context.outputs.has_plan_pr }}
+          TARGET_BRANCH: ${{ steps.context.outputs.target_branch }}
+        run: |
+          git config user.name "Oz Agent"
+          git config user.email "oz-agent@warp.dev"
+
+          if [ "$HAS_PLAN_PR" = "true" ]; then
+            git fetch origin "$TARGET_BRANCH"
+            git checkout -B "$TARGET_BRANCH" FETCH_HEAD
+          elif git ls-remote --exit-code --heads origin "$TARGET_BRANCH" >/dev/null 2>&1; then
+            git fetch origin "$TARGET_BRANCH"
+            git checkout -B "$TARGET_BRANCH" FETCH_HEAD
+          else
+            git checkout -B "$TARGET_BRANCH" "origin/$DEFAULT_BRANCH"
+          fi
+
+      - name: Materialize approved plan context
+        if: steps.context.outputs.has_plan_pr == 'true'
+        uses: actions/github-script@v7
+        env:
+          PLAN_FILE_PATHS_JSON: ${{ steps.context.outputs.plan_file_paths_json }}
+          PLAN_PR_NUMBER: ${{ steps.context.outputs.plan_pr_number }}
+          PLAN_PR_URL: ${{ steps.context.outputs.plan_pr_url }}
+        with:
+          script: |
+            const fs = require('fs');
+            const planFiles = JSON.parse(process.env.PLAN_FILE_PATHS_JSON || '[]');
+            const sections = [
+              `Linked approved plan PR: #${process.env.PLAN_PR_NUMBER} (${process.env.PLAN_PR_URL})`,
+            ];
+
+            if (!planFiles.length) {
+              sections.push('No plan files were identified on the linked approved plan PR.');
+            }
+
+            for (const filePath of planFiles) {
+              if (!fs.existsSync(filePath)) {
+                sections.push(`## ${filePath}\n\nThis file was listed on the linked PR but is not present after checking out the branch.`);
+                continue;
+              }
+
+              sections.push(`## ${filePath}\n\n${fs.readFileSync(filePath, 'utf8').trim()}`);
+            }
+
+            fs.writeFileSync('implementation_plan_context.md', `${sections.join('\n\n')}\n`, 'utf8');
+
+      - name: Construct prompt
+        id: prompt
+        uses: actions/github-script@v7
+        env:
+          HAS_PLAN_PR: ${{ steps.context.outputs.has_plan_pr }}
+          PLAN_PR_NUMBER: ${{ steps.context.outputs.plan_pr_number }}
+          PLAN_PR_URL: ${{ steps.context.outputs.plan_pr_url }}
+          TARGET_BRANCH: ${{ steps.context.outputs.target_branch }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const issue = context.payload.issue;
+            const labels = issue.labels.map(label => label.name).join(', ') || 'None';
+            const assignees = issue.assignees.map(assignee => assignee.login).join(', ') || 'None';
+            const commentsNote = fs.existsSync('issue_comments.txt')
+              ? 'Previous issue comments from organization members are available in `issue_comments.txt`.'
+              : 'There are no previous comments from organization members on this issue.';
+            const planNote = process.env.HAS_PLAN_PR === 'true'
+              ? `An approved plan from linked PR #${process.env.PLAN_PR_NUMBER} is available in \`implementation_plan_context.md\`. Treat it as the primary implementation guide and continue work on branch \`${process.env.TARGET_BRANCH}\`.`
+              : 'No linked approved plan PR was found. Implement directly from the issue description and organization-member comments.';
+
+            const prompt = `Create an implementation diff for GitHub Issue #${issue.number}.
+
+            Issue Details:
+            - Title: ${issue.title}
+            - Labels: ${labels}
+            - Assignees: ${assignees}
+            - Description: ${issue.body || 'No description provided.'}
+
+            Previous Issue Comments:
+            - ${commentsNote}
+
+            Approved Plan Context:
+            - ${planNote}
+            ${process.env.HAS_PLAN_PR === 'true' ? `- Linked approved plan PR: ${process.env.PLAN_PR_URL}` : ''}
+
+            Additional Instructions:
+            - Use the repository's local \`implement-issue\` skill as the base workflow.
+            - If \`implementation_plan_context.md\` exists, align the implementation with it unless the repository state makes a small adjustment necessary.
+            - Only treat the issue body and \`issue_comments.txt\` as discussion context for this run.
+            - Write a concise markdown summary for the eventual pull request body to \`implementation_summary.md\` in the repository root.
+            - Treat \`issue_comments.txt\`, \`implementation_plan_context.md\`, and \`implementation_summary.md\` as temporary context only and do not include them in committed changes.
+            - Do not create a branch, commit, push, or open a pull request. Only produce the repository diff, run any appropriate validation, and leave a concise summary.`;
+
+            core.setOutput('prompt', prompt);
+
+      - name: Run Oz Agent
+        id: agent
+        env:
+          GH_TOKEN: ${{ github.token }}
+        uses: warpdotdev/oz-agent-action@v1
+        with:
+          skill: implement-issue
+          prompt: ${{ steps.prompt.outputs.prompt }}
+          name: Implement issue #${{ github.event.issue.number }}
+          profile: ${{ vars.WARP_AGENT_PROFILE || '' }}
+          output_format: text
+          model: ${{ vars.WARP_AGENT_MODEL || '' }}
+          mcp: ${{ vars.WARP_AGENT_MCP || '' }}
+          warp_api_key: ${{ secrets.WARP_API_KEY }}
+
+      - name: Commit and push implementation
+        if: success()
+        id: publish
+        env:
+          HAS_PLAN_PR: ${{ steps.context.outputs.has_plan_pr }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          SUMMARY_FILE: implementation_summary.md
+          TARGET_BRANCH: ${{ steps.context.outputs.target_branch }}
+        run: |
+          SUMMARY_TMP=""
+          if [ -f "$SUMMARY_FILE" ]; then
+            SUMMARY_TMP="$(mktemp)"
+            cp "$SUMMARY_FILE" "$SUMMARY_TMP"
+          fi
+
+          rm -f issue_comments.txt implementation_plan_context.md "$SUMMARY_FILE"
+
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            echo "summary_tmp=$SUMMARY_TMP" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git add -A
+          git commit -m "Implement issue #$ISSUE_NUMBER" -m "Co-Authored-By: Oz <oz-agent@warp.dev>"
+          git push origin "$TARGET_BRANCH"
+
+          echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          echo "summary_tmp=$SUMMARY_TMP" >> "$GITHUB_OUTPUT"
+
+      - name: Publish issue or pull request updates
+        if: success()
+        uses: actions/github-script@v7
+        env:
+          HAS_PLAN_PR: ${{ steps.context.outputs.has_plan_pr }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          PLAN_PR_NUMBER: ${{ steps.context.outputs.plan_pr_number }}
+          PLAN_PR_URL: ${{ steps.context.outputs.plan_pr_url }}
+          SHOULD_PUBLISH: ${{ steps.publish.outputs.should_publish }}
+          SUMMARY_TMP: ${{ steps.publish.outputs.summary_tmp }}
+          TARGET_BRANCH: ${{ steps.context.outputs.target_branch }}
+          DEFAULT_BRANCH: ${{ steps.context.outputs.default_branch }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issueNumber = Number(process.env.ISSUE_NUMBER);
+            const issueTitle = process.env.ISSUE_TITLE;
+            const hasPlanPr = process.env.HAS_PLAN_PR === 'true';
+            const shouldPublish = process.env.SHOULD_PUBLISH === 'true';
+            const summaryBody = process.env.SUMMARY_TMP && fs.existsSync(process.env.SUMMARY_TMP)
+              ? fs.readFileSync(process.env.SUMMARY_TMP, 'utf8').trim()
+              : '';
+
+            if (!shouldPublish) {
+              const body = summaryBody || 'I analyzed this issue but did not produce an implementation diff.';
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                body,
+              });
+              return;
+            }
+
+            if (hasPlanPr) {
+              const planPrNumber = Number(process.env.PLAN_PR_NUMBER);
+              const planPrUrl = process.env.PLAN_PR_URL;
+              const prComment = summaryBody
+                ? `Oz Agent pushed implementation updates for Issue #${issueNumber}.\n\n${summaryBody}`
+                : `Oz Agent pushed implementation updates for Issue #${issueNumber}.`;
+
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: planPrNumber,
+                body: prComment,
+              });
+
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                body: `I pushed implementation updates to the linked approved plan PR: ${planPrUrl}`,
+              });
+              return;
+            }
+
+            const branchName = process.env.TARGET_BRANCH;
+            const defaultBranch = process.env.DEFAULT_BRANCH;
+            const { data: matchingPrs } = await github.rest.pulls.list({
+              owner,
+              repo,
+              head: `${owner}:${branchName}`,
+              state: 'open',
+              per_page: 100,
+            });
+
+            let pr = matchingPrs[0];
+
+            if (!pr) {
+              const prBody = summaryBody
+                ? [
+                    `This PR implements Issue #${issueNumber}.`,
+                    '',
+                    summaryBody,
+                    '',
+                    `Refs #${issueNumber}`,
+                    '',
+                    'Co-Authored-By: Oz <oz-agent@warp.dev>',
+                  ].join('\n')
+                : undefined;
+
+              const { data: createdPr } = await github.rest.pulls.create({
+                owner,
+                repo,
+                title: `Implement issue #${issueNumber}: ${issueTitle}`,
+                head: branchName,
+                base: defaultBranch,
+                body: prBody,
+                draft: true,
+              });
+
+              pr = createdPr;
+            } else if (summaryBody) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: pr.number,
+                body: `Oz Agent pushed additional implementation updates for Issue #${issueNumber}.\n\n${summaryBody}`,
+              });
+            }
+
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: issueNumber,
+              body: `I created or updated a draft implementation PR for this issue: ${pr.html_url}`,
+            });
