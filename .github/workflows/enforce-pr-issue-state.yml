@@ -1,0 +1,289 @@
+name: Enforce PR Issue State
+
+on:
+  pull_request_target:
+    types: [opened, reopened, edited, synchronize, ready_for_review]
+
+concurrency:
+  group: enforce-pr-issue-state-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  enforce_issue_state:
+    if: github.event.pull_request.state == 'open'
+    name: Enforce PR issue state
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Evaluate PR against associated issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pr = context.payload.pull_request;
+
+            const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const unique = values => [...new Set(values.filter(value => Number.isInteger(value) && value > 0))];
+            const sameRepoIssueUrlPattern = new RegExp(
+              `https://github\\.com/${escapeRegex(owner)}/${escapeRegex(repo)}/issues/(\\d+)`,
+              'gi',
+            );
+
+            const collectMatches = (text, patterns) => {
+              if (!text) {
+                return [];
+              }
+
+              const matches = [];
+
+              for (const pattern of patterns) {
+                for (const match of text.matchAll(pattern)) {
+                  const value = Number(match[1]);
+                  if (Number.isInteger(value) && value > 0) {
+                    matches.push(value);
+                  }
+                }
+              }
+
+              return unique(matches);
+            };
+
+            const issueCandidates = [];
+            const seenIssueNumbers = new Set();
+            const addIssueCandidates = (numbers, source) => {
+              for (const number of numbers) {
+                if (seenIssueNumbers.has(number)) {
+                  continue;
+                }
+
+                seenIssueNumbers.add(number);
+                issueCandidates.push({ number, source });
+              }
+            };
+
+            addIssueCandidates(
+              collectMatches(pr.body || '', [
+                /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?|implements?|issue)\s*:?\s+#(\d+)/gi,
+                sameRepoIssueUrlPattern,
+              ]),
+              'pull request body',
+            );
+
+            addIssueCandidates(
+              collectMatches(pr.title || '', [
+                /(?:plan|implement)\s+issue\s+#(\d+)/gi,
+                /(?:^|[^\w])issue\s+#(\d+)/gi,
+              ]),
+              'pull request title',
+            );
+
+            addIssueCandidates(
+              collectMatches(pr.head.ref || '', [
+                /(?:^|\/)(?:plan|implement)[-_]issue[-_](\d+)(?:$|[-_/])/gi,
+                /(?:^|\/)issue[-_](\d+)(?:$|[-_/])/gi,
+              ]),
+              'branch name',
+            );
+
+            const prTimelineEvents = await github.paginate(github.rest.issues.listEventsForTimeline, {
+              owner,
+              repo,
+              issue_number: pr.number,
+              per_page: 100,
+            });
+
+            const timelineIssueNumbers = [];
+            for (const event of prTimelineEvents) {
+              if (event.event === 'connected') {
+                const subject = event.subject;
+                if (subject?.type === 'issue' && typeof subject.number === 'number') {
+                  timelineIssueNumbers.push(subject.number);
+                }
+              }
+
+              if (event.event === 'cross-referenced') {
+                const sourceIssue = event.source?.issue;
+                if (sourceIssue && !sourceIssue.pull_request && typeof sourceIssue.number === 'number') {
+                  timelineIssueNumbers.push(sourceIssue.number);
+                }
+              }
+            }
+
+            addIssueCandidates(unique(timelineIssueNumbers), 'pull request timeline');
+
+            let associatedIssue = null;
+            let associationSource = '';
+
+            for (const candidate of issueCandidates) {
+              try {
+                const { data: issue } = await github.rest.issues.get({
+                  owner,
+                  repo,
+                  issue_number: candidate.number,
+                });
+
+                if (!issue.pull_request) {
+                  associatedIssue = issue;
+                  associationSource = candidate.source;
+                  break;
+                }
+              } catch (error) {
+                core.info(`Skipping issue candidate #${candidate.number}: ${error?.message || String(error)}`);
+              }
+            }
+
+            if (!associatedIssue) {
+              core.notice('No associated issue could be identified confidently. Skipping PR enforcement.');
+              return;
+            }
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner,
+              repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+
+            const changedFiles = files.map(file => file.filename);
+            const nonMarkdownFiles = changedFiles.filter(filename => !filename.toLowerCase().endsWith('.md'));
+            const planFiles = changedFiles.filter(filename => filename.startsWith('plans/'));
+            const isCurrentPlanPr =
+              planFiles.length > 0 ||
+              /^oz-agent\/plan-issue-\d+$/i.test(pr.head.ref || '') ||
+              /^plan issue #\d+\b/i.test(pr.title || '');
+
+            const issueLabels = associatedIssue.labels
+              .map(label => typeof label === 'string' ? label : label.name)
+              .filter(Boolean);
+
+            const hasReadyToPlan = issueLabels.includes('ready-to-plan');
+            const hasReadyToImplement = issueLabels.includes('ready-to-implement');
+
+            const issueTimelineEvents = await github.paginate(github.rest.issues.listEventsForTimeline, {
+              owner,
+              repo,
+              issue_number: associatedIssue.number,
+              per_page: 100,
+            });
+
+            const linkedPrNumbers = new Set();
+            for (const event of issueTimelineEvents) {
+              if (event.event === 'cross-referenced') {
+                const sourceIssue = event.source?.issue;
+                if (sourceIssue?.pull_request && typeof sourceIssue.number === 'number') {
+                  linkedPrNumbers.add(sourceIssue.number);
+                }
+              }
+
+              if (event.event === 'connected') {
+                const subject = event.subject;
+                if (subject?.type === 'pull_request' && typeof subject.number === 'number') {
+                  linkedPrNumbers.add(subject.number);
+                }
+              }
+            }
+
+            const linkedApprovedPlanPrs = [];
+            const linkedUnapprovedPlanPrs = [];
+
+            for (const prNumber of linkedPrNumbers) {
+              const { data: linkedPr } = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: prNumber,
+              });
+
+              const linkedPrLabels = linkedPr.labels
+                .map(label => typeof label === 'string' ? label : label.name)
+                .filter(Boolean);
+
+              const linkedPrFiles = await github.paginate(github.rest.pulls.listFiles, {
+                owner,
+                repo,
+                pull_number: prNumber,
+                per_page: 100,
+              });
+
+              const linkedPlanFiles = linkedPrFiles
+                .map(file => file.filename)
+                .filter(filename => filename.startsWith('plans/'));
+
+              const isLinkedPlanPr =
+                linkedPlanFiles.length > 0 ||
+                linkedPr.head.ref === `oz-agent/plan-issue-${associatedIssue.number}` ||
+                linkedPr.title.startsWith(`Plan issue #${associatedIssue.number}`);
+
+              if (!isLinkedPlanPr) {
+                continue;
+              }
+
+              const planPrSummary = {
+                number: linkedPr.number,
+                url: linkedPr.html_url,
+              };
+
+              if (linkedPrLabels.includes('plan-approved')) {
+                linkedApprovedPlanPrs.push(planPrSummary);
+              } else {
+                linkedUnapprovedPlanPrs.push(planPrSummary);
+              }
+            }
+
+            const violations = [];
+
+            if (hasReadyToPlan && nonMarkdownFiles.length > 0) {
+              violations.push(
+                `Issue #${associatedIssue.number} is labeled \`ready-to-plan\`, so associated PRs must stay markdown-only until implementation is authorized. This PR changes non-markdown files: ${nonMarkdownFiles.slice(0, 10).map(filename => `\`${filename}\``).join(', ')}${nonMarkdownFiles.length > 10 ? ', …' : ''}.`,
+              );
+            } else if (!hasReadyToImplement && nonMarkdownFiles.length > 0) {
+              violations.push(
+                `Issue #${associatedIssue.number} is not labeled \`ready-to-implement\`, so PRs with code-like diffs cannot stay open yet. This PR changes non-markdown files: ${nonMarkdownFiles.slice(0, 10).map(filename => `\`${filename}\``).join(', ')}${nonMarkdownFiles.length > 10 ? ', …' : ''}.`,
+              );
+            }
+
+            if (!isCurrentPlanPr && linkedUnapprovedPlanPrs.length > 0 && linkedApprovedPlanPrs.length === 0) {
+              violations.push(
+                `Issue #${associatedIssue.number} has linked plan PRs, but none are labeled \`plan-approved\`: ${linkedUnapprovedPlanPrs.map(planPr => `[#${planPr.number}](${planPr.url})`).join(', ')}.`,
+              );
+            }
+
+            if (!violations.length) {
+              core.info(`PR #${pr.number} passed issue-state enforcement for issue #${associatedIssue.number}.`);
+              return;
+            }
+
+            const body = [
+              'Closing this PR because its associated issue is not in a state that allows this change.',
+              '',
+              `Associated issue: #${associatedIssue.number} (${associatedIssue.html_url})`,
+              `Association source: ${associationSource}`,
+              `Issue labels: ${issueLabels.length ? issueLabels.map(label => `\`${label}\``).join(', ') : 'none'}`,
+              '',
+              'Why this was closed:',
+              ...violations.map(violation => `- ${violation}`),
+              '',
+              'Next steps:',
+              '- If this should be implementation work, move the issue to `ready-to-implement`.',
+              '- If this issue already has a plan PR, label that PR `plan-approved` before opening implementation work.',
+              '- If this should remain planning work, keep the PR markdown-only or update the plan PR instead.',
+              '- Reopen or recreate the PR after the issue state is corrected.',
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: pr.number,
+              body,
+            });
+
+            await github.rest.pulls.update({
+              owner,
+              repo,
+              pull_number: pr.number,
+              state: 'closed',
+            });
