@@ -79,7 +79,8 @@ jobs:
               }
             }
 
-            const linkedPlanPrs = [];
+            const linkedApprovedPlanPrs = [];
+            const linkedUnapprovedPlanPrs = [];
 
             for (const prNumber of linkedPrNumbers) {
               const { data: pr } = await github.rest.pulls.get({
@@ -92,40 +93,55 @@ jobs:
                 .map(label => typeof label === 'string' ? label : label.name)
                 .filter(Boolean);
 
-              if (!labels.includes('plan-approved')) {
+              const files = await github.paginate(github.rest.pulls.listFiles, {
+                owner,
+                repo,
+                pull_number: pr.number,
+                per_page: 100,
+              });
+
+              const planFiles = files
+                .map(file => file.filename)
+                .filter(filename => filename.startsWith('plans/'));
+
+              const isPlanPr =
+                planFiles.length > 0 ||
+                pr.head.ref === `oz-agent/plan-issue-${issue.number}` ||
+                pr.title.startsWith(`Plan issue #${issue.number}`);
+
+              if (!isPlanPr) {
                 continue;
               }
 
-              linkedPlanPrs.push({
+              const planPr = {
                 number: pr.number,
                 url: pr.html_url,
                 updatedAt: pr.updated_at,
                 headRefName: pr.head.ref,
                 headRepoFullName: pr.head.repo?.full_name || '',
-              });
+                planFiles,
+              };
+
+              if (labels.includes('plan-approved')) {
+                linkedApprovedPlanPrs.push(planPr);
+              } else {
+                linkedUnapprovedPlanPrs.push(planPr);
+              }
             }
 
-            linkedPlanPrs.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
-            const selectedPlanPr = linkedPlanPrs[0] || null;
+            linkedApprovedPlanPrs.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+            const selectedPlanPr = linkedApprovedPlanPrs[0] || null;
+            const shouldNoop = !selectedPlanPr && linkedUnapprovedPlanPrs.length > 0;
+            const noopReason = shouldNoop
+              ? `Linked plan PR(s) exist for this issue but none are labeled plan-approved: ${linkedUnapprovedPlanPrs.map(pr => `#${pr.number}`).join(', ')}.`
+              : '';
 
             if (selectedPlanPr && selectedPlanPr.headRepoFullName !== `${owner}/${repo}`) {
               core.setFailed(`Linked approved plan PR #${selectedPlanPr.number} uses branch ${selectedPlanPr.headRepoFullName}:${selectedPlanPr.headRefName}, which this workflow cannot push to with the repository token.`);
               return;
             }
 
-            let planFiles = [];
-            if (selectedPlanPr) {
-              const files = await github.paginate(github.rest.pulls.listFiles, {
-                owner,
-                repo,
-                pull_number: selectedPlanPr.number,
-                per_page: 100,
-              });
-
-              planFiles = files
-                .map(file => file.filename)
-                .filter(filename => filename.startsWith('plans/'));
-            }
+            const planFiles = selectedPlanPr ? selectedPlanPr.planFiles : [];
 
             core.setOutput('default_branch', defaultBranch);
             core.setOutput('has_plan_pr', selectedPlanPr ? 'true' : 'false');
@@ -133,8 +149,11 @@ jobs:
             core.setOutput('plan_pr_url', selectedPlanPr ? selectedPlanPr.url : '');
             core.setOutput('target_branch', selectedPlanPr ? selectedPlanPr.headRefName : `oz-agent/implement-issue-${issue.number}`);
             core.setOutput('plan_file_paths_json', JSON.stringify(planFiles));
+            core.setOutput('should_noop', shouldNoop ? 'true' : 'false');
+            core.setOutput('noop_reason', noopReason);
 
       - name: Validate Warp API key
+        if: steps.context.outputs.should_noop != 'true'
         env:
           WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
         run: |
@@ -151,7 +170,14 @@ jobs:
               ;;
           esac
 
+      - name: Record no-op decision
+        if: steps.context.outputs.should_noop == 'true'
+        env:
+          NOOP_REASON: ${{ steps.context.outputs.noop_reason }}
+        run: |
+          printf '%s\n' "$NOOP_REASON" >> "$GITHUB_STEP_SUMMARY"
       - name: Prepare working branch
+        if: steps.context.outputs.should_noop != 'true'
         env:
           DEFAULT_BRANCH: ${{ steps.context.outputs.default_branch }}
           HAS_PLAN_PR: ${{ steps.context.outputs.has_plan_pr }}
@@ -171,7 +197,7 @@ jobs:
           fi
 
       - name: Materialize approved plan context
-        if: steps.context.outputs.has_plan_pr == 'true'
+        if: steps.context.outputs.should_noop != 'true' && steps.context.outputs.has_plan_pr == 'true'
         uses: actions/github-script@v7
         env:
           PLAN_FILE_PATHS_JSON: ${{ steps.context.outputs.plan_file_paths_json }}
@@ -201,6 +227,7 @@ jobs:
             fs.writeFileSync('implementation_plan_context.md', `${sections.join('\n\n')}\n`, 'utf8');
 
       - name: Construct prompt
+        if: steps.context.outputs.should_noop != 'true'
         id: prompt
         uses: actions/github-script@v7
         env:
@@ -248,6 +275,7 @@ jobs:
             core.setOutput('prompt', prompt);
 
       - name: Run Oz Agent
+        if: steps.context.outputs.should_noop != 'true'
         id: agent
         env:
           GH_TOKEN: ${{ github.token }}
@@ -263,7 +291,7 @@ jobs:
           warp_api_key: ${{ secrets.WARP_API_KEY }}
 
       - name: Commit and push implementation
-        if: success()
+        if: success() && steps.context.outputs.should_noop != 'true'
         id: publish
         env:
           HAS_PLAN_PR: ${{ steps.context.outputs.has_plan_pr }}
@@ -293,7 +321,7 @@ jobs:
           echo "summary_tmp=$SUMMARY_TMP" >> "$GITHUB_OUTPUT"
 
       - name: Publish issue or pull request updates
-        if: success()
+        if: success() && steps.context.outputs.should_noop != 'true'
         uses: actions/github-script@v7
         env:
           HAS_PLAN_PR: ${{ steps.context.outputs.has_plan_pr }}
