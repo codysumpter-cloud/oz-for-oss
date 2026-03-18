@@ -1,0 +1,39 @@
+# ======================================================================================
+# Workflow: Auto PR Review
+# ======================================================================================
+# Usage:
+#   - Runs automatically when a pull request is opened.
+#   - Analyzes the diff of the PR.
+#
+# Setup:
+#   - Ensure WARP_API_KEY is set in Repository Secrets.
+#   - The Agent needs read access to contents and write access to pull-requests.
+#
+# Expected Output:
+#   - Inline comments on the PR diff highlighting potential bugs, security issues, or style improvements.
+#   - A general summary comment if applicable.
+#
+# When to use:
+#   - Use this to get immediate feedback on code changes before human review.
+# ======================================================================================
+name: Auto PR Review
+on:
+  pull_request:
+    types:
+      - opened
+  workflow_dispatch:
+jobs:
+  review_pr:
+    if: >-
+      !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'cherrypick')) &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event.action == 'opened' &&
+          github.event.pull_request.draft == false)
+      )
+    uses: warpdotdev/oz-agent-action/.github/workflows/review-pr.yml@main
+    with:
+      profile: ""
+      skill: review-pr
+    secrets:
+      WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
