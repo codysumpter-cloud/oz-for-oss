@@ -353,6 +353,7 @@ jobs:
             const repo = context.repo.repo;
             const issueNumber = Number(process.env.ISSUE_NUMBER);
             const issueTitle = process.env.ISSUE_TITLE;
+            const implementationPrTitle = `Implement issue #${issueNumber}: ${issueTitle}`;
             const hasPlanPr = process.env.HAS_PLAN_PR === 'true';
             const shouldPublish = process.env.SHOULD_PUBLISH === 'true';
             const summaryBody = process.env.SUMMARY_TMP && fs.existsSync(process.env.SUMMARY_TMP)
@@ -376,6 +377,12 @@ jobs:
               const prComment = summaryBody
                 ? `Oz pushed implementation updates for Issue #${issueNumber}.\n\n${summaryBody}`
                 : `Oz pushed implementation updates for Issue #${issueNumber}.`;
+              await github.rest.pulls.update({
+                owner,
+                repo,
+                pull_number: planPrNumber,
+                title: implementationPrTitle,
+              });
 
               await github.rest.issues.createComment({
                 owner,
@@ -410,7 +417,7 @@ jobs:
               const { data: createdPr } = await github.rest.pulls.create({
                 owner,
                 repo,
-                title: `Implement issue #${issueNumber}: ${issueTitle}`,
+                title: implementationPrTitle,
                 head: branchName,
                 base: defaultBranch,
                 body: summaryBody,
