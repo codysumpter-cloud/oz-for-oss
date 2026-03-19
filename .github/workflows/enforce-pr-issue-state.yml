@@ -1,31 +1,53 @@
-name: Enforce PR Issue State
-
+name: Enforce PR Issue State Logic
 on:
-  pull_request_target:
-    types: [opened, reopened, edited, synchronize, ready_for_review]
-
-concurrency:
-  group: enforce-pr-issue-state-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
+  workflow_call:
+    inputs:
+      pr_number:
+        description: Pull request number to evaluate
+        required: true
+        type: string
+    outputs:
+      allow_review:
+        description: Whether downstream PR hooks may continue after enforcement.
+        value: ${{ jobs.enforce_issue_state.outputs.allow_review }}
 jobs:
   enforce_issue_state:
-    if: github.event.pull_request.state == 'open'
     name: Enforce PR issue state
     runs-on: ubuntu-latest
     permissions:
       issues: write
       pull-requests: write
-
+    outputs:
+      allow_review: ${{ steps.evaluate.outputs.allow_review }}
     steps:
       - name: Evaluate PR against associated issue
+        id: evaluate
         uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
         with:
           github-token: ${{ github.token }}
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const pr = context.payload.pull_request;
+            const prNumber = Number(process.env.PR_NUMBER || '0');
+
+            if (!Number.isInteger(prNumber) || prNumber <= 0) {
+              core.setFailed(`Invalid pull request number: ${process.env.PR_NUMBER || '<empty>'}`);
+              return;
+            }
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: prNumber,
+            });
+
+            if (pr.state !== 'open') {
+              core.notice(`Skipping enforcement because pull request #${pr.number} is ${pr.state}.`);
+              core.setOutput('allow_review', 'false');
+              return;
+            }
 
             const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const unique = values => [...new Set(values.filter(value => Number.isInteger(value) && value > 0))];
@@ -117,7 +139,6 @@ jobs:
             addIssueCandidates(unique(timelineIssueNumbers), 'pull request timeline');
 
             let associatedIssue = null;
-            let associationSource = '';
 
             for (const candidate of issueCandidates) {
               try {
@@ -129,7 +150,6 @@ jobs:
 
                 if (!issue.pull_request) {
                   associatedIssue = issue;
-                  associationSource = candidate.source;
                   break;
                 }
               } catch (error) {
@@ -139,6 +159,7 @@ jobs:
 
             if (!associatedIssue) {
               core.notice('No associated issue could be identified confidently. Skipping PR enforcement.');
+              core.setOutput('allow_review', 'true');
               return;
             }
 
@@ -191,11 +212,11 @@ jobs:
             const linkedApprovedPlanPrs = [];
             const linkedUnapprovedPlanPrs = [];
 
-            for (const prNumber of linkedPrNumbers) {
+            for (const linkedPrNumber of linkedPrNumbers) {
               const { data: linkedPr } = await github.rest.pulls.get({
                 owner,
                 repo,
-                pull_number: prNumber,
+                pull_number: linkedPrNumber,
               });
 
               const linkedPrLabels = linkedPr.labels
@@ -205,7 +226,7 @@ jobs:
               const linkedPrFiles = await github.paginate(github.rest.pulls.listFiles, {
                 owner,
                 repo,
-                pull_number: prNumber,
+                pull_number: linkedPrNumber,
                 per_page: 100,
               });
 
@@ -254,8 +275,12 @@ jobs:
 
             if (!violations.length) {
               core.info(`PR #${pr.number} passed issue-state enforcement for issue #${associatedIssue.number}.`);
+              core.setOutput('allow_review', 'true');
               return;
             }
+
+            core.setOutput('allow_review', 'false');
+
             const contributionDocsUrl = `https://github.com/${owner}/${repo}#readme`;
             const blocksImplementationWork = nonMarkdownFiles.length > 0 && !hasReadyToImplement;
             const lacksApprovedPlan = !isCurrentPlanPr && linkedUnapprovedPlanPrs.length > 0 && linkedApprovedPlanPrs.length === 0;

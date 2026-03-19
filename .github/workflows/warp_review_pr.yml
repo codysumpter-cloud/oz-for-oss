@@ -1,133 +1,55 @@
-# ======================================================================================
-# Workflow: Auto PR Review
-# ======================================================================================
-# Usage:
-#   - Runs automatically when a pull request is opened or marked ready for review.
-#   - Also runs when an org member comments "/oz-review" on a pull request.
-#   - Analyzes the diff of the PR.
-#
-# Setup:
-#   - Ensure WARP_API_KEY is set in Repository Secrets.
-#   - The Agent needs read access to contents and write access to pull-requests.
-#
-# Expected Output:
-#   - Inline comments on the PR diff highlighting potential bugs, security issues, or style improvements.
-#   - A general summary comment if applicable.
-#
-# When to use:
-#   - Use this to get immediate feedback on code changes before human review.
-#   - Use "/oz-review" on an existing PR to trigger an on-demand review from an org member account.
-# ======================================================================================
-name: Auto PR Review
-
+name: Auto PR Review Logic
 on:
-  pull_request:
-    types:
-      - opened
-      - ready_for_review
-  issue_comment:
-    types:
-      - created
-  workflow_dispatch:
+  workflow_call:
     inputs:
       pr_number:
         description: Pull request number to review
         required: true
+        type: string
+      trigger_source:
+        description: Source that requested the review
+        required: true
+        type: string
+      requester:
+        description: Login of the user who requested the review, if any
+        required: false
+        default: ""
         type: string
       focus:
         description: Optional extra focus guidance for the review
         required: false
         default: ""
         type: string
-
-concurrency:
-  group: warp-review-pr-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number || github.run_id }}
-  cancel-in-progress: false
-
+      comment_id:
+        description: Issue comment ID to react to for slash-command reviews
+        required: false
+        default: ""
+        type: string
 jobs:
   review_pr:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (
-        github.event_name == 'pull_request' &&
-        !startsWith(github.head_ref, 'cherrypick') &&
-        (github.event.action == 'opened' || github.event.action == 'ready_for_review') &&
-        github.event.pull_request.draft == false
-      ) ||
-      (
-        github.event_name == 'issue_comment' &&
-        github.event.issue.pull_request &&
-        github.actor != 'github-actions[bot]' &&
-        contains(github.event.comment.body, '/oz-review') &&
-        (github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'OWNER')
-      )
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
       issues: write
     steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v4
-
-      - name: Resolve review context
+      - name: Resolve PR context
         id: context
         uses: actions/github-script@v7
         env:
-          DISPATCH_PR_NUMBER: ${{ inputs.pr_number || '' }}
-          DISPATCH_FOCUS: ${{ inputs.focus || '' }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          TRIGGER_SOURCE: ${{ inputs.trigger_source }}
+          REQUESTER: ${{ inputs.requester }}
+          REVIEW_FOCUS: ${{ inputs.focus }}
         with:
           github-token: ${{ github.token }}
           script: |
-            const slashCommandPattern = /(?:^|\s)\/oz-review\b([\s\S]*)/i;
-            const allowedAssociations = new Set(['MEMBER', 'OWNER']);
             const { owner, repo } = context.repo;
+            const prNumber = Number(process.env.PR_NUMBER || '0');
 
-            let shouldRun = false;
-            let prNumber = 0;
-            let focus = '';
-            let requester = '';
-            let triggerComment = '';
-
-            if (context.eventName === 'workflow_dispatch') {
-              prNumber = Number(process.env.DISPATCH_PR_NUMBER || '0');
-              focus = (process.env.DISPATCH_FOCUS || '').trim();
-              shouldRun = Number.isInteger(prNumber) && prNumber > 0;
-              requester = context.actor;
-              triggerComment = focus ? `/oz-review ${focus}` : '/oz-review';
-            } else if (context.eventName === 'pull_request') {
-              const pr = context.payload.pull_request;
-              prNumber = pr.number;
-              shouldRun =
-                !pr.draft &&
-                ['opened', 'ready_for_review'].includes(context.payload.action) &&
-                !pr.head.ref.startsWith('cherrypick');
-              requester = context.actor;
-            } else if (context.eventName === 'issue_comment') {
-              const issue = context.payload.issue;
-              const comment = context.payload.comment;
-              const body = comment.body || '';
-              const match = body.match(slashCommandPattern);
-              const association = comment.author_association || '';
-              const isAllowed = allowedAssociations.has(association);
-
-              prNumber = issue.number;
-              requester = comment.user?.login || context.actor;
-              triggerComment = body.trim();
-              if (match) {
-                focus = match[1].trim();
-              }
-
-              shouldRun =
-                Boolean(issue.pull_request) &&
-                Boolean(match) &&
-                isAllowed &&
-                context.actor !== 'github-actions[bot]';
-            }
-
-            core.setOutput('should_run', shouldRun ? 'true' : 'false');
-            if (!shouldRun) {
-              core.notice('Review workflow skipped after context resolution.');
+            if (!Number.isInteger(prNumber) || prNumber <= 0) {
+              core.setOutput('should_run', 'false');
+              core.notice('Review workflow skipped because no valid pull request number was provided.');
               return;
             }
 
@@ -137,25 +59,43 @@ jobs:
               pull_number: prNumber,
             });
 
+            if (pr.state !== 'open') {
+              core.setOutput('should_run', 'false');
+              core.notice(`Review workflow skipped because pull request #${pr.number} is ${pr.state}.`);
+              return;
+            }
+
+            core.setOutput('should_run', 'true');
             core.setOutput('pr_number', String(pr.number));
             core.setOutput('base_ref', pr.base.ref);
             core.setOutput('base_sha', pr.base.sha);
             core.setOutput('title', pr.title);
-            core.setOutput('trigger_source', context.eventName);
-            core.setOutput('requester', requester);
-            core.setOutput('focus', focus);
-            core.setOutput('trigger_comment', triggerComment);
+            core.setOutput('trigger_source', process.env.TRIGGER_SOURCE || 'workflow_call');
+            core.setOutput('requester', process.env.REQUESTER || context.actor);
+            core.setOutput('focus', (process.env.REVIEW_FOCUS || '').trim());
+
+      - name: Checkout Repo
+        if: steps.context.outputs.should_run == 'true'
+        uses: actions/checkout@v4
 
       - name: Acknowledge slash command
-        if: steps.context.outputs.should_run == 'true' && github.event_name == 'issue_comment'
+        if: steps.context.outputs.should_run == 'true' && inputs.comment_id != ''
         uses: actions/github-script@v7
+        env:
+          COMMENT_ID: ${{ inputs.comment_id }}
         with:
           github-token: ${{ github.token }}
           script: |
+            const commentId = Number(process.env.COMMENT_ID || '0');
+            if (!Number.isInteger(commentId) || commentId <= 0) {
+              core.notice('Skipping slash-command acknowledgement because no valid comment ID was provided.');
+              return;
+            }
+
             await github.rest.reactions.createForIssueComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              comment_id: context.payload.comment.id,
+              comment_id: commentId,
               content: 'eyes',
             });
 
