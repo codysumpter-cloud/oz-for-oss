@@ -31,10 +31,12 @@ jobs:
           github-token: ${{ github.token }}
           script: |
             const fs = require('fs');
+            const path = require('path');
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const issue = context.payload.issue;
             const defaultBranch = context.payload.repository.default_branch;
+            const expectedPlanBranch = `oz-agent/plan-issue-${issue.number}`;
 
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner,
@@ -54,42 +56,43 @@ jobs:
               fs.writeFileSync('issue_comments.txt', commentsText, 'utf8');
             }
 
-            const timelineEvents = await github.paginate(github.rest.issues.listEventsForTimeline, {
-              owner,
-              repo,
-              issue_number: issue.number,
-              per_page: 100,
-            });
 
-            const linkedPrNumbers = new Set();
+            const linkedApprovedPlanPrs = [];
+            const linkedUnapprovedPlanPrs = [];
+            const localPlanFiles = [];
+            const plansDir = path.resolve('plans');
 
-            for (const event of timelineEvents) {
-              if (event.event === 'cross-referenced') {
-                const sourceIssue = event.source?.issue;
-                if (sourceIssue?.pull_request && typeof sourceIssue.number === 'number') {
-                  linkedPrNumbers.add(sourceIssue.number);
-                }
-              }
+            if (fs.existsSync(plansDir)) {
+              const stack = [plansDir];
 
-              if (event.event === 'connected') {
-                const subject = event.subject;
-                if (subject?.type === 'pull_request' && typeof subject.number === 'number') {
-                  linkedPrNumbers.add(subject.number);
+              while (stack.length) {
+                const currentDir = stack.pop();
+
+                for (const entry of fs.readdirSync(currentDir, { withFileTypes: true })) {
+                  const entryPath = path.join(currentDir, entry.name);
+
+                  if (entry.isDirectory()) {
+                    stack.push(entryPath);
+                    continue;
+                  }
+
+                  const relativePath = path.relative(process.cwd(), entryPath);
+                  if (relativePath === `plans/issue-${issue.number}.md`) {
+                    localPlanFiles.push(relativePath);
+                  }
                 }
               }
             }
 
-            const linkedApprovedPlanPrs = [];
-            const linkedUnapprovedPlanPrs = [];
-            const localPlanFilePath = `plans/issue-${issue.number}.md`;
-            const localPlanFiles = fs.existsSync(localPlanFilePath) ? [localPlanFilePath] : [];
+            const matchingPlanPrs = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: 'all',
+              head: `${owner}:${expectedPlanBranch}`,
+              per_page: 100,
+            });
 
-            for (const prNumber of linkedPrNumbers) {
-              const { data: pr } = await github.rest.pulls.get({
-                owner,
-                repo,
-                pull_number: prNumber,
-              });
+            for (const pr of matchingPlanPrs) {
 
               const labels = pr.labels
                 .map(label => typeof label === 'string' ? label : label.name)
@@ -105,12 +108,6 @@ jobs:
               const planFiles = files
                 .map(file => file.filename)
                 .filter(filename => filename.startsWith('plans/'));
-              const isPlanPr = pr.head.ref === `oz-agent/plan-issue-${issue.number}`;
-                pr.title.startsWith(`Plan issue #${issue.number}`);
-
-              if (!isPlanPr) {
-                continue;
-              }
 
               const planPr = {
                 number: pr.number,
