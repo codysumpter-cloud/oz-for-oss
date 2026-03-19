@@ -24,6 +24,7 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const issueNumber = context.payload.issue.number;
+            const assigneeLogin = context.payload.assignee?.login || 'oz-agent';
             const metadata = `<!-- oz-agent-metadata: {"type":"issue-status","workflow":"comment-on-unready-assigned-issue","issue":${issueNumber}} -->`;
             const body = [
               'This issue is assigned to Oz, but it is not labeled `ready-to-plan` or `ready-to-implement`, so there is no work to do yet.',
@@ -49,12 +50,18 @@ jobs:
                 comment_id: existingComment.id,
                 body,
               });
-              return;
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                body,
+              });
             }
 
-            await github.rest.issues.createComment({
+            await github.rest.issues.removeAssignees({
               owner,
               repo,
               issue_number: issueNumber,
-              body,
+              assignees: [assigneeLogin],
             });
