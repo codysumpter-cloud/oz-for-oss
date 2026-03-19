@@ -250,7 +250,7 @@ jobs:
               const { data: pr } = await github.rest.pulls.create({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                title: `Plan issue #${issueNumber}: ${issueTitle}`,
+                title: `Plan: ${issueTitle}`,
                 head: branchName,
                 base: defaultBranch,
                 body: summaryBody,
