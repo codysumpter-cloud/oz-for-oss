@@ -81,6 +81,8 @@ jobs:
 
             const linkedApprovedPlanPrs = [];
             const linkedUnapprovedPlanPrs = [];
+            const localPlanFilePath = `plans/issue-${issue.number}.md`;
+            const localPlanFiles = fs.existsSync(localPlanFilePath) ? [localPlanFilePath] : [];
 
             for (const prNumber of linkedPrNumbers) {
               const { data: pr } = await github.rest.pulls.get({
@@ -103,10 +105,7 @@ jobs:
               const planFiles = files
                 .map(file => file.filename)
                 .filter(filename => filename.startsWith('plans/'));
-
-              const isPlanPr =
-                planFiles.length > 0 ||
-                pr.head.ref === `oz-agent/plan-issue-${issue.number}` ||
+              const isPlanPr = pr.head.ref === `oz-agent/plan-issue-${issue.number}`;
                 pr.title.startsWith(`Plan issue #${issue.number}`);
 
               if (!isPlanPr) {
@@ -131,7 +130,13 @@ jobs:
 
             linkedApprovedPlanPrs.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
             const selectedPlanPr = linkedApprovedPlanPrs[0] || null;
-            const shouldNoop = !selectedPlanPr && linkedUnapprovedPlanPrs.length > 0;
+            const planContextSource = selectedPlanPr
+              ? 'approved-pr'
+              : localPlanFiles.length
+                ? 'directory'
+                : '';
+            const planFiles = selectedPlanPr ? selectedPlanPr.planFiles : localPlanFiles;
+            const shouldNoop = !selectedPlanPr && !localPlanFiles.length && linkedUnapprovedPlanPrs.length > 0;
             const noopReason = shouldNoop
               ? `Linked plan PR(s) exist for this issue but none are labeled plan-approved: ${linkedUnapprovedPlanPrs.map(pr => `#${pr.number}`).join(', ')}.`
               : '';
@@ -141,10 +146,10 @@ jobs:
               return;
             }
 
-            const planFiles = selectedPlanPr ? selectedPlanPr.planFiles : [];
-
             core.setOutput('default_branch', defaultBranch);
             core.setOutput('has_plan_pr', selectedPlanPr ? 'true' : 'false');
+            core.setOutput('has_plan_context', planFiles.length ? 'true' : 'false');
+            core.setOutput('plan_context_source', planContextSource);
             core.setOutput('plan_pr_number', selectedPlanPr ? String(selectedPlanPr.number) : '');
             core.setOutput('plan_pr_url', selectedPlanPr ? selectedPlanPr.url : '');
             core.setOutput('target_branch', selectedPlanPr ? selectedPlanPr.headRefName : `oz-agent/implement-issue-${issue.number}`);
@@ -196,10 +201,11 @@ jobs:
             git checkout -B "$TARGET_BRANCH" "origin/$DEFAULT_BRANCH"
           fi
 
-      - name: Materialize approved plan context
-        if: steps.context.outputs.should_noop != 'true' && steps.context.outputs.has_plan_pr == 'true'
+      - name: Materialize plan context
+        if: steps.context.outputs.should_noop != 'true' && steps.context.outputs.has_plan_context == 'true'
         uses: actions/github-script@v7
         env:
+          PLAN_CONTEXT_SOURCE: ${{ steps.context.outputs.plan_context_source }}
           PLAN_FILE_PATHS_JSON: ${{ steps.context.outputs.plan_file_paths_json }}
           PLAN_PR_NUMBER: ${{ steps.context.outputs.plan_pr_number }}
           PLAN_PR_URL: ${{ steps.context.outputs.plan_pr_url }}
@@ -207,12 +213,17 @@ jobs:
           script: |
             const fs = require('fs');
             const planFiles = JSON.parse(process.env.PLAN_FILE_PATHS_JSON || '[]');
-            const sections = [
-              `Linked approved plan PR: #${process.env.PLAN_PR_NUMBER} (${process.env.PLAN_PR_URL})`,
-            ];
+            const planContextSource = process.env.PLAN_CONTEXT_SOURCE;
+            const sections = [];
+
+            if (planContextSource === 'approved-pr') {
+              sections.push(`Linked approved plan PR: #${process.env.PLAN_PR_NUMBER} (${process.env.PLAN_PR_URL})`);
+            } else if (planContextSource === 'directory') {
+              sections.push('Repository plan file(s) associated with this issue were found in `plans/`.');
+            }
 
             if (!planFiles.length) {
-              sections.push('No plan files were identified on the linked approved plan PR.');
+              sections.push('No plan files were identified for this issue.');
             }
 
             for (const filePath of planFiles) {
@@ -231,6 +242,8 @@ jobs:
         id: prompt
         uses: actions/github-script@v7
         env:
+          HAS_PLAN_CONTEXT: ${{ steps.context.outputs.has_plan_context }}
+          PLAN_CONTEXT_SOURCE: ${{ steps.context.outputs.plan_context_source }}
           HAS_PLAN_PR: ${{ steps.context.outputs.has_plan_pr }}
           PLAN_PR_NUMBER: ${{ steps.context.outputs.plan_pr_number }}
           PLAN_PR_URL: ${{ steps.context.outputs.plan_pr_url }}
@@ -245,9 +258,11 @@ jobs:
             const commentsNote = fs.existsSync('issue_comments.txt')
               ? 'Previous issue comments from organization members are available in `issue_comments.txt`.'
               : 'There are no previous comments from organization members on this issue.';
-            const planNote = process.env.HAS_PLAN_PR === 'true'
-              ? `An approved plan from linked PR #${process.env.PLAN_PR_NUMBER} is available in \`implementation_plan_context.md\`. Treat it as the primary implementation guide and continue work on branch \`${process.env.TARGET_BRANCH}\`.`
-              : 'No linked approved plan PR was found. Implement directly from the issue description and organization-member comments.';
+            const planNote = process.env.HAS_PLAN_CONTEXT === 'true'
+              ? process.env.PLAN_CONTEXT_SOURCE === 'approved-pr'
+                ? `An approved plan from linked PR #${process.env.PLAN_PR_NUMBER} is available in \`implementation_plan_context.md\`. Treat it as the primary implementation guide and continue work on branch \`${process.env.TARGET_BRANCH}\`.`
+                : `A repository plan associated with this issue is available in \`implementation_plan_context.md\`. Treat it as the primary implementation guide and continue work on branch \`${process.env.TARGET_BRANCH}\`.`
+              : 'No linked approved plan PR or repository plan file was found. Implement directly from the issue description and organization-member comments.';
 
             const prompt = `Create an implementation diff for GitHub Issue #${issue.number}.
 
@@ -259,10 +274,10 @@ jobs:
 
             Previous Issue Comments:
             - ${commentsNote}
-
+            Plan Context:
             Approved Plan Context:
             - ${planNote}
-            ${process.env.HAS_PLAN_PR === 'true' ? `- Linked approved plan PR: ${process.env.PLAN_PR_URL}` : ''}
+            ${process.env.PLAN_CONTEXT_SOURCE === 'approved-pr' ? `- Linked approved plan PR: ${process.env.PLAN_PR_URL}` : ''}
 
             Additional Instructions:
             - Use the repository's local \`implement-issue\` skill as the base workflow.
