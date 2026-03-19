@@ -24,6 +24,24 @@ node dist/index.js complete 1
 # Delete a todo (by position number)
 node dist/index.js delete 2
 
+# Edit a todo's text
+node dist/index.js edit 1 "Buy organic groceries"
+
+# Set priority (high, medium, low)
+node dist/index.js priority 1 high
+
+# Filter todos by priority
+node dist/index.js filter high
+
+# Set a due date
+node dist/index.js due 1 2025-12-31
+
+# List overdue todos
+node dist/index.js overdue
+
+# Remove all completed todos
+node dist/index.js clear
+
 # Search todos
 node dist/index.js search "groceries"
 
