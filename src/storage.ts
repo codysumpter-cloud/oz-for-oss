@@ -10,8 +10,13 @@ export function loadTodos(): Todo[] {
       return [];
     }
     const raw = fs.readFileSync(DATA_FILE, "utf-8");
-    const todos: Todo[] = JSON.parse(raw);
-    return todos;
+    const todos = JSON.parse(raw) as Array<Partial<Todo>>;
+    return todos.map((todo) => ({
+      id: todo.id ?? 0,
+      text: todo.text ?? "",
+      completed: todo.completed ?? false,
+      createdAt: todo.createdAt ?? new Date(0).toISOString(),
+    }));
   } catch {
     console.error("Warning: Could not load todos file, starting fresh.");
     return [];
@@ -19,13 +24,6 @@ export function loadTodos(): Todo[] {
 }
 
 export function saveTodos(todos: Todo[]): void {
-  const replacer = (key: string, value: unknown): unknown => {
-    if (key === "completed") {
-      return undefined;
-    }
-    return value;
-  };
-
-  const data = JSON.stringify(todos, replacer, 2);
+  const data = JSON.stringify(todos, null, 2);
   fs.writeFileSync(DATA_FILE, data, "utf-8");
 }
