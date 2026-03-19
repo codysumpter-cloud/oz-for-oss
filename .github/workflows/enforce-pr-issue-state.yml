@@ -256,23 +256,14 @@ jobs:
               core.info(`PR #${pr.number} passed issue-state enforcement for issue #${associatedIssue.number}.`);
               return;
             }
-
-            const body = [
-              'Closing this PR because its associated issue is not in a state that allows this change.',
-              '',
-              `Associated issue: #${associatedIssue.number} (${associatedIssue.html_url})`,
-              `Association source: ${associationSource}`,
-              `Issue labels: ${issueLabels.length ? issueLabels.map(label => `\`${label}\``).join(', ') : 'none'}`,
-              '',
-              'Why this was closed:',
-              ...violations.map(violation => `- ${violation}`),
-              '',
-              'Next steps:',
-              '- If this should be implementation work, move the issue to `ready-to-implement`.',
-              '- If this issue already has a plan PR, label that PR `plan-approved` before opening implementation work.',
-              '- If this should remain planning work, keep the PR markdown-only or update the plan PR instead.',
-              '- Reopen or recreate the PR after the issue state is corrected.',
-            ].join('\n');
+            const contributionDocsUrl = `https://github.com/${owner}/${repo}#readme`;
+            const blocksImplementationWork = nonMarkdownFiles.length > 0 && !hasReadyToImplement;
+            const lacksApprovedPlan = !isCurrentPlanPr && linkedUnapprovedPlanPrs.length > 0 && linkedApprovedPlanPrs.length === 0;
+            const body = blocksImplementationWork
+              ? `The PR that you've opened seems to contain code changes and is associated with an issue that is not marked as \`ready-to-implement\`. This PR will be automatically closed. Please see our [contribution docs](${contributionDocsUrl}) for guidance on when code changes are accepted for issues.`
+              : lacksApprovedPlan
+                ? `The PR that you've opened seems to contain code changes and is associated with an issue that does not have an approved plan. This PR will be automatically closed. Please see our [contribution docs](${contributionDocsUrl}) for guidance on when code changes are accepted for issues.`
+                : `The PR that you've opened is associated with an issue that is not marked as \`ready-to-plan\` or \`ready-to-implement\`. This PR will be automatically closed. Please see our [contribution docs](${contributionDocsUrl}) for guidance on when code changes are accepted for issues.`;
 
             await github.rest.issues.createComment({
               owner,
