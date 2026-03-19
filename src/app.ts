@@ -39,29 +39,34 @@ export function listTodos(): void {
 }
 
 export function completeTodo(position: number): void {
+  const displayTodos = [...todos].reverse();
   const index = position - 1;
 
-  if (index < 0 || index >= todos.length) {
+  if (index < 0 || index >= displayTodos.length) {
     console.log(`Invalid todo number: ${position}. Use "list" to see available todos.`);
     return;
   }
 
-  todos[index].completed = true;
+  const todo = displayTodos[index];
+  todo.completed = true;
   saveTodos(todos);
-  console.log(`Completed: "${todos[index].text}"`);
+  console.log(`Completed: "${todo.text}"`);
 }
 
 export function deleteTodo(position: number): void {
+  const displayTodos = [...todos].reverse();
   const index = position - 1;
 
-  if (index < 0 || index >= todos.length) {
+  if (index < 0 || index >= displayTodos.length) {
     console.log(`Invalid todo number: ${position}. Use "list" to see available todos.`);
     return;
   }
 
-  const removed = todos.splice(index, 1);
+  const todo = displayTodos[index];
+  const originalIndex = todos.indexOf(todo);
+  todos.splice(originalIndex, 1);
   saveTodos(todos);
-  console.log(`Deleted: "${removed[0].text}"`);
+  console.log(`Deleted: "${todo.text}"`);
 }
 
 export function searchTodos(query: string): void {
