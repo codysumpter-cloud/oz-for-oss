@@ -37,7 +37,7 @@ jobs:
           DISPATCH_PR_NUMBER: ${{ inputs.pr_number || '' }}
           DISPATCH_FOCUS: ${{ inputs.focus || '' }}
         with:
-          github-token: ${{ github.token }}
+          github-token: ${{ secrets.APP_GH_TOKEN }}
           script: |
             const slashCommandPattern = /(?:^|\s)\/oz-review\b([\s\S]*)/i;
             const allowedAssociations = new Set(['MEMBER', 'OWNER']);

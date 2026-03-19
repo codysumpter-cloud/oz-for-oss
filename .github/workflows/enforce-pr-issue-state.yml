@@ -7,6 +7,8 @@ on:
         required: true
         type: string
     secrets:
+      APP_GH_TOKEN:
+        required: true
       WARP_API_KEY:
         required: true
     outputs:
@@ -26,6 +28,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.APP_GH_TOKEN }}
 
       - name: Prepare enforcement context
         id: context
@@ -33,7 +37,7 @@ jobs:
         env:
           PR_NUMBER: ${{ inputs.pr_number }}
         with:
-          github-token: ${{ github.token }}
+          github-token: ${{ secrets.APP_GH_TOKEN }}
           script: |
             const fs = require('fs');
             const owner = context.repo.owner;
@@ -208,7 +212,7 @@ jobs:
         if: steps.context.outputs.mode == 'agent'
         uses: warpdotdev/oz-agent-action@v1
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.APP_GH_TOKEN }}
         with:
           prompt: ${{ steps.context.outputs.agent_prompt }}
           name: Associate PR #${{ inputs.pr_number }} with ready issue
@@ -226,7 +230,7 @@ jobs:
           MODE: ${{ steps.context.outputs.mode }}
           DIRECT_CLOSE_COMMENT: ${{ steps.context.outputs.close_comment }}
         with:
-          github-token: ${{ github.token }}
+          github-token: ${{ secrets.APP_GH_TOKEN }}
           script: |
             const fs = require('fs');
             const owner = context.repo.owner;
