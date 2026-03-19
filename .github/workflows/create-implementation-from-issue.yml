@@ -344,7 +344,7 @@ jobs:
             const hasPlanPr = process.env.HAS_PLAN_PR === 'true';
             const shouldPublish = process.env.SHOULD_PUBLISH === 'true';
             const summaryBody = process.env.SUMMARY_TMP && fs.existsSync(process.env.SUMMARY_TMP)
-              ? fs.readFileSync(process.env.SUMMARY_TMP, 'utf8').trim()
+              ? fs.readFileSync(process.env.SUMMARY_TMP, 'utf8')
               : '';
 
             if (!shouldPublish) {
@@ -394,17 +394,6 @@ jobs:
             let pr = matchingPrs[0];
 
             if (!pr) {
-              const prBody = summaryBody
-                ? [
-                    `This PR implements Issue #${issueNumber}.`,
-                    '',
-                    summaryBody,
-                    '',
-                    `Refs #${issueNumber}`,
-                    '',
-                    'Co-Authored-By: Oz <oz-agent@warp.dev>',
-                  ].join('\n')
-                : undefined;
 
               const { data: createdPr } = await github.rest.pulls.create({
                 owner,
@@ -412,7 +401,7 @@ jobs:
                 title: `Implement issue #${issueNumber}: ${issueTitle}`,
                 head: branchName,
                 base: defaultBranch,
-                body: prBody,
+                body: summaryBody,
                 draft: true,
               });
 

@@ -243,19 +243,8 @@ jobs:
             const summaryFile = process.env.SUMMARY_FILE;
             const metadata = `<!-- oz-agent-metadata: {"type":"issue-status","workflow":"create-plan-from-issue","issue":${issueNumber}} -->`;
             const summaryBody = fs.existsSync(summaryFile)
-              ? fs.readFileSync(summaryFile, 'utf8').trim()
+              ? fs.readFileSync(summaryFile, 'utf8')
               : '';
-            const prBody = summaryBody
-              ? [
-                  `This PR adds an implementation plan for Issue #${issueNumber}.`,
-                  '',
-                  summaryBody,
-                  '',
-                  `Refs #${issueNumber}`,
-                  '',
-                  'Co-Authored-By: Oz <oz-agent@warp.dev>',
-                ].join('\n')
-              : undefined;
 
             try {
               const { data: pr } = await github.rest.pulls.create({
@@ -264,7 +253,7 @@ jobs:
                 title: `Plan issue #${issueNumber}: ${issueTitle}`,
                 head: branchName,
                 base: defaultBranch,
-                body: prBody,
+                body: summaryBody,
                 draft: false,
               });
 
