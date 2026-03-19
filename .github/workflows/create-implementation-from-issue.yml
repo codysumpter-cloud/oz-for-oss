@@ -183,7 +183,7 @@ jobs:
           HAS_PLAN_PR: ${{ steps.context.outputs.has_plan_pr }}
           TARGET_BRANCH: ${{ steps.context.outputs.target_branch }}
         run: |
-          git config user.name "Oz Agent"
+          git config user.name "Oz"
           git config user.email "oz-agent@warp.dev"
 
           if [ "$HAS_PLAN_PR" = "true" ]; then
@@ -274,7 +274,7 @@ jobs:
 
             core.setOutput('prompt', prompt);
 
-      - name: Run Oz Agent
+      - name: Run Oz
         if: steps.context.outputs.should_noop != 'true'
         id: agent
         env:
@@ -362,8 +362,8 @@ jobs:
               const planPrNumber = Number(process.env.PLAN_PR_NUMBER);
               const planPrUrl = process.env.PLAN_PR_URL;
               const prComment = summaryBody
-                ? `Oz Agent pushed implementation updates for Issue #${issueNumber}.\n\n${summaryBody}`
-                : `Oz Agent pushed implementation updates for Issue #${issueNumber}.`;
+                ? `Oz pushed implementation updates for Issue #${issueNumber}.\n\n${summaryBody}`
+                : `Oz pushed implementation updates for Issue #${issueNumber}.`;
 
               await github.rest.issues.createComment({
                 owner,
@@ -411,7 +411,7 @@ jobs:
                 owner,
                 repo,
                 issue_number: pr.number,
-                body: `Oz Agent pushed additional implementation updates for Issue #${issueNumber}.\n\n${summaryBody}`,
+                body: `Oz pushed additional implementation updates for Issue #${issueNumber}.\n\n${summaryBody}`,
               });
             }
 

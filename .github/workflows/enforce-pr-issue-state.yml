@@ -204,7 +204,7 @@ jobs:
               ;;
           esac
 
-      - name: Run Oz agent association check
+      - name: Run Oz association check
         if: steps.context.outputs.mode == 'agent'
         uses: warpdotdev/oz-agent-action@v1
         env:
@@ -243,7 +243,7 @@ jobs:
 
             if (mode === 'agent') {
               if (!fs.existsSync('pr_issue_association.json')) {
-                core.setFailed('Oz agent did not produce pr_issue_association.json.');
+                core.setFailed('Oz did not produce pr_issue_association.json.');
                 return;
               }
 
@@ -258,14 +258,14 @@ jobs:
               }
 
               if (result.matched === true && Number.isInteger(result.issue_number) && result.issue_number > 0) {
-                core.info(`PR #${prNumber} passed issue-state enforcement via Oz agent match to issue #${result.issue_number}.`);
+                core.info(`PR #${prNumber} passed issue-state enforcement via Oz match to issue #${result.issue_number}.`);
                 core.setOutput('allow_review', 'true');
                 return;
               }
 
               closeComment = typeof result.close_comment === 'string' ? result.close_comment.trim() : '';
               if (!closeComment) {
-                core.setFailed('Oz agent returned no match without a close_comment.');
+                core.setFailed('Oz returned no match without a close_comment.');
                 return;
               }
             }

@@ -1,0 +1,60 @@
+name: Comment on Unready Assigned Issue
+
+on:
+  issues:
+    types: [assigned]
+
+concurrency:
+  group: comment-on-unready-assigned-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  comment_when_unready:
+    if: github.event.assignee.login == 'oz-agent' && !contains(github.event.issue.labels.*.name, 'ready-to-plan') && !contains(github.event.issue.labels.*.name, 'ready-to-implement')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+
+    steps:
+      - name: Create or update unready assignment comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issueNumber = context.payload.issue.number;
+            const metadata = `<!-- oz-agent-metadata: {"type":"issue-status","workflow":"comment-on-unready-assigned-issue","issue":${issueNumber}} -->`;
+            const body = [
+              'This issue is assigned to Oz, but it is not labeled `ready-to-plan` or `ready-to-implement`, so there is no work to do yet.',
+              '',
+              metadata,
+            ].join('\n');
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: issueNumber,
+              per_page: 100,
+            });
+
+            const existingComment = comments.find(comment =>
+              typeof comment.body === 'string' && comment.body.includes(metadata)
+            );
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existingComment.id,
+                body,
+              });
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: issueNumber,
+              body,
+            });

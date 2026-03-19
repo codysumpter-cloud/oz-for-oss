@@ -183,7 +183,7 @@ jobs:
 
             core.setOutput('prompt', prompt);
 
-      - name: Run Oz Agent Review
+      - name: Run Oz Review
         if: steps.context.outputs.should_run == 'true'
         uses: warpdotdev/oz-agent-action@v1
         env:
@@ -301,7 +301,7 @@ jobs:
               owner,
               repo,
               pull_number: prNumber,
-              body: summary || 'Automated review by Oz Agent',
+              body: summary || 'Automated review by Oz',
               event: 'COMMENT',
               ...(comments.length ? { comments } : {}),
             });

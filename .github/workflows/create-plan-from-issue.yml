@@ -88,7 +88,7 @@ jobs:
             const issueNumber = context.payload.issue.number;
             const metadata = `<!-- oz-agent-metadata: {"type":"issue-status","workflow":"create-plan-from-issue","issue":${issueNumber}} -->`;
             const body = [
-              'Oz Agent is starting work on an implementation plan for this issue.',
+              'Oz is starting work on an implementation plan for this issue.',
               '',
               metadata,
             ].join('\n');
@@ -139,7 +139,7 @@ jobs:
               exit 1
               ;;
           esac
-      - name: Run Oz Agent
+      - name: Run Oz
         id: agent
         uses: warpdotdev/oz-agent-action@v1
         env:
@@ -162,7 +162,7 @@ jobs:
           rm -f issue_comments.txt
 
           if [[ -z $(git status --porcelain -- plans) ]]; then
-            echo "No changes made by Oz Agent."
+            echo "No changes made by Oz."
             echo "should_create_pr=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -170,7 +170,7 @@ jobs:
           BRANCH_NAME="oz-agent/plan-issue-$ISSUE_NUMBER"
 
 
-          git config user.name "Oz Agent"
+          git config user.name "Oz"
           git config user.email "oz-agent@warp.dev"
 
           git checkout -B "$BRANCH_NAME"
