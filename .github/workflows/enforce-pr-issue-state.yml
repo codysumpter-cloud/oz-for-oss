@@ -82,7 +82,7 @@ jobs:
             const hasCodeChanges = nonMarkdownFiles.length > 0;
             const changeKind = hasCodeChanges ? 'implementation' : 'plan';
             const requiredLabel = hasCodeChanges ? 'ready-to-implement' : 'ready-to-plan';
-            const contributionDocsUrl = `https://github.com/${owner}/${repo}#readme`;
+            const contributionDocsUrl = `https://github.com/${owner}/${repo}/blob/main/CONTRIBUTING.md`;
 
             const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const sameRepoIssueUrlPattern = new RegExp(
