@@ -178,7 +178,7 @@ export function clearCompleted(): void {
     return;
   }
 
-  todos = [];
+  todos = todos.filter((t) => !t.completed);
   saveTodos(todos);
   console.log(`Cleared ${completedCount} completed todo(s).`);
 }
