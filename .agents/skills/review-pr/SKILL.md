@@ -12,12 +12,14 @@ Review the current pull request and write the output to `review.json`.
 - The working directory is the PR branch checkout.
 - The workflow provides an annotated diff in `pr_diff.txt`.
 - The workflow provides the PR description in `pr_description.txt`.
+- If `implementation_plan_context.md` exists, it contains plan context for implementation-vs-plan validation.
 - Focus on files and lines changed by this PR.
 - Do not post comments or reviews to GitHub directly.
 
 ## Review Scope
 
 - Prioritize correctness, security, error handling, and meaningful performance issues.
+- When `implementation_plan_context.md` exists, use the repository's local `check-impl-against-plan` skill and treat material plan drift as a review concern.
 - Include style or nit comments only when you can provide a concrete suggestion block.
 - If a concern involves untouched code, mention it in the summary instead of an inline comment.
 

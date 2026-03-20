@@ -82,6 +82,7 @@ jobs:
             core.setOutput('pr_number', String(pr.number));
             core.setOutput('base_ref', pr.base.ref);
             core.setOutput('base_sha', pr.base.sha);
+            core.setOutput('head_ref', pr.head.ref);
             core.setOutput('title', pr.title);
             core.setOutput('trigger_source', process.env.TRIGGER_SOURCE || 'workflow_call');
             core.setOutput('requester', process.env.REQUESTER || context.actor);
@@ -124,6 +125,252 @@ jobs:
           gh pr checkout "$PR_NUMBER"
           git fetch origin "$BASE_REF"
 
+      - name: Resolve approved plan context
+        if: steps.context.outputs.should_run == 'true'
+        id: plan_context
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.context.outputs.pr_number }}
+        with:
+          github-token: ${{ steps.app_token.outputs.token }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const { owner, repo } = context.repo;
+            const prNumber = Number(process.env.PR_NUMBER || '0');
+
+            if (!Number.isInteger(prNumber) || prNumber <= 0) {
+              core.setOutput('issue_number', '');
+              core.setOutput('has_plan_context', 'false');
+              core.setOutput('plan_context_source', '');
+              core.setOutput('plan_pr_number', '');
+              core.setOutput('plan_pr_url', '');
+              core.setOutput('plan_branch', '');
+              core.setOutput('plan_file_paths_json', '[]');
+              return;
+            }
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: prNumber,
+            });
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner,
+              repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+
+            const changedFiles = files.map(file => file.filename);
+            const branchIssueMatches = [...pr.head.ref.matchAll(/(?:^|\/)(?:plan|implement)-issue-(\d+)(?:$|[/-])/g)]
+              .map(match => Number(match[1]))
+              .filter(value => Number.isInteger(value) && value > 0);
+            const planFileIssueNumbers = changedFiles
+              .map(filename => filename.match(/^plans\/issue-(\d+)\.md$/))
+              .filter(Boolean)
+              .map(match => Number(match[1]))
+              .filter(value => Number.isInteger(value) && value > 0);
+
+            const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const sameRepoIssueUrlPattern = new RegExp(
+              `https://github\\.com/${escapeRegex(owner)}/${escapeRegex(repo)}/issues/(\\d+)`,
+              'gi',
+            );
+            const explicitIssuePatterns = [
+              /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?|implements?|issue)\s*:?\s+#(\d+)/gi,
+              sameRepoIssueUrlPattern,
+            ];
+            const explicitIssueNumbers = [...new Set(explicitIssuePatterns.flatMap(pattern =>
+              [...(pr.body || '').matchAll(pattern)]
+                .map(match => Number(match[1]))
+                .filter(value => Number.isInteger(value) && value > 0)
+            ))];
+
+            const issueCandidates = [...new Set([
+              ...branchIssueMatches,
+              ...planFileIssueNumbers,
+              ...explicitIssueNumbers,
+            ])];
+
+            let issueNumber = null;
+            for (const candidate of issueCandidates) {
+              try {
+                const { data: issue } = await github.rest.issues.get({
+                  owner,
+                  repo,
+                  issue_number: candidate,
+                });
+
+                if (!issue.pull_request) {
+                  issueNumber = candidate;
+                  break;
+                }
+              } catch (error) {
+                core.info(`Skipping issue candidate #${candidate}: ${error?.message || String(error)}`);
+              }
+            }
+
+            if (!issueNumber) {
+              core.info(`No associated issue was resolved for PR #${pr.number}; skipping approved-plan lookup.`);
+              core.setOutput('issue_number', '');
+              core.setOutput('has_plan_context', 'false');
+              core.setOutput('plan_context_source', '');
+              core.setOutput('plan_pr_number', '');
+              core.setOutput('plan_pr_url', '');
+              core.setOutput('plan_branch', '');
+              core.setOutput('plan_file_paths_json', '[]');
+              return;
+            }
+
+            const linkedApprovedPlanPrs = [];
+            const localPlanFiles = [];
+            const plansDir = path.resolve('plans');
+
+            if (fs.existsSync(plansDir)) {
+              const stack = [plansDir];
+
+              while (stack.length) {
+                const currentDir = stack.pop();
+
+                for (const entry of fs.readdirSync(currentDir, { withFileTypes: true })) {
+                  const entryPath = path.join(currentDir, entry.name);
+
+                  if (entry.isDirectory()) {
+                    stack.push(entryPath);
+                    continue;
+                  }
+
+                  const relativePath = path.relative(process.cwd(), entryPath);
+                  if (relativePath === `plans/issue-${issueNumber}.md`) {
+                    localPlanFiles.push(relativePath);
+                  }
+                }
+              }
+            }
+
+            const expectedPlanBranch = `oz-agent/plan-issue-${issueNumber}`;
+            const matchingPlanPrs = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: 'all',
+              head: `${owner}:${expectedPlanBranch}`,
+              per_page: 100,
+            });
+
+            for (const candidatePr of matchingPlanPrs) {
+              const labels = candidatePr.labels
+                .map(label => typeof label === 'string' ? label : label.name)
+                .filter(Boolean);
+
+              const candidateFiles = await github.paginate(github.rest.pulls.listFiles, {
+                owner,
+                repo,
+                pull_number: candidatePr.number,
+                per_page: 100,
+              });
+
+              const planFiles = candidateFiles
+                .map(file => file.filename)
+                .filter(filename => filename.startsWith('plans/'));
+
+              if (labels.includes('plan-approved')) {
+                linkedApprovedPlanPrs.push({
+                  number: candidatePr.number,
+                  url: candidatePr.html_url,
+                  updatedAt: candidatePr.updated_at,
+                  headRefName: candidatePr.head.ref,
+                  headRepoFullName: candidatePr.head.repo?.full_name || '',
+                  planFiles,
+                });
+              }
+            }
+
+            linkedApprovedPlanPrs.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+            let selectedPlanPr = linkedApprovedPlanPrs[0] || null;
+
+            if (selectedPlanPr && selectedPlanPr.headRepoFullName !== `${owner}/${repo}`) {
+              core.warning(`Skipping linked approved plan PR #${selectedPlanPr.number} because its branch ${selectedPlanPr.headRepoFullName}:${selectedPlanPr.headRefName} is not in this repository.`);
+              selectedPlanPr = null;
+            }
+
+            const planContextSource = selectedPlanPr
+              ? 'approved-pr'
+              : localPlanFiles.length
+                ? 'directory'
+                : '';
+            const planFiles = selectedPlanPr ? selectedPlanPr.planFiles : localPlanFiles;
+
+            core.setOutput('issue_number', String(issueNumber));
+            core.setOutput('has_plan_context', planFiles.length ? 'true' : 'false');
+            core.setOutput('plan_context_source', planContextSource);
+            core.setOutput('plan_pr_number', selectedPlanPr ? String(selectedPlanPr.number) : '');
+            core.setOutput('plan_pr_url', selectedPlanPr ? selectedPlanPr.url : '');
+            core.setOutput('plan_branch', selectedPlanPr ? selectedPlanPr.headRefName : '');
+            core.setOutput('plan_file_paths_json', JSON.stringify(planFiles));
+
+      - name: Fetch approved plan branch
+        if: steps.context.outputs.should_run == 'true' && steps.plan_context.outputs.has_plan_context == 'true' && steps.plan_context.outputs.plan_context_source == 'approved-pr' && steps.plan_context.outputs.plan_branch != '' && steps.plan_context.outputs.plan_branch != steps.context.outputs.head_ref
+        env:
+          PLAN_BRANCH: ${{ steps.plan_context.outputs.plan_branch }}
+        run: |
+          git fetch origin "$PLAN_BRANCH"
+
+      - name: Materialize plan context
+        if: steps.context.outputs.should_run == 'true' && steps.plan_context.outputs.has_plan_context == 'true'
+        uses: actions/github-script@v7
+        env:
+          CURRENT_HEAD_REF: ${{ steps.context.outputs.head_ref }}
+          PLAN_CONTEXT_SOURCE: ${{ steps.plan_context.outputs.plan_context_source }}
+          PLAN_FILE_PATHS_JSON: ${{ steps.plan_context.outputs.plan_file_paths_json }}
+          PLAN_PR_NUMBER: ${{ steps.plan_context.outputs.plan_pr_number }}
+          PLAN_PR_URL: ${{ steps.plan_context.outputs.plan_pr_url }}
+          PLAN_BRANCH: ${{ steps.plan_context.outputs.plan_branch }}
+        with:
+          script: |
+            const fs = require('fs');
+            const { execFileSync } = require('child_process');
+            const planFiles = JSON.parse(process.env.PLAN_FILE_PATHS_JSON || '[]');
+            const planContextSource = process.env.PLAN_CONTEXT_SOURCE;
+            const currentHeadRef = process.env.CURRENT_HEAD_REF;
+            const planBranch = process.env.PLAN_BRANCH;
+            const sections = [];
+
+            if (planContextSource === 'approved-pr') {
+              sections.push(`Linked approved plan PR: #${process.env.PLAN_PR_NUMBER} (${process.env.PLAN_PR_URL})`);
+            } else if (planContextSource === 'directory') {
+              sections.push('Repository plan file(s) associated with this PR were found in `plans/`.');
+            }
+
+            if (!planFiles.length) {
+              sections.push('No plan files were identified for this PR.');
+            }
+
+            for (const filePath of planFiles) {
+              let content = '';
+
+              if (fs.existsSync(filePath)) {
+                content = fs.readFileSync(filePath, 'utf8').trim();
+              } else if (planContextSource === 'approved-pr' && planBranch && planBranch !== currentHeadRef) {
+                try {
+                  content = execFileSync('git', ['show', `origin/${planBranch}:${filePath}`], {
+                    encoding: 'utf8',
+                  }).trim();
+                } catch (error) {
+                  sections.push(`## ${filePath}\n\nThis file was listed on the linked approved plan PR but could not be read from branch \`${planBranch}\`.`);
+                  continue;
+                }
+              } else {
+                sections.push(`## ${filePath}\n\nThis file was expected for plan validation but is not present in the checked out branch.`);
+                continue;
+              }
+
+              sections.push(`## ${filePath}\n\n${content}`);
+            }
+
+            fs.writeFileSync('implementation_plan_context.md', `${sections.join('\n\n')}\n`, 'utf8');
+
       - name: Generate annotated diff
         if: steps.context.outputs.should_run == 'true'
         env:
@@ -152,6 +399,10 @@ jobs:
         id: prompt
         uses: actions/github-script@v7
         env:
+          HAS_PLAN_CONTEXT: ${{ steps.plan_context.outputs.has_plan_context }}
+          ISSUE_NUMBER: ${{ steps.plan_context.outputs.issue_number }}
+          PLAN_CONTEXT_SOURCE: ${{ steps.plan_context.outputs.plan_context_source }}
+          PLAN_PR_URL: ${{ steps.plan_context.outputs.plan_pr_url }}
           PR_NUMBER: ${{ steps.context.outputs.pr_number }}
           REVIEW_FOCUS: ${{ steps.context.outputs.focus }}
           REQUESTER: ${{ steps.context.outputs.requester }}
@@ -176,11 +427,17 @@ jobs:
             const focus = (process.env.REVIEW_FOCUS || '').trim();
             const requester = process.env.REQUESTER || 'unknown';
             const triggerSource = process.env.TRIGGER_SOURCE;
+            const hasPlanContext = process.env.HAS_PLAN_CONTEXT === 'true';
             const focusLine = focus
               ? `Additional focus from @${requester}: ${focus}`
               : triggerSource === 'issue_comment'
                 ? `The review was requested by @${requester} via /oz-review. Perform a general review if no extra guidance was provided.`
                 : 'Perform a general review of the pull request.';
+            const planLine = hasPlanContext
+              ? process.env.PLAN_CONTEXT_SOURCE === 'approved-pr'
+                ? `Approved plan context is available in \`implementation_plan_context.md\` from linked approved plan PR ${process.env.PLAN_PR_URL}. Use the repository's local \`check-impl-against-plan\` skill to verify that the implementation matches the approved plan, and note any material mismatches in the review summary and inline comments when they can be anchored to changed lines.`
+                : `Repository plan context is available in \`implementation_plan_context.md\`. Use the repository's local \`check-impl-against-plan\` skill to compare the implementation against that plan context, and note any material mismatches in the review summary and inline comments when they can be anchored to changed lines.`
+              : 'No approved or repository plan context was found for this PR.';
 
             const prompt = `Review Pull Request #${prNumber} and write the result to \`review.json\`.
 
@@ -188,11 +445,14 @@ jobs:
             - Title: ${pr.title}
             - Description: Read \`${descriptionPath}\` for the full PR description.
             - Diff: Read \`pr_diff.txt\` for the annotated diff to review.
+            - Issue: ${process.env.ISSUE_NUMBER ? `#${process.env.ISSUE_NUMBER}` : 'No associated issue resolved for plan lookup.'}
+            - Plan Context: ${planLine}
             - Trigger: ${triggerSource}
             - ${focusLine}
 
             Additional Instructions:
             - Use the repository's local \`review-pr\` skill as the base workflow.
+            - If \`implementation_plan_context.md\` exists, also use the repository's local \`check-impl-against-plan\` skill before finalizing the review.
             - Restrict inline comments to changed lines represented in \`pr_diff.txt\`.
             - Do not post to GitHub directly; only write or update \`review.json\`.`;
 
