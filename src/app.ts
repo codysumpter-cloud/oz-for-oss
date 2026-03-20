@@ -153,7 +153,7 @@ export function listOverdue(): void {
   const now = new Date();
   const overdue = todos.filter((todo) => {
     if (!todo.dueDate || todo.completed) return false;
-    return new Date(todo.dueDate) > now;
+    return new Date(todo.dueDate) < now;
   });
 
   if (overdue.length === 0) {
