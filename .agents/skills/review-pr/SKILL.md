@@ -1,33 +1,24 @@
 ---
 name: review-pr
-description: Review a pull request diff and write structured feedback to review.json for the workflow to publish. Use when reviewing a checked-out PR from local artifacts like pr_diff.txt and pr_description.txt and producing machine-readable review output instead of posting directly to GitHub.
+description: Review a pull request and publish feedback directly on GitHub. Use when the prompt provides the repository and pull request context and the agent should inspect the PR using GitHub-aware tools, then post the review itself.
 ---
 
 # Review PR Skill
 
-Review the current pull request and write the output to `review.json`.
+Review the target pull request and publish the review directly on GitHub.
 
 ## Context
 
-- The working directory is the PR branch checkout.
-- The workflow provides an annotated diff in `pr_diff.txt`.
-- The workflow provides the PR description in `pr_description.txt`.
+- The prompt provides the repository, pull request number, and any extra focus guidance.
+- Use GitHub-aware tools available in the environment to inspect the pull request metadata, changed files, and diff.
 - Focus on files and lines changed by this PR.
-- Do not post comments or reviews to GitHub directly.
+- Publish the review directly on GitHub instead of writing local output files.
 
 ## Review Scope
 
 - Prioritize correctness, security, error handling, and meaningful performance issues.
 - Include style or nit comments only when you can provide a concrete suggestion block.
 - If a concern involves untouched code, mention it in the summary instead of an inline comment.
-
-## Diff Line Annotations
-
-The diff file uses these prefixes:
-
-- `[OLD:n]` for deleted lines on the old side. Use `"LEFT"`.
-- `[NEW:n]` for added lines on the new side. Use `"RIGHT"`.
-- `[OLD:n,NEW:m]` for unchanged context. Use `"RIGHT"` with line `m`.
 
 ## Comment Requirements
 
@@ -58,37 +49,11 @@ Rules:
 
 - Match the exact indentation of the original file.
 - Include only replacement code.
-- For multi-line suggestions, set `start_line` to the first line and `line` to the last line.
-
-## Output Format
-
-Create `review.json` with this shape:
-
-```json
-{
-  "summary": "## Overview\n...\n\n## Concerns\n- ...\n\n## Verdict\nFound: 1 critical, 2 important, 3 suggestions\n\n**Request changes**",
-  "comments": [
-    {
-      "path": "path/to/file",
-      "line": 42,
-      "side": "RIGHT",
-      "start_line": 40,
-      "body": "⚠️ [IMPORTANT] Short explanation\n\n```suggestion\nreplacement\n```"
-    }
-  ]
-}
-```
-
-Field rules:
-
-- `path` must be relative to the repository root.
-- `line` is required and must target the correct side.
-- `start_line` is optional and only for multi-line ranges.
-- `side` must be `"LEFT"` or `"RIGHT"`.
+- For multi-line suggestions, ensure the suggestion matches the exact range you are replacing.
 
 ## Summary Requirements
 
-The `summary` must include:
+The final review you publish must include:
 
 - A high-level overview of the PR.
 - Important concerns and any untouched-code concerns that could not be commented inline.
@@ -99,9 +64,6 @@ The `summary` must include:
 
 Before finishing:
 
-- Validate `review.json` with `jq`.
-- Fix invalid JSON if validation fails.
-- Confirm line numbers match the annotated diff.
-- Do not run `gh pr review`, `gh pr comment`, `gh api`, or any other command that posts to GitHub.
-
-Your only output is the final `review.json`.
+- Confirm any inline comment line numbers match the actual pull request diff.
+- Publish exactly one coherent pull request review, with inline comments when warranted.
+- Do not modify repository code, create branches, or open pull requests as part of the review.
