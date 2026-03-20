@@ -39,10 +39,53 @@ case "$(dpkg --print-architecture)" in
 esac
 
 if [[ "$version" == "latest" ]]; then
-  deb_url="$(curl -fsSI -o /dev/null -w '%{redirect_url}' "https://app.warp.dev/download/cli?os=linux&package=deb&arch=$arch&channel=$channel")"
+  resolution="$(
+    node - "$channel" "$arch" <<'NODE'
+const channel = process.argv[2];
+const arch = process.argv[3];
+const url = `https://app.warp.dev/download/cli?os=linux&package=deb&arch=${arch}&channel=${channel}`;
+
+fetch(url, {
+  method: 'GET',
+  redirect: 'manual',
+  headers: {
+    'User-Agent': 'oz-action',
+  },
+}).then((response) => {
+  if (response.status !== 301 && response.status !== 302) {
+    throw new Error(`Expected redirect, got status ${response.status}`);
+  }
+
+  const location = response.headers.get('location');
+  if (!location) {
+    throw new Error('Redirect location header missing');
+  }
+
+  const parsed = new URL(location);
+  const pathComponents = parsed.pathname.split('/').filter(Boolean);
+  const resolvedVersion = pathComponents.length >= 2 ? pathComponents[1] : '';
+
+  process.stdout.write(`${location}\n${resolvedVersion}\n`);
+}).catch((error) => {
+  console.error(error.message);
+  process.exit(1);
+});
+NODE
+  )" || {
+    echo "::error::Unable to resolve the latest Oz release URL."
+    exit 1
+  }
+
+  deb_url="$(printf '%s\n' "$resolution" | sed -n '1p')"
+  resolved_version="$(printf '%s\n' "$resolution" | sed -n '2p')"
+
   if [[ -z "$deb_url" ]]; then
     echo "::error::Unable to resolve the latest Oz release URL."
     exit 1
+  fi
+
+  if [[ -n "$resolved_version" ]]; then
+    version="$resolved_version"
   fi
 else
   deb_version="${version#v}"
