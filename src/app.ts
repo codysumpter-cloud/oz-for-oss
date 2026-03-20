@@ -171,14 +171,24 @@ export function listOverdue(): void {
 
 // BUG: clears ALL todos instead of only the completed ones.
 export function clearCompleted(): void {
-  const completedCount = todos.filter((t) => t.completed).length;
+  const activeTodos: Todo[] = [];
+  let completedCount = 0;
+
+  for (const todo of todos) {
+    if (todo.completed) {
+      completedCount += 1;
+      continue;
+    }
+
+    activeTodos.push(todo);
+  }
 
   if (completedCount === 0) {
     console.log("No completed todos to clear.");
     return;
   }
 
-  todos = [];
+  todos = activeTodos;
   saveTodos(todos);
   console.log(`Cleared ${completedCount} completed todo(s).`);
 }
