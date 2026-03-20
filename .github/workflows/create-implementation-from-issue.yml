@@ -155,6 +155,7 @@ jobs:
             core.setOutput('noop_reason', noopReason);
       - name: Comment on issue status
         if: steps.context.outputs.should_noop != 'true'
+        id: status_comment
         uses: actions/github-script@v7
         with:
           github-token: ${{ github.token }}
@@ -192,15 +193,19 @@ jobs:
                 comment_id: existingComment.id,
                 body,
               });
+              core.setOutput('comment_id', String(existingComment.id));
+              core.setOutput('metadata', metadata);
               return;
             }
 
-            await github.rest.issues.createComment({
+            const { data: comment } = await github.rest.issues.createComment({
               owner,
               repo,
               issue_number: issueNumber,
               body,
             });
+            core.setOutput('comment_id', String(comment.id));
+            core.setOutput('metadata', metadata);
 
       - name: Validate Warp API key
         if: steps.context.outputs.should_noop != 'true'
@@ -372,7 +377,7 @@ jobs:
         id: agent
         env:
           GH_TOKEN: ${{ github.token }}
-        uses: warpdotdev/oz-agent-action@v1
+        uses: ./.github/actions/run-oz-agent
         with:
           skill: implement-issue
           prompt: ${{ steps.prompt.outputs.prompt }}
@@ -382,6 +387,10 @@ jobs:
           model: ${{ vars.WARP_AGENT_MODEL || '' }}
           mcp: ${{ vars.WARP_AGENT_MCP || '' }}
           share: ${{ steps.share.outputs.recipient }}
+          github_token: ${{ github.token }}
+          comment_id: ${{ steps.status_comment.outputs.comment_id }}
+          status_message: Oz is working on an implementation for this issue.
+          comment_metadata: ${{ steps.status_comment.outputs.metadata }}
           warp_api_key: ${{ secrets.WARP_API_KEY }}
 
       - name: Commit and push implementation

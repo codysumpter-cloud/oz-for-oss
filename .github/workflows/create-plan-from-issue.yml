@@ -112,6 +112,7 @@ jobs:
                 body,
               });
               core.setOutput('comment_id', String(existingComment.id));
+              core.setOutput('metadata', metadata);
               return;
             }
 
@@ -123,6 +124,7 @@ jobs:
             });
 
             core.setOutput('comment_id', String(comment.id));
+            core.setOutput('metadata', metadata);
       - name: Validate Warp API key
         env:
           WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
@@ -173,7 +175,7 @@ jobs:
             core.setOutput('recipient', `${sender.login}@users.noreply.github.com`);
       - name: Run Oz
         id: agent
-        uses: warpdotdev/oz-agent-action@v1
+        uses: ./.github/actions/run-oz-agent
         env:
           GH_TOKEN: ${{ github.token }}
         with:
@@ -185,6 +187,10 @@ jobs:
           model: ${{ vars.WARP_AGENT_MODEL || '' }}
           mcp: ${{ vars.WARP_AGENT_MCP || '' }}
           share: ${{ steps.share.outputs.recipient }}
+          github_token: ${{ github.token }}
+          comment_id: ${{ steps.status_comment.outputs.comment_id }}
+          status_message: Oz is starting work on an implementation plan for this issue.
+          comment_metadata: ${{ steps.status_comment.outputs.metadata }}
           warp_api_key: ${{ secrets.WARP_API_KEY }}
       - name: Prepare plan branch
         if: success()
