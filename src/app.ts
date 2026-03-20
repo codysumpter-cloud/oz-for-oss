@@ -59,7 +59,7 @@ export function deleteTodo(position: number): void {
     return;
   }
 
-  const removed = todos.splice(index);
+  const removed = todos.splice(index, 1);
   saveTodos(todos);
   console.log(`Deleted: "${removed[0].text}"`);
 }
