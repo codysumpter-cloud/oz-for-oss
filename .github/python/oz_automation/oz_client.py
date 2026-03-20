@@ -11,6 +11,7 @@ from oz_automation.context import require_env
 
 
 TERMINAL_STATES = {"SUCCEEDED", "FAILED", "CANCELLED", "ERROR", "BLOCKED"}
+DEFAULT_OZ_API_BASE_URL = "https://oz.staging.warp.dev/api/v1"
 
 
 def _normalize_mcp_servers(raw_value: str | None) -> dict[str, Any]:
@@ -57,7 +58,8 @@ def build_run_config(*, name: str | None = None, include_github_mcp: bool = True
 
 
 def get_client() -> OzAPI:
-    return OzAPI(api_key=require_env("WARP_API_KEY"))
+    base_url = os.getenv("OZ_API_BASE_URL", "").strip() or DEFAULT_OZ_API_BASE_URL
+    return OzAPI(api_key=require_env("WARP_API_KEY"), base_url=base_url)
 
 
 def start_run(
