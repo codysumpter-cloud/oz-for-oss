@@ -147,13 +147,11 @@ export function setDueDate(position: number, dateStr: string): void {
   console.log(`Set due date of "${todos[index].text}" to ${date.toLocaleDateString()}`);
 }
 
-// BUG: the comparison is backwards — items with a due date in the future
-// are reported as overdue, while actually overdue items are not shown.
 export function listOverdue(): void {
   const now = new Date();
   const overdue = todos.filter((todo) => {
     if (!todo.dueDate || todo.completed) return false;
-    return new Date(todo.dueDate) > now;
+    return new Date(todo.dueDate) < now;
   });
 
   if (overdue.length === 0) {
