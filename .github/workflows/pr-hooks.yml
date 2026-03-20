@@ -30,6 +30,12 @@ jobs:
       focus: ${{ steps.resolve.outputs.focus }}
       comment_id: ${{ steps.resolve.outputs.comment_id }}
     steps:
+      - name: Create GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.GHA_APP_ID }}
+          private-key: ${{ secrets.GHA_PRIVATE_KEY }}
       - name: Resolve review context
         id: resolve
         uses: actions/github-script@v7
@@ -37,7 +43,7 @@ jobs:
           DISPATCH_PR_NUMBER: ${{ inputs.pr_number || '' }}
           DISPATCH_FOCUS: ${{ inputs.focus || '' }}
         with:
-          github-token: ${{ github.token }}
+          github-token: ${{ steps.app_token.outputs.token }}
           script: |
             const slashCommandPattern = /(?:^|\s)\/oz-review\b([\s\S]*)/i;
             const allowedAssociations = new Set(['MEMBER', 'OWNER']);
