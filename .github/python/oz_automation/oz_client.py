@@ -103,6 +103,22 @@ def get_session_link(run: Any) -> str:
     return getattr(run, "session_link", None) or ""
 
 
+def wait_for_session_link(
+    run_id: str,
+    *,
+    poll_interval_seconds: int = 2,
+    timeout_seconds: int = 60,
+) -> str:
+    started = time.monotonic()
+    while True:
+        link = get_session_link(get_run(run_id))
+        if link:
+            return link
+        if time.monotonic() - started > timeout_seconds:
+            return ""
+        time.sleep(poll_interval_seconds)
+
+
 def get_pull_request_urls(run: Any) -> list[str]:
     urls: list[str] = []
     for artifact in getattr(run, "artifacts", None) or []:

@@ -15,10 +15,10 @@ from oz_automation.github_client import (
 from oz_automation.outputs import append_summary
 from oz_automation.oz_client import (
     get_pull_request_urls,
-    get_run,
     get_session_link,
     start_run,
     wait_for_run,
+    wait_for_session_link,
 )
 
 
@@ -147,7 +147,7 @@ Publishing requirements:
         skill=f"{repo_ref.full_name}:implement-issue",
         config_name=f"implement-issue-{issue.number}",
     )
-    session_link = get_session_link(get_run(run_id))
+    session_link = wait_for_session_link(run_id)
     upsert_comment(
         issue,
         WORKFLOW_NAME,
