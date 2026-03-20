@@ -21,6 +21,7 @@ from oz_automation.oz_client import (
 
 
 WORKFLOW_NAME = "create-plan-from-issue"
+SKILL_PATH = ".agents/skills/create-plan/SKILL.md"
 
 
 def _member_comments_text(comments: Iterable) -> str:
@@ -59,6 +60,7 @@ def main() -> int:
 
     labels = ", ".join(labels_to_names(issue.labels)) or "None"
     assignees = ", ".join(assignee.login for assignee in issue.assignees) or "None"
+    skill_spec = f"{repo_ref.full_name}:{SKILL_PATH}"
     prompt = f"""Create and publish a plan pull request for GitHub Issue #{issue.number} in {repo_ref.full_name}.
 
 Issue details:
@@ -78,7 +80,7 @@ Organization-member comments:
 {comments_text}
 
 Publishing requirements:
-- Use the repository skill `{repo_ref.full_name}:create-plan`.
+- Use the repository skill `{skill_spec}`.
 - Create or update `plans/issue-{issue.number}.md`.
 - Commit only the plan file.
 - Create or update the pull request for `{branch_name}` targeting `{default_branch}`.
@@ -89,7 +91,7 @@ Publishing requirements:
     run_id = start_run(
         prompt=prompt,
         title=f"Create plan for issue #{issue.number}",
-        skill=f"{repo_ref.full_name}:create-plan",
+        skill=skill_spec,
         config_name=f"plan-issue-{issue.number}",
     )
     session_link = wait_for_session_link(run_id)

@@ -23,6 +23,7 @@ from oz_automation.oz_client import (
 
 
 WORKFLOW_NAME = "create-implementation-from-issue"
+SKILL_PATH = ".agents/skills/implement-issue/SKILL.md"
 
 
 def _member_comments_text(comments: Iterable) -> str:
@@ -111,6 +112,7 @@ def main() -> int:
 
     labels = ", ".join(labels_to_names(issue.labels)) or "None"
     assignees = ", ".join(assignee.login for assignee in issue.assignees) or "None"
+    skill_spec = f"{repo_ref.full_name}:{SKILL_PATH}"
     prompt = f"""Implement and publish GitHub Issue #{issue.number} in {repo_ref.full_name}.
 
 Issue details:
@@ -132,7 +134,7 @@ Plan context:
 {plan_context}
 
 Publishing requirements:
-- Use the repository skill `{repo_ref.full_name}:implement-issue`.
+- Use the repository skill `{skill_spec}`.
 - Keep the implementation scoped to this issue.
 - Publish directly to `{target_branch}`.
 - Create or update the pull request titled `{pr_title}`.
@@ -144,7 +146,7 @@ Publishing requirements:
     run_id = start_run(
         prompt=prompt,
         title=f"Implement issue #{issue.number}",
-        skill=f"{repo_ref.full_name}:implement-issue",
+        skill=skill_spec,
         config_name=f"implement-issue-{issue.number}",
     )
     session_link = wait_for_session_link(run_id)
