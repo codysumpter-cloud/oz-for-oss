@@ -39,7 +39,7 @@ export function listTodos(): void {
 }
 
 export function completeTodo(position: number): void {
-  const index = position;
+  const index = position - 1;
 
   if (index < 0 || index >= todos.length) {
     console.log(`Invalid todo number: ${position}. Use "list" to see available todos.`);
