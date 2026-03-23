@@ -87,6 +87,11 @@ class GitHubClient:
             f"/repos/{owner}/{repo}/issues/{issue_number}/comments",
         )
 
+    def list_issue_events(self, owner: str, repo: str, issue_number: int) -> list[dict[str, Any]]:
+        return self.paginate(
+            f"/repos/{owner}/{repo}/issues/{issue_number}/events",
+        )
+
     def create_comment(self, owner: str, repo: str, issue_number: int, body: str) -> dict[str, Any]:
         return self.request(
             "POST",
@@ -99,6 +104,12 @@ class GitHubClient:
             "PATCH",
             f"/repos/{owner}/{repo}/issues/comments/{comment_id}",
             json_body={"body": body},
+        )
+
+    def get_comment(self, owner: str, repo: str, comment_id: int) -> dict[str, Any]:
+        return self.request(
+            "GET",
+            f"/repos/{owner}/{repo}/issues/comments/{comment_id}",
         )
 
     def delete_comment(self, owner: str, repo: str, comment_id: int) -> None:

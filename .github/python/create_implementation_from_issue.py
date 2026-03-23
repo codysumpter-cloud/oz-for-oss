@@ -57,6 +57,7 @@ def main() -> None:
             owner,
             repo,
             issue_number,
+            event_payload=event,
             workflow="create-implementation-from-issue",
             status_line="Oz is working on an implementation for this issue.",
         )

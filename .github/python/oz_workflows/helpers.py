@@ -33,17 +33,77 @@ def comment_metadata(workflow: str, issue_number: int) -> str:
     return f'<!-- oz-agent-metadata: {{"type":"issue-status","workflow":"{workflow}","issue":{issue_number}}} -->'
 
 
+def split_comment_body(body: str, metadata: str) -> tuple[str, str]:
+    if metadata and metadata in body:
+        content, _, _ = body.partition(metadata)
+        return content.strip(), metadata
+    return body.strip(), metadata
+
+
+def build_comment_body(content: str, metadata: str) -> str:
+    content = content.strip()
+    if metadata:
+        if content:
+            return f"{content}\n\n{metadata}"
+        return metadata
+    return content
+
+
+def append_comment_sections(existing_body: str, metadata: str, sections: list[str]) -> str:
+    content, metadata = split_comment_body(existing_body, metadata)
+    normalized_sections = [section.strip() for section in sections if section and section.strip()]
+    if not content:
+        return build_comment_body("\n\n".join(normalized_sections), metadata)
+
+    updated = content
+    for section in normalized_sections:
+        if section not in updated:
+            updated = f"{updated}\n\n{section}"
+    return build_comment_body(updated, metadata)
+
+
+def resolve_oz_assigner_login(
+    github: GitHubClient,
+    owner: str,
+    repo: str,
+    issue_number: int,
+    *,
+    event_payload: dict[str, Any],
+) -> str:
+    if (
+        event_payload.get("action") == "assigned"
+        and (event_payload.get("assignee") or {}).get("login") == "oz-agent"
+    ):
+        return (event_payload.get("sender") or {}).get("login") or ""
+
+    events = github.list_issue_events(owner, repo, issue_number)
+    matching_events = [
+        event
+        for event in events
+        if event.get("event") == "assigned"
+        and (event.get("assignee") or {}).get("login") == "oz-agent"
+    ]
+    if not matching_events:
+        return (event_payload.get("sender") or {}).get("login") or ""
+
+    matching_events.sort(
+        key=lambda event: parse_datetime(event.get("created_at") or "1970-01-01T00:00:00Z"),
+        reverse=True,
+    )
+    return (matching_events[0].get("actor") or {}).get("login") or ""
+
+
 def upsert_status_comment(
     github: GitHubClient,
     owner: str,
     repo: str,
     issue_number: int,
     *,
+    event_payload: dict[str, Any],
     workflow: str,
     status_line: str,
 ) -> dict[str, Any]:
     metadata = comment_metadata(workflow, issue_number)
-    body = "\n".join([status_line, "", metadata])
     comments = github.list_issue_comments(owner, repo, issue_number)
     existing = next(
         (
@@ -55,11 +115,29 @@ def upsert_status_comment(
         None,
     )
     if existing:
-        updated = github.update_comment(owner, repo, int(existing["id"]), body)
+        updated_body = append_comment_sections(str(existing.get("body") or ""), metadata, [status_line])
+        updated = github.update_comment(owner, repo, int(existing["id"]), updated_body)
         updated["_oz_metadata"] = metadata
+        updated["_oz_created"] = False
         return updated
-    created = github.create_comment(owner, repo, issue_number, body)
+    assigner_login = resolve_oz_assigner_login(
+        github,
+        owner,
+        repo,
+        issue_number,
+        event_payload=event_payload,
+    )
+    initial_sections = [status_line]
+    if assigner_login:
+        initial_sections.insert(0, f"@{assigner_login}")
+    created = github.create_comment(
+        owner,
+        repo,
+        issue_number,
+        build_comment_body("\n\n".join(initial_sections), metadata),
+    )
     created["_oz_metadata"] = metadata
+    created["_oz_created"] = True
     return created
 
 
@@ -73,11 +151,12 @@ def update_status_comment(
     metadata: str,
     session_link: str | None = None,
 ) -> None:
-    lines = [status_line]
+    existing = github.get_comment(owner, repo, comment_id)
+    sections = [status_line]
     if session_link:
-        lines.extend(["", f"Sharing session at: {session_link}"])
-    lines.extend(["", metadata])
-    github.update_comment(owner, repo, comment_id, "\n".join(lines))
+        sections.append(f"Sharing session at: {session_link}")
+    updated_body = append_comment_sections(str(existing.get("body") or ""), metadata, sections)
+    github.update_comment(owner, repo, comment_id, updated_body)
 
 
 def branch_exists(github: GitHubClient, owner: str, repo: str, branch: str) -> bool:

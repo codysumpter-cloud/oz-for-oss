@@ -31,6 +31,7 @@ def main() -> None:
             owner,
             repo,
             issue_number,
+            event_payload=event,
             workflow="create-plan-from-issue",
             status_line="Oz is starting work on an implementation plan for this issue.",
         )
@@ -95,14 +96,14 @@ def main() -> None:
             branch_name,
             created_after=run.created_at - timedelta(minutes=1),
         ):
-            body = "\n".join(
-                [
-                    "I analyzed this issue but did not produce a plan diff.",
-                    "",
-                    metadata,
-                ]
+            update_status_comment(
+                github,
+                owner,
+                repo,
+                comment_id,
+                status_line="I analyzed this issue but did not produce a plan diff.",
+                metadata=metadata,
             )
-            github.update_comment(owner, repo, comment_id, body)
             return
 
         existing_prs = github.list_pulls(owner, repo, state="open", head=f"{owner}:{branch_name}")
@@ -128,17 +129,13 @@ def main() -> None:
                 body=pr_body,
                 draft=False,
             )
-        github.update_comment(
+        update_status_comment(
+            github,
             owner,
             repo,
             comment_id,
-            "\n".join(
-                [
-                    f"I created a plan PR for this issue: {pr['html_url']}",
-                    "",
-                    metadata,
-                ]
-            ),
+            status_line=f"I created a plan PR for this issue: {pr['html_url']}",
+            metadata=metadata,
         )
 
 
