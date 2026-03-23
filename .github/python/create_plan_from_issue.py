@@ -7,6 +7,7 @@ from oz_workflows.env import load_event, repo_parts, repo_slug, workspace, requi
 from oz_workflows.github_api import GitHubClient
 from oz_workflows.helpers import (
     branch_updated_since,
+    build_plan_preview_section,
     org_member_comments_text,
     update_status_comment,
     upsert_status_comment,
@@ -129,12 +130,16 @@ def main() -> None:
                 body=pr_body,
                 draft=False,
             )
+        plan_preview_section = build_plan_preview_section(owner, repo, branch_name, issue_number)
         update_status_comment(
             github,
             owner,
             repo,
             comment_id,
-            status_line=f"I created a plan PR for this issue: {pr['html_url']}",
+            status_line=(
+                f"I created a plan PR for this issue: {pr['html_url']}\n\n"
+                f"{plan_preview_section}"
+            ),
             metadata=metadata,
         )
 

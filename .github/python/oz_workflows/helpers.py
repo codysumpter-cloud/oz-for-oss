@@ -159,6 +159,12 @@ def update_status_comment(
     github.update_comment(owner, repo, comment_id, updated_body)
 
 
+def build_plan_preview_section(owner: str, repo: str, branch_name: str, issue_number: int) -> str:
+    plan_path = f"plans/issue-{issue_number}.md"
+    preview_url = f"https://github.com/{owner}/{repo}/blob/{branch_name}/{plan_path}"
+    return f"Preview generated plan: [{plan_path}]({preview_url})"
+
+
 def branch_exists(github: GitHubClient, owner: str, repo: str, branch: str) -> bool:
     return github.get_ref(owner, repo, f"heads/{branch}") is not None
 
