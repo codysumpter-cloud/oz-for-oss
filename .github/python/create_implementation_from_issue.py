@@ -8,6 +8,7 @@ from oz_workflows.env import load_event, repo_parts, repo_slug, workspace, requi
 from oz_workflows.github_api import GitHubClient
 from oz_workflows.helpers import (
     branch_updated_since,
+    build_next_steps_section,
     org_member_comments_text,
     resolve_plan_context_for_issue,
     update_status_comment,
@@ -64,6 +65,12 @@ def main() -> None:
         comment_id = int(status_comment["id"])
         metadata = status_comment["_oz_metadata"]
         last_session_link = {"value": ""}
+        next_steps_section = build_next_steps_section(
+            [
+                "Review the implementation changes in the PR.",
+                "Complete any manual verification needed for this issue before merging.",
+            ]
+        )
 
         plan_sections = []
         if plan_context["plan_context_source"] == "approved-pr" and selected_plan_pr:
@@ -163,7 +170,8 @@ def main() -> None:
                 owner,
                 repo,
                 issue_number,
-                f"I pushed implementation updates to the linked approved plan PR: {selected_plan_pr['url']}",
+                f"I pushed implementation updates to the linked approved plan PR: {selected_plan_pr['url']}\n\n"
+                f"{next_steps_section}",
             )
             return
 
@@ -195,7 +203,8 @@ def main() -> None:
             owner,
             repo,
             issue_number,
-            f"I created or updated a draft implementation PR for this issue: {pr['html_url']}",
+            f"I created or updated a draft implementation PR for this issue: {pr['html_url']}\n\n"
+            f"{next_steps_section}",
         )
 
 

@@ -165,6 +165,13 @@ def build_plan_preview_section(owner: str, repo: str, branch_name: str, issue_nu
     return f"Preview generated plan: [{plan_path}]({preview_url})"
 
 
+def build_next_steps_section(steps: list[str]) -> str:
+    normalized_steps = [step.strip() for step in steps if step and step.strip()]
+    if not normalized_steps:
+        return ""
+    return "Next steps:\n" + "\n".join(f"- {step}" for step in normalized_steps)
+
+
 def branch_exists(github: GitHubClient, owner: str, repo: str, branch: str) -> bool:
     return github.get_ref(owner, repo, f"heads/{branch}") is not None
 
