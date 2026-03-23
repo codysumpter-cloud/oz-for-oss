@@ -63,7 +63,10 @@ def build_agent_config(
 def skill_spec(skill_name: str) -> str:
     if ":" in skill_name:
         return skill_name
-    return f"{repo_slug()}:{skill_name}"
+    skill_path = skill_name
+    if not skill_path.endswith("SKILL.md"):
+        skill_path = f".agents/skills/{skill_name}/SKILL.md"
+    return f"{repo_slug()}:{skill_path}"
 
 
 def run_agent(
