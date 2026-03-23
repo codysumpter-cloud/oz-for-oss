@@ -21,7 +21,7 @@ If `implementation_plan_context.md` exists, it contains the approved implementat
 4. Run the most relevant validation available in the repository for the files you changed. Prefer existing build, test, lint, or typecheck commands documented in the repository.
 5. Write a concise markdown summary for the workflow to reuse in `implementation_summary.md` at the repository root. Include what changed, how it was validated, and any remaining assumptions or follow-up notes.
 6. Treat `issue_comments.txt`, `implementation_plan_context.md`, and `implementation_summary.md` as temporary workflow files only. Do not include them in the final diff.
-7. Do not stage files, create commits, push branches, open pull requests, or use the GitHub CLI. Another workflow step handles repository publishing after you finish.
+7. Default behavior: do not stage files, create commits, push branches, open pull requests, or use the GitHub CLI. If the prompt explicitly says you are running in a cloud-environment workflow where the caller cannot read your local diff and instructs you to publish a named branch, you may commit and push exactly the requested implementation changes to that branch, but still do not open or update the pull request yourself unless the prompt explicitly asks for it.
 
 ## Output expectations
 

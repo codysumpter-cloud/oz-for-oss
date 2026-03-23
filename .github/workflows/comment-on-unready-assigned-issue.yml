@@ -1,20 +1,16 @@
 name: Comment on Unready Assigned Issue
-
 on:
   issues:
     types: [assigned]
-
 concurrency:
   group: comment-on-unready-assigned-issue-${{ github.event.issue.number }}
   cancel-in-progress: false
-
 jobs:
   comment_when_unready:
     if: github.event.assignee.login == 'oz-agent' && !contains(github.event.issue.labels.*.name, 'ready-to-plan') && !contains(github.event.issue.labels.*.name, 'ready-to-implement')
     runs-on: ubuntu-latest
     permissions:
       issues: write
-
     steps:
       - name: Create GitHub App token
         id: app_token
@@ -22,31 +18,18 @@ jobs:
         with:
           app-id: ${{ secrets.GHA_APP_ID }}
           private-key: ${{ secrets.GHA_PRIVATE_KEY }}
-      - name: Create or update unready assignment comment
-        uses: actions/github-script@v7
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          github-token: ${{ steps.app_token.outputs.token }}
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const issueNumber = context.payload.issue.number;
-            const assigneeLogin = context.payload.assignee?.login || 'oz-agent';
-            const metadata = `<!-- oz-agent-metadata: {"type":"issue-status","workflow":"comment-on-unready-assigned-issue","issue":${issueNumber}} -->`;
-            const body = [
-              'This issue is assigned to Oz, but it is not labeled `ready-to-plan` or `ready-to-implement`, so there is no work to do yet.',
-              '',
-              metadata,
-            ].join('\n');
-            await github.rest.issues.createComment({
-              owner,
-              repo,
-              issue_number: issueNumber,
-              body,
-            });
-
-            await github.rest.issues.removeAssignees({
-              owner,
-              repo,
-              issue_number: issueNumber,
-              assignees: [assigneeLogin],
-            });
+          python-version: '3.11'
+      - name: Install Python workflow dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r .github/python/requirements.txt
+      - name: Run unready-assignment workflow
+        env:
+          PYTHONPATH: .github/python
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+        run: python .github/python/comment_on_unready_assigned_issue.py

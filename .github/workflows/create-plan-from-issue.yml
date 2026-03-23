@@ -1,13 +1,10 @@
 name: Create Plan from Issue
-
 on:
   issues:
     types: [assigned, labeled]
-
 concurrency:
   group: create-plan-issue-${{ github.event.issue.number }}
   cancel-in-progress: false
-
 jobs:
   create_plan:
     if: (github.event.action == 'assigned' && github.event.assignee.login == 'oz-agent' && contains(github.event.issue.labels.*.name, 'ready-to-plan')) || (github.event.action == 'labeled' && github.event.label.name == 'ready-to-plan' && contains(github.event.issue.assignees.*.login, 'oz-agent'))
@@ -18,7 +15,6 @@ jobs:
       id-token: write
       issues: write
       pull-requests: write
-
     steps:
       - name: Create GitHub App token
         id: app_token
@@ -30,15 +26,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ steps.app_token.outputs.token }}
       - name: Authenticate to Google Cloud for staging secret access
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: projects/643991131484/locations/global/workloadIdentityPools/github-actions/providers/warp-terraform
-
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
-
       - name: Resolve staging origin token
         run: |
           STAGING_ORIGIN_TOKEN="$(gcloud --project=warp-server-staging secrets versions access latest --secret=staging-origin-token)"
@@ -48,324 +41,22 @@ jobs:
             printf '%s\n' "$STAGING_ORIGIN_TOKEN"
             echo EOF
           } >> "$GITHUB_ENV"
-
-      - name: Construct prompt
-        id: prompt
-        uses: actions/github-script@v7
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          github-token: ${{ steps.app_token.outputs.token }}
-          script: |
-            const fs = require('fs');
-            const issue = context.payload.issue;
-            const labels = issue.labels.map(label => label.name).join(', ') || 'None';
-            const assignees = issue.assignees.map(assignee => assignee.login).join(', ') || 'None';
-
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issue.number,
-              per_page: 100,
-            });
-
-            const orgMemberComments = comments.filter(comment =>
-              ['MEMBER', 'OWNER'].includes(comment.author_association)
-            );
-
-            let commentsNote = 'There are no previous comments from organization members on this issue.';
-            if (orgMemberComments.length) {
-              const commentsText = orgMemberComments
-                .map(comment => `- ${comment.user?.login || 'unknown'} (${comment.created_at}): ${comment.body}`)
-                .join('\n');
-              fs.writeFileSync('issue_comments.txt', commentsText, 'utf8');
-              commentsNote = 'Previous issue comments from organization members are available in `issue_comments.txt`.';
-            }
-
-            const prompt = `Create a plan-only diff for GitHub Issue #${issue.number}.
-
-            Issue Details:
-            - Title: ${issue.title}
-            - Labels: ${labels}
-            - Assignees: ${assignees}
-            - Description: ${issue.body || 'No description provided.'}
-
-            Previous Issue Comments:
-            - ${commentsNote}
-
-            Additional Instructions:
-            - Use the repository's local \`create-plan\` skill as the base workflow.
-            - Store the resulting plan in the repository's \`plans/\` directory.
-            - Write a concise markdown summary for the eventual pull request body to \`plan_summary.md\` in the repository root.
-            - Research the codebase enough to produce a grounded implementation plan.
-            - Treat \`issue_comments.txt\` and \`plan_summary.md\` as temporary context only and do not include them in committed changes.
-            - Do not implement the feature itself in this run.
-            - Do not create a branch, commit, push, or open a pull request. Only produce the repository diff, the summary file, and a concise summary of the plan.`;
-
-            core.setOutput('prompt', prompt);
-
-      - name: Create or update issue status comment
-        id: status_comment
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ steps.app_token.outputs.token }}
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const issueNumber = context.payload.issue.number;
-            const metadata = `<!-- oz-agent-metadata: {"type":"issue-status","workflow":"create-plan-from-issue","issue":${issueNumber}} -->`;
-            const body = [
-              'Oz is starting work on an implementation plan for this issue.',
-              '',
-              metadata,
-            ].join('\n');
-
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner,
-              repo,
-              issue_number: issueNumber,
-              per_page: 100,
-            });
-
-            const existingComment = comments.find(comment =>
-              typeof comment.body === 'string' && comment.body.includes(metadata)
-            );
-
-            if (existingComment) {
-              await github.rest.issues.updateComment({
-                owner,
-                repo,
-                comment_id: existingComment.id,
-                body,
-              });
-              core.setOutput('comment_id', String(existingComment.id));
-              core.setOutput('metadata', metadata);
-              return;
-            }
-
-            const { data: comment } = await github.rest.issues.createComment({
-              owner,
-              repo,
-              issue_number: issueNumber,
-              body,
-            });
-
-            core.setOutput('comment_id', String(comment.id));
-            core.setOutput('metadata', metadata);
-      - name: Validate Warp API key
-        env:
-          WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
+          python-version: '3.11'
+      - name: Install Python workflow dependencies
         run: |
-          if [ -z "$WARP_API_KEY" ]; then
-            echo "::error::Missing WARP_API_KEY GitHub Actions secret."
-            exit 1
-          fi
-
-          case "$WARP_API_KEY" in
-            wk-*) ;;
-            *)
-              echo "::error::WARP_API_KEY appears malformed. Expected a Warp API key starting with 'wk-'."
-              exit 1
-              ;;
-          esac
-      - name: Determine session sharing recipient
-        id: share
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ steps.app_token.outputs.token }}
-          script: |
-            const sender = context.payload.sender;
-
-            if (!sender?.login) {
-              core.setOutput('recipient', '');
-              return;
-            }
-
-            try {
-              const { data: user } = await github.rest.users.getByUsername({
-                username: sender.login,
-              });
-
-              if (user.email) {
-                core.setOutput('recipient', user.email);
-                return;
-              }
-            } catch (error) {
-              core.warning(`Failed to resolve public email for @${sender.login}: ${error?.message || String(error)}`);
-            }
-
-            if (sender.id) {
-              core.setOutput('recipient', `${sender.id}+${sender.login}@users.noreply.github.com`);
-              return;
-            }
-
-            core.setOutput('recipient', `${sender.login}@users.noreply.github.com`);
-      - name: Run Oz
-        id: agent
-        uses: ./.github/actions/run-oz-agent
+          python -m pip install --upgrade pip
+          python -m pip install -r .github/python/requirements.txt
+      - name: Run create-plan workflow
         env:
+          PYTHONPATH: .github/python
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
-        with:
-          skill: create-plan
-          prompt: ${{ steps.prompt.outputs.prompt }}
-          name: Create plan for issue #${{ github.event.issue.number }}
-          profile: ${{ vars.WARP_AGENT_PROFILE || '' }}
-          output_format: text
-          model: ${{ vars.WARP_AGENT_MODEL || '' }}
-          mcp: ${{ vars.WARP_AGENT_MCP || '' }}
-          share: ${{ steps.share.outputs.recipient }}
-          github_token: ${{ steps.app_token.outputs.token }}
-          comment_id: ${{ steps.status_comment.outputs.comment_id }}
-          status_message: Oz is starting work on an implementation plan for this issue.
-          comment_metadata: ${{ steps.status_comment.outputs.metadata }}
-          warp_api_key: ${{ secrets.WARP_API_KEY }}
-      - name: Prepare plan branch
-        if: success()
-        id: prepare_pr
-        env:
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-        run: |
-          rm -f issue_comments.txt
-
-          if [[ -z $(git status --porcelain -- plans) ]]; then
-            echo "No changes made by Oz."
-            echo "should_create_pr=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          BRANCH_NAME="oz-agent/plan-issue-$ISSUE_NUMBER"
-
-
-          git config user.name "Oz"
-          git config user.email "oz-agent@warp.dev"
-
-          git checkout -B "$BRANCH_NAME"
-          git add plans
-          git commit -m "Add plan for issue #$ISSUE_NUMBER" -m "Co-Authored-By: Oz <oz-agent@warp.dev>"
-          git push origin "$BRANCH_NAME" --force
-          echo "should_create_pr=true" >> "$GITHUB_OUTPUT"
-          echo "branch_name=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
-      - name: Update issue comment when no plan diff is produced
-        if: success() && steps.prepare_pr.outputs.should_create_pr == 'false'
-        uses: actions/github-script@v7
-        env:
-          COMMENT_ID: ${{ steps.status_comment.outputs.comment_id }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          SUMMARY_FILE: plan_summary.md
-        with:
-          github-token: ${{ steps.app_token.outputs.token }}
-          script: |
-            const fs = require('fs');
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const issueNumber = Number(process.env.ISSUE_NUMBER);
-            const commentId = Number(process.env.COMMENT_ID);
-            const summaryFile = process.env.SUMMARY_FILE;
-            const metadata = `<!-- oz-agent-metadata: {"type":"issue-status","workflow":"create-plan-from-issue","issue":${issueNumber}} -->`;
-            const summaryBody = fs.existsSync(summaryFile)
-              ? fs.readFileSync(summaryFile, 'utf8').trim()
-              : '';
-            const body = summaryBody
-              ? [
-                  'I analyzed this issue but did not produce a plan diff.',
-                  '',
-                  summaryBody,
-                  '',
-                  metadata,
-                ].join('\n')
-              : [
-                  'I analyzed this issue but did not produce a plan diff.',
-                  '',
-                  metadata,
-                ].join('\n');
-
-            await github.rest.issues.updateComment({
-              owner,
-              repo,
-              comment_id: commentId,
-              body,
-            });
-
-      - name: Create PR from plan diff
-        if: steps.prepare_pr.outputs.should_create_pr == 'true'
-        id: create_pr
-        uses: actions/github-script@v7
-        env:
-          COMMENT_ID: ${{ steps.status_comment.outputs.comment_id }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          ISSUE_TITLE: ${{ github.event.issue.title }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          BRANCH_NAME: ${{ steps.prepare_pr.outputs.branch_name }}
-          SUMMARY_FILE: plan_summary.md
-        with:
-          github-token: ${{ steps.app_token.outputs.token }}
-          script: |
-            const fs = require('fs');
-            const issueNumber = Number(process.env.ISSUE_NUMBER);
-            const issueTitle = process.env.ISSUE_TITLE;
-            const defaultBranch = process.env.DEFAULT_BRANCH;
-            const branchName = process.env.BRANCH_NAME;
-            const commentId = Number(process.env.COMMENT_ID);
-            const summaryFile = process.env.SUMMARY_FILE;
-            const metadata = `<!-- oz-agent-metadata: {"type":"issue-status","workflow":"create-plan-from-issue","issue":${issueNumber}} -->`;
-            const summaryBody = fs.existsSync(summaryFile)
-              ? fs.readFileSync(summaryFile, 'utf8')
-              : '';
-
-            try {
-              const { data: pr } = await github.rest.pulls.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: `Plan: ${issueTitle}`,
-                head: branchName,
-                base: defaultBranch,
-                body: summaryBody,
-                draft: false,
-              });
-
-              const commentBody = [
-                `I created a plan PR for this issue: ${pr.html_url}`,
-                '',
-                metadata,
-              ].join('\n');
-
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: commentId,
-                body: commentBody,
-              });
-
-              core.setOutput('pr_url', pr.html_url);
-            } catch (error) {
-              const message = error?.message || String(error);
-
-
-              core.setFailed(`Failed to create plan PR: ${message}`);
-            }
-
-      - name: Update issue comment on failure
-        if: failure() && steps.status_comment.outputs.comment_id != ''
-        uses: actions/github-script@v7
-        env:
-          COMMENT_ID: ${{ steps.status_comment.outputs.comment_id }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-        with:
-          github-token: ${{ steps.app_token.outputs.token }}
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const issueNumber = Number(process.env.ISSUE_NUMBER);
-            const commentId = Number(process.env.COMMENT_ID);
-            const metadata = `<!-- oz-agent-metadata: {"type":"issue-status","workflow":"create-plan-from-issue","issue":${issueNumber}} -->`;
-            const body = [
-              'I started working on a plan for this issue, but the workflow failed before completion.',
-              '',
-              metadata,
-            ].join('\n');
-
-            await github.rest.issues.updateComment({
-              owner,
-              repo,
-              comment_id: commentId,
-              body,
-            });
-
+          WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
+          WARP_AGENT_PROFILE: ${{ vars.WARP_AGENT_PROFILE || '' }}
+          WARP_AGENT_MODEL: ${{ vars.WARP_AGENT_MODEL || '' }}
+          WARP_AGENT_MCP: ${{ vars.WARP_AGENT_MCP || '' }}
+          WARP_AGENT_ENVIRONMENT_ID: ${{ vars.WARP_AGENT_ENVIRONMENT_ID || '' }}
+          WARP_AGENT_PLAN_ENVIRONMENT_ID: ${{ vars.WARP_AGENT_PLAN_ENVIRONMENT_ID || '' }}
+        run: python .github/python/create_plan_from_issue.py

@@ -30,74 +30,29 @@ jobs:
       focus: ${{ steps.resolve.outputs.focus }}
       comment_id: ${{ steps.resolve.outputs.comment_id }}
     steps:
-      - name: Create GitHub App token
-        id: app_token
-        uses: actions/create-github-app-token@v3
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          app-id: ${{ secrets.GHA_APP_ID }}
-          private-key: ${{ secrets.GHA_PRIVATE_KEY }}
+          python-version: '3.11'
+      - name: Install Python workflow dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r .github/python/requirements.txt
       - name: Resolve review context
         id: resolve
-        uses: actions/github-script@v7
         env:
+          PYTHONPATH: .github/python
           DISPATCH_PR_NUMBER: ${{ inputs.pr_number || '' }}
           DISPATCH_FOCUS: ${{ inputs.focus || '' }}
-        with:
-          github-token: ${{ steps.app_token.outputs.token }}
-          script: |
-            const slashCommandPattern = /(?:^|\s)\/oz-review\b([\s\S]*)/i;
-            const allowedAssociations = new Set(['MEMBER', 'OWNER']);
-
-            let shouldReview = false;
-            let prNumber = 0;
-            let triggerSource = context.eventName;
-            let requester = context.actor;
-            let focus = '';
-            let commentId = '';
-
-            if (context.eventName === 'workflow_dispatch') {
-              prNumber = Number(process.env.DISPATCH_PR_NUMBER || '0');
-              focus = (process.env.DISPATCH_FOCUS || '').trim();
-              shouldReview = Number.isInteger(prNumber) && prNumber > 0;
-            } else if (context.eventName === 'issue_comment') {
-              const issue = context.payload.issue;
-              const comment = context.payload.comment;
-              const body = comment.body || '';
-              const match = body.match(slashCommandPattern);
-              const association = comment.author_association || '';
-
-              prNumber = issue.number;
-              requester = comment.user?.login || context.actor;
-              commentId = String(comment.id || '');
-              if (match) {
-                focus = match[1].trim();
-              }
-
-              shouldReview =
-                Boolean(issue.pull_request) &&
-                Boolean(match) &&
-                allowedAssociations.has(association) &&
-                context.actor !== 'github-actions[bot]';
-            }
-
-            core.setOutput('should_review', shouldReview ? 'true' : 'false');
-            core.setOutput('pr_number', shouldReview ? String(prNumber) : '');
-            core.setOutput('trigger_source', triggerSource);
-            core.setOutput('requester', requester);
-            core.setOutput('focus', focus);
-            core.setOutput('comment_id', commentId);
-
-            if (!shouldReview) {
-              core.notice('PR review orchestration skipped after context resolution.');
-            }
-
+        run: python .github/python/resolve_review_context.py
   enforce_issue_state:
     if: github.event_name == 'pull_request_target' && github.event.pull_request.state == 'open'
     uses: ./.github/workflows/enforce-pr-issue-state.yml
     with:
       pr_number: ${{ github.event.pull_request.number }}
     secrets: inherit
-
   review_pr_after_enforcement:
     needs: [enforce_issue_state]
     if: >-
@@ -111,7 +66,6 @@ jobs:
       trigger_source: pull_request_target
       requester: ${{ github.actor }}
     secrets: inherit
-
   review_pr_on_demand:
     needs: [resolve_review_context]
     if: >-

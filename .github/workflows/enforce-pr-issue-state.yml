@@ -27,7 +27,7 @@ jobs:
       issues: write
       pull-requests: write
     outputs:
-      allow_review: ${{ steps.finalize.outputs.allow_review }}
+      allow_review: ${{ steps.run_enforcement.outputs.allow_review }}
     steps:
       - name: Create GitHub App token
         id: app_token
@@ -37,179 +37,13 @@ jobs:
           private-key: ${{ secrets.GHA_PRIVATE_KEY }}
       - name: Checkout repo
         uses: actions/checkout@v4
-        with:
-          token: ${{ steps.app_token.outputs.token }}
-
-      - name: Prepare enforcement context
-        id: context
-        uses: actions/github-script@v7
-        env:
-          PR_NUMBER: ${{ inputs.pr_number }}
-        with:
-          github-token: ${{ steps.app_token.outputs.token }}
-          script: |
-            const fs = require('fs');
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const prNumber = Number(process.env.PR_NUMBER || '0');
-
-            if (!Number.isInteger(prNumber) || prNumber <= 0) {
-              core.setFailed(`Invalid pull request number: ${process.env.PR_NUMBER || '<empty>'}`);
-              return;
-            }
-
-            const { data: pr } = await github.rest.pulls.get({
-              owner,
-              repo,
-              pull_number: prNumber,
-            });
-
-            if (pr.state !== 'open') {
-              core.notice(`Skipping enforcement because pull request #${pr.number} is ${pr.state}.`);
-              core.setOutput('mode', 'close');
-              core.setOutput('close_comment', '');
-              return;
-            }
-
-            const files = await github.paginate(github.rest.pulls.listFiles, {
-              owner,
-              repo,
-              pull_number: pr.number,
-              per_page: 100,
-            });
-
-            const changedFiles = files.map(file => file.filename);
-            const nonMarkdownFiles = changedFiles.filter(filename => !filename.toLowerCase().endsWith('.md'));
-            const hasCodeChanges = nonMarkdownFiles.length > 0;
-            const changeKind = hasCodeChanges ? 'implementation' : 'plan';
-            const requiredLabel = hasCodeChanges ? 'ready-to-implement' : 'ready-to-plan';
-            const contributionDocsUrl = `https://github.com/${owner}/${repo}/blob/main/CONTRIBUTING.md`;
-
-            const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const sameRepoIssueUrlPattern = new RegExp(
-              `https://github\\.com/${escapeRegex(owner)}/${escapeRegex(repo)}/issues/(\\d+)`,
-              'gi',
-            );
-            const explicitIssuePatterns = [
-              /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?|implements?|issue)\s*:?\s+#(\d+)/gi,
-              sameRepoIssueUrlPattern,
-            ];
-            const explicitIssueNumbers = [...new Set(explicitIssuePatterns.flatMap(pattern =>
-              [...(pr.body || '').matchAll(pattern)]
-                .map(match => Number(match[1]))
-                .filter(value => Number.isInteger(value) && value > 0)
-            ))];
-
-            let explicitIssue = null;
-            for (const issueNumber of explicitIssueNumbers) {
-              try {
-                const { data: issue } = await github.rest.issues.get({
-                  owner,
-                  repo,
-                  issue_number: issueNumber,
-                });
-
-                if (!issue.pull_request) {
-                  explicitIssue = issue;
-                  break;
-                }
-              } catch (error) {
-                core.info(`Skipping explicit issue candidate #${issueNumber}: ${error?.message || String(error)}`);
-              }
-            }
-
-            if (explicitIssue) {
-              const labels = explicitIssue.labels
-                .map(label => typeof label === 'string' ? label : label.name)
-                .filter(Boolean);
-
-              if (labels.includes(requiredLabel)) {
-                core.info(`PR #${pr.number} passed issue-state enforcement via explicit issue #${explicitIssue.number}.`);
-                core.setOutput('mode', 'allow');
-                core.setOutput('close_comment', '');
-                return;
-              }
-
-              const closeComment = hasCodeChanges
-                ? `The PR that you've opened seems to contain code changes and is associated with issue #${explicitIssue.number}, which is not marked as \`${requiredLabel}\`. This PR will be automatically closed. Please see our [contribution docs](${contributionDocsUrl}) for guidance on when code changes are accepted for issues.`
-                : `The PR that you've opened seems to contain plan changes and is associated with issue #${explicitIssue.number}, which is not marked as \`${requiredLabel}\`. This PR will be automatically closed. Please see our [contribution docs](${contributionDocsUrl}) for guidance on when plan changes are accepted for issues.`;
-
-              core.setOutput('mode', 'close');
-              core.setOutput('close_comment', closeComment);
-              return;
-            }
-
-            const readyIssues = await github.paginate(github.rest.issues.listForRepo, {
-              owner,
-              repo,
-              state: 'open',
-              labels: requiredLabel,
-              per_page: 100,
-            });
-
-            const candidateIssues = readyIssues
-              .filter(issue => !issue.pull_request)
-              .map(issue => ({
-                number: issue.number,
-                title: issue.title,
-                body: issue.body || '',
-                url: issue.html_url,
-                labels: issue.labels
-                  .map(label => typeof label === 'string' ? label : label.name)
-                  .filter(Boolean),
-              }));
-
-            const prContext = [
-              `PR #${pr.number}`,
-              `Title: ${pr.title}`,
-              `Branch: ${pr.head.ref}`,
-              `Change kind: ${changeKind}`,
-              `Required issue label: ${requiredLabel}`,
-              '',
-              'PR body:',
-              pr.body || 'No description provided.',
-              '',
-              'Changed files:',
-              ...(changedFiles.length ? changedFiles.map(file => `- ${file}`) : ['- No changed files found.']),
-            ].join('\n');
-
-            fs.writeFileSync('pr_context.md', `${prContext}\n`, 'utf8');
-            fs.writeFileSync('ready_issues.json', `${JSON.stringify(candidateIssues, null, 2)}\n`, 'utf8');
-
-            const agentPrompt = `Determine whether pull request #${pr.number} is clearly associated with one of the issues in \`ready_issues.json\`.
-
-            Available files:
-            - Read \`pr_context.md\` for the pull request title, body, branch name, change classification, and changed files.
-            - Read \`ready_issues.json\` for the candidate issues already filtered to the required label \`${requiredLabel}\`.
-
-            Instructions:
-            - Only choose an issue when the association is clear from the PR title, PR body, branch name, or changed files.
-            - If no issue is a clear match, return no match.
-            - Write your decision to \`pr_issue_association.json\` with this exact JSON shape:
-              {
-                "matched": boolean,
-                "issue_number": number | null,
-                "rationale": string,
-                "close_comment": string
-              }
-            - If \`matched\` is false, set \`close_comment\` to a concise PR comment explaining that this ${changeKind} PR could not be matched to an issue marked \`${requiredLabel}\` and include this contribution docs link: ${contributionDocsUrl}
-            - Do not modify any other files.`;
-
-            core.setOutput('mode', 'agent');
-            core.setOutput('close_comment', '');
-            core.setOutput('agent_prompt', agentPrompt);
       - name: Authenticate to Google Cloud for staging secret access
-        if: steps.context.outputs.mode == 'agent'
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: projects/643991131484/locations/global/workloadIdentityPools/github-actions/providers/warp-terraform
-
       - name: Set up Cloud SDK
-        if: steps.context.outputs.mode == 'agent'
         uses: google-github-actions/setup-gcloud@v2
-
       - name: Resolve staging origin token
-        if: steps.context.outputs.mode == 'agent'
         run: |
           STAGING_ORIGIN_TOKEN="$(gcloud --project=warp-server-staging secrets versions access latest --secret=staging-origin-token)"
           echo "::add-mask::$STAGING_ORIGIN_TOKEN"
@@ -218,117 +52,24 @@ jobs:
             printf '%s\n' "$STAGING_ORIGIN_TOKEN"
             echo EOF
           } >> "$GITHUB_ENV"
-
-      - name: Validate Warp API key
-        if: steps.context.outputs.mode == 'agent'
-        env:
-          WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Python workflow dependencies
         run: |
-          if [ -z "$WARP_API_KEY" ]; then
-            echo "::error::Missing WARP_API_KEY GitHub Actions secret."
-            exit 1
-          fi
-
-          case "$WARP_API_KEY" in
-            wk-*) ;;
-            *)
-              echo "::error::WARP_API_KEY appears malformed. Expected a Warp API key starting with 'wk-'."
-              exit 1
-              ;;
-          esac
-
-      - name: Run Oz association check
-        if: steps.context.outputs.mode == 'agent'
-        uses: warpdotdev/oz-agent-action@v1
+          python -m pip install --upgrade pip
+          python -m pip install -r .github/python/requirements.txt
+      - name: Run PR issue-state enforcement
+        id: run_enforcement
         env:
+          PYTHONPATH: .github/python
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
-        with:
-          prompt: ${{ steps.context.outputs.agent_prompt }}
-          name: Associate PR #${{ inputs.pr_number }} with ready issue
-          profile: ${{ vars.WARP_AGENT_PROFILE || '' }}
-          output_format: text
-          model: ${{ vars.WARP_AGENT_MODEL || '' }}
-          mcp: ${{ vars.WARP_AGENT_MCP || '' }}
-          warp_api_key: ${{ secrets.WARP_API_KEY }}
-
-      - name: Finalize enforcement result
-        id: finalize
-        uses: actions/github-script@v7
-        env:
           PR_NUMBER: ${{ inputs.pr_number }}
-          MODE: ${{ steps.context.outputs.mode }}
-          DIRECT_CLOSE_COMMENT: ${{ steps.context.outputs.close_comment }}
-        with:
-          github-token: ${{ steps.app_token.outputs.token }}
-          script: |
-            const fs = require('fs');
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const prNumber = Number(process.env.PR_NUMBER || '0');
-            const mode = process.env.MODE;
-
-            if (mode === 'allow') {
-              core.setOutput('allow_review', 'true');
-              return;
-            }
-
-            let closeComment = process.env.DIRECT_CLOSE_COMMENT || '';
-
-            if (mode === 'agent') {
-              if (!fs.existsSync('pr_issue_association.json')) {
-                core.setFailed('Oz did not produce pr_issue_association.json.');
-                return;
-              }
-
-              const raw = fs.readFileSync('pr_issue_association.json', 'utf8');
-              let result;
-
-              try {
-                result = JSON.parse(raw);
-              } catch (error) {
-                core.setFailed(`Failed to parse pr_issue_association.json: ${error.message}`);
-                return;
-              }
-
-              if (result.matched === true && Number.isInteger(result.issue_number) && result.issue_number > 0) {
-                core.info(`PR #${prNumber} passed issue-state enforcement via Oz match to issue #${result.issue_number}.`);
-                core.setOutput('allow_review', 'true');
-                return;
-              }
-
-              closeComment = typeof result.close_comment === 'string' ? result.close_comment.trim() : '';
-              if (!closeComment) {
-                core.setFailed('Oz returned no match without a close_comment.');
-                return;
-              }
-            }
-
-            const { data: pr } = await github.rest.pulls.get({
-              owner,
-              repo,
-              pull_number: prNumber,
-            });
-
-            if (pr.state !== 'open') {
-              core.notice(`PR #${pr.number} is already ${pr.state}; skipping close action.`);
-              core.setOutput('allow_review', 'false');
-              return;
-            }
-
-            if (closeComment) {
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: pr.number,
-                body: closeComment,
-              });
-            }
-
-            await github.rest.pulls.update({
-              owner,
-              repo,
-              pull_number: pr.number,
-              state: 'closed',
-            });
-
-            core.setOutput('allow_review', 'false');
+          WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
+          WARP_AGENT_PROFILE: ${{ vars.WARP_AGENT_PROFILE || '' }}
+          WARP_AGENT_MODEL: ${{ vars.WARP_AGENT_MODEL || '' }}
+          WARP_AGENT_MCP: ${{ vars.WARP_AGENT_MCP || '' }}
+          WARP_AGENT_ENVIRONMENT_ID: ${{ vars.WARP_AGENT_ENVIRONMENT_ID || '' }}
+          WARP_AGENT_ENFORCEMENT_ENVIRONMENT_ID: ${{ vars.WARP_AGENT_ENFORCEMENT_ENVIRONMENT_ID || '' }}
+        run: python .github/python/enforce_pr_issue_state.py
