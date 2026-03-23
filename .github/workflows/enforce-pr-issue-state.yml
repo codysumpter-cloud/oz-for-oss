@@ -23,6 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
       issues: write
       pull-requests: write
     outputs:
@@ -197,6 +198,26 @@ jobs:
             core.setOutput('mode', 'agent');
             core.setOutput('close_comment', '');
             core.setOutput('agent_prompt', agentPrompt);
+      - name: Authenticate to Google Cloud for staging secret access
+        if: steps.context.outputs.mode == 'agent'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/643991131484/locations/global/workloadIdentityPools/github-actions/providers/warp-terraform
+
+      - name: Set up Cloud SDK
+        if: steps.context.outputs.mode == 'agent'
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve staging origin token
+        if: steps.context.outputs.mode == 'agent'
+        run: |
+          STAGING_ORIGIN_TOKEN="$(gcloud --project=warp-server-staging secrets versions access latest --secret=staging-origin-token)"
+          echo "::add-mask::$STAGING_ORIGIN_TOKEN"
+          {
+            echo 'STAGING_ORIGIN_TOKEN<<EOF'
+            printf '%s\n' "$STAGING_ORIGIN_TOKEN"
+            echo EOF
+          } >> "$GITHUB_ENV"
 
       - name: Validate Warp API key
         if: steps.context.outputs.mode == 'agent'

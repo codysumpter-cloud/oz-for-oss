@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
       issues: write
       pull-requests: write
 
@@ -160,6 +161,26 @@ jobs:
             core.setOutput('plan_file_paths_json', JSON.stringify(planFiles));
             core.setOutput('should_noop', shouldNoop ? 'true' : 'false');
             core.setOutput('noop_reason', noopReason);
+      - name: Authenticate to Google Cloud for staging secret access
+        if: steps.context.outputs.should_noop != 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/643991131484/locations/global/workloadIdentityPools/github-actions/providers/warp-terraform
+
+      - name: Set up Cloud SDK
+        if: steps.context.outputs.should_noop != 'true'
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve staging origin token
+        if: steps.context.outputs.should_noop != 'true'
+        run: |
+          STAGING_ORIGIN_TOKEN="$(gcloud --project=warp-server-staging secrets versions access latest --secret=staging-origin-token)"
+          echo "::add-mask::$STAGING_ORIGIN_TOKEN"
+          {
+            echo 'STAGING_ORIGIN_TOKEN<<EOF'
+            printf '%s\n' "$STAGING_ORIGIN_TOKEN"
+            echo EOF
+          } >> "$GITHUB_ENV"
       - name: Comment on issue status
         if: steps.context.outputs.should_noop != 'true'
         id: status_comment
