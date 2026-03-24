@@ -11,6 +11,17 @@ import {
   listOverdue,
   clearCompleted,
   showHelp,
+  listPending,
+  listCompleted,
+  listSorted,
+  listToday,
+  listUpcoming,
+  addSubtask,
+  completeSubtask,
+  listSubtasks,
+  archiveCompleted,
+  listArchived,
+  restoreFromArchive,
 } from "./app";
 import { Priority } from "./types";
 
@@ -31,9 +42,24 @@ switch (command) {
   }
 
   case "list":
-  case "ls":
-    listTodos();
+  case "ls": {
+    if (args.includes("--pending")) {
+      listPending();
+    } else if (args.includes("--completed")) {
+      listCompleted();
+    } else if (args.includes("--sort")) {
+      const sortIdx = args.indexOf("--sort");
+      const sortField = args[sortIdx + 1];
+      if (!sortField) {
+        console.log("Please provide a sort field: due, priority, or created.");
+        process.exit(1);
+      }
+      listSorted(sortField);
+    } else {
+      listTodos();
+    }
     break;
+  }
 
   case "complete":
   case "done": {
@@ -107,6 +133,71 @@ switch (command) {
   case "clear":
     clearCompleted();
     break;
+
+  case "today":
+    listToday();
+    break;
+
+  case "upcoming":
+    listUpcoming();
+    break;
+
+  case "subtask": {
+    const subCmd = args[1]?.toLowerCase();
+    switch (subCmd) {
+      case "add": {
+        const num = parseInt(args[2], 10);
+        const text = args.slice(3).join(" ");
+        if (isNaN(num) || !text) {
+          console.log('Usage: todo subtask add <number> <text>');
+          process.exit(1);
+        }
+        addSubtask(num, text);
+        break;
+      }
+      case "done": {
+        const num = parseInt(args[2], 10);
+        const sid = parseInt(args[3], 10);
+        if (isNaN(num) || isNaN(sid)) {
+          console.log('Usage: todo subtask done <number> <subtask_id>');
+          process.exit(1);
+        }
+        completeSubtask(num, sid);
+        break;
+      }
+      case "list": {
+        const num = parseInt(args[2], 10);
+        if (isNaN(num)) {
+          console.log('Usage: todo subtask list <number>');
+          process.exit(1);
+        }
+        listSubtasks(num);
+        break;
+      }
+      default:
+        console.log('Usage: todo subtask <add|done|list> ...');
+        break;
+    }
+    break;
+  }
+
+  case "archive":
+    archiveCompleted();
+    break;
+
+  case "archived":
+    listArchived();
+    break;
+
+  case "restore": {
+    const id = parseInt(args[1], 10);
+    if (isNaN(id)) {
+      console.log("Please provide an archived todo id. Example: todo restore 3");
+      process.exit(1);
+    }
+    restoreFromArchive(id);
+    break;
+  }
 
   case "search":
   case "find": {
