@@ -15,11 +15,16 @@ def parse_datetime(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
 
 
-def org_member_comments_text(comments: list[dict[str, Any]]) -> str:
+def org_member_comments_text(
+    comments: list[dict[str, Any]],
+    *,
+    exclude_comment_id: int | None = None,
+) -> str:
     selected = [
         comment
         for comment in comments
         if comment.get("author_association") in {"MEMBER", "OWNER"}
+        and int(comment.get("id") or 0) != exclude_comment_id
     ]
     if not selected:
         return ""
@@ -27,6 +32,17 @@ def org_member_comments_text(comments: list[dict[str, Any]]) -> str:
         f"- {comment.get('user', {}).get('login') or 'unknown'} ({comment.get('created_at')}): {comment.get('body') or ''}"
         for comment in selected
     )
+
+
+def triggering_comment_prompt_text(event_payload: dict[str, Any]) -> str:
+    comment = event_payload.get("comment")
+    if not isinstance(comment, dict):
+        return ""
+    body = str(comment.get("body") or "").strip()
+    if not body:
+        return ""
+    author_login = (comment.get("user") or {}).get("login") or (event_payload.get("sender") or {}).get("login") or "unknown"
+    return f"@{author_login} commented:\n{body}"
 
 
 def comment_metadata(workflow: str, issue_number: int) -> str:

@@ -11,6 +11,7 @@ from oz_workflows.helpers import (
     build_next_steps_section,
     org_member_comments_text,
     resolve_plan_context_for_issue,
+    triggering_comment_prompt_text,
     update_status_comment,
     upsert_status_comment,
 )
@@ -24,10 +25,13 @@ def main() -> None:
     issue_number = int(issue["number"])
     issue_title = issue["title"]
     default_branch = event["repository"]["default_branch"]
+    triggering_comment_id = int((event.get("comment") or {}).get("id") or 0) or None
 
     with GitHubClient(require_env("GH_TOKEN"), repo_slug()) as github:
+        github.add_assignees(owner, repo, issue_number, ["oz-agent"])
         comments = github.list_issue_comments(owner, repo, issue_number)
-        comments_text = org_member_comments_text(comments)
+        comments_text = org_member_comments_text(comments, exclude_comment_id=triggering_comment_id)
+        triggering_comment_text = triggering_comment_prompt_text(event)
         plan_context = resolve_plan_context_for_issue(
             github,
             owner,
@@ -95,6 +99,9 @@ def main() -> None:
 
             Previous Issue Comments From Organization Members:
             {comments_text or "- None"}
+
+            Explicit Triggering Comment:
+            {triggering_comment_text or "- None"}
 
             Plan Context:
             {plan_context_text}

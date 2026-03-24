@@ -10,6 +10,7 @@ from oz_workflows.helpers import (
     build_next_steps_section,
     build_plan_preview_section,
     org_member_comments_text,
+    triggering_comment_prompt_text,
     update_status_comment,
     upsert_status_comment,
 )
@@ -24,10 +25,13 @@ def main() -> None:
     issue_title = issue["title"]
     default_branch = event["repository"]["default_branch"]
     branch_name = f"oz-agent/plan-issue-{issue_number}"
+    triggering_comment_id = int((event.get("comment") or {}).get("id") or 0) or None
 
     with GitHubClient(require_env("GH_TOKEN"), repo_slug()) as github:
+        github.add_assignees(owner, repo, issue_number, ["oz-agent"])
         comments = github.list_issue_comments(owner, repo, issue_number)
-        comments_text = org_member_comments_text(comments)
+        comments_text = org_member_comments_text(comments, exclude_comment_id=triggering_comment_id)
+        triggering_comment_text = triggering_comment_prompt_text(event)
         status_comment = upsert_status_comment(
             github,
             owner,
@@ -53,6 +57,9 @@ def main() -> None:
 
             Previous Issue Comments From Organization Members:
             {comments_text or "- None"}
+
+            Explicit Triggering Comment:
+            {triggering_comment_text or "- None"}
 
             Cloud Workflow Requirements:
             - Use the repository's local `create-plan` skill as the base workflow.

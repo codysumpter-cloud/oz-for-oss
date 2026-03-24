@@ -2,12 +2,14 @@ name: Create Implementation from Issue
 on:
   issues:
     types: [assigned, labeled]
+  issue_comment:
+    types: [created]
 concurrency:
   group: create-implementation-issue-${{ github.event.issue.number }}
   cancel-in-progress: false
 jobs:
   create_implementation:
-    if: (github.event.action == 'assigned' && github.event.assignee.login == 'oz-agent' && contains(github.event.issue.labels.*.name, 'ready-to-implement')) || (github.event.action == 'labeled' && github.event.label.name == 'ready-to-implement' && contains(github.event.issue.assignees.*.login, 'oz-agent'))
+    if: (github.event_name == 'issues' && github.event.action == 'assigned' && github.event.assignee.login == 'oz-agent' && contains(github.event.issue.labels.*.name, 'ready-to-implement')) || (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'ready-to-implement' && contains(github.event.issue.assignees.*.login, 'oz-agent')) || (github.event_name == 'issue_comment' && !github.event.issue.pull_request && contains(github.event.issue.labels.*.name, 'ready-to-implement') && contains(github.event.comment.body, '@oz-agent') && (github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'OWNER'))
     name: Create implementation diff
     runs-on: ubuntu-latest
     permissions:

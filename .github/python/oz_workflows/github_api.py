@@ -131,6 +131,19 @@ class GitHubClient:
             json_body={"assignees": assignees},
         )
 
+    def add_assignees(
+        self,
+        owner: str,
+        repo: str,
+        issue_number: int,
+        assignees: list[str],
+    ) -> dict[str, Any]:
+        return self.request(
+            "POST",
+            f"/repos/{owner}/{repo}/issues/{issue_number}/assignees",
+            json_body={"assignees": assignees},
+        )
+
     def get_user(self, username: str) -> dict[str, Any] | None:
         return self.request_or_none("GET", f"/users/{username}")
 
