@@ -4,6 +4,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from triage_new_issues import format_issue_comments, resolve_issue_number_override
 
 from oz_workflows.triage import (
     ORIGINAL_REPORT_END,
@@ -101,6 +102,42 @@ class PreservedOriginalReportTest(unittest.TestCase):
         self.assertIn(ORIGINAL_REPORT_END, updated)
         self.assertIn("<summary>Original issue report</summary>", updated)
         self.assertIn("Original report text", updated)
+class ResolveIssueNumberOverrideTest(unittest.TestCase):
+    def test_uses_issue_number_from_issue_comment_event(self) -> None:
+        self.assertEqual(
+            resolve_issue_number_override("issue_comment", {"issue": {"number": 42}}),
+            "42",
+        )
+
+    def test_uses_issue_number_from_issue_opened_event(self) -> None:
+        self.assertEqual(
+            resolve_issue_number_override("issues", {"issue": {"number": 84}}),
+            "84",
+        )
+
+
+class FormatIssueCommentsTest(unittest.TestCase):
+    def test_can_exclude_triggering_comment(self) -> None:
+        rendered = format_issue_comments(
+            [
+                {
+                    "id": 1,
+                    "author_association": "MEMBER",
+                    "created_at": "2026-03-24T00:00:00Z",
+                    "body": "Earlier context",
+                    "user": {"login": "alice"},
+                },
+                {
+                    "id": 2,
+                    "author_association": "MEMBER",
+                    "created_at": "2026-03-24T01:00:00Z",
+                    "body": "@oz-agent focus on repro",
+                    "user": {"login": "alice"},
+                },
+            ],
+            exclude_comment_id=2,
+        )
+        self.assertEqual(rendered, "- @alice [MEMBER] (2026-03-24T00:00:00Z): Earlier context")
 
 
 if __name__ == "__main__":
