@@ -8,7 +8,11 @@ from typing import Any
 from oz_workflows.actions import append_summary, warning
 from oz_workflows.env import load_event, optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.github_api import GitHubClient
-from oz_workflows.helpers import triggering_comment_prompt_text
+from oz_workflows.helpers import (
+    triggering_comment_prompt_text,
+    update_status_comment,
+    upsert_status_comment,
+)
 from oz_workflows.oz_client import build_agent_config, run_agent
 from oz_workflows.transport import new_transport_token, poll_for_transport_payload
 from oz_workflows.triage import (
@@ -123,6 +127,18 @@ def process_issue(
 ) -> None:
     issue_number = int(issue["number"])
     template_context = discover_issue_templates(workspace())
+    status_comment = upsert_status_comment(
+        github,
+        owner,
+        repo,
+        issue_number,
+        event_payload={},
+        workflow=WORKFLOW_NAME,
+        status_line="Oz has started triaging this issue.",
+    )
+    comment_id = int(status_comment["id"])
+    metadata = status_comment["_oz_metadata"]
+    last_session_link = {"value": ""}
     comments = github.list_issue_comments(owner, repo, issue_number)
     comments_text = format_issue_comments(comments, exclude_comment_id=triggering_comment_id)
     current_body = str(issue.get("body") or "").strip()
@@ -194,11 +210,29 @@ def process_issue(
         """
     ).strip()
 
-    run_agent(
+    run = run_agent(
         prompt=prompt,
         skill_name="triage-issue",
         title=f"Triage issue #{issue_number}",
         config=agent_config,
+        on_poll=lambda current_run: _on_poll(
+            github,
+            owner,
+            repo,
+            comment_id,
+            metadata,
+            last_session_link,
+            current_run,
+        ),
+    )
+    _on_poll(
+        github,
+        owner,
+        repo,
+        comment_id,
+        metadata,
+        last_session_link,
+        run,
     )
     payload, transport_comment_id = poll_for_transport_payload(
         github,
@@ -299,6 +333,29 @@ def extract_requested_labels(result: dict[str, Any]) -> list[str]:
     if not isinstance(raw_labels, list):
         return []
     return dedupe_strings(raw_labels)
+
+def _on_poll(
+    github: GitHubClient,
+    owner: str,
+    repo: str,
+    comment_id: int,
+    metadata: str,
+    last_session_link: dict[str, str],
+    run: object,
+) -> None:
+    session_link = getattr(run, "session_link", None) or ""
+    if not session_link or session_link == last_session_link["value"]:
+        return
+    update_status_comment(
+        github,
+        owner,
+        repo,
+        comment_id,
+        status_line="Oz has started triaging this issue.",
+        metadata=metadata,
+        session_link=session_link,
+    )
+    last_session_link["value"] = session_link
 
 
 def format_issue_comments(
