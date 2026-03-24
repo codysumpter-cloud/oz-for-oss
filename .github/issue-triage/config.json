@@ -1,0 +1,95 @@
+{
+  "labels": {
+    "triaged": {
+      "color": "0E8A16",
+      "description": "Initial Oz triage has been completed for this issue"
+    },
+    "bug": {
+      "color": "D73A4A",
+      "description": "Something is not working as expected"
+    },
+    "enhancement": {
+      "color": "A2EEEF",
+      "description": "New capability or improvement request"
+    },
+    "documentation": {
+      "color": "0075CA",
+      "description": "Documentation or guidance update"
+    },
+    "needs-info": {
+      "color": "D93F0B",
+      "description": "The issue needs more information before it can be triaged confidently"
+    },
+    "repro:high": {
+      "color": "B60205",
+      "description": "The report looks highly reproducible from the available information"
+    },
+    "repro:medium": {
+      "color": "FBCA04",
+      "description": "The report looks partially reproducible but has some uncertainty"
+    },
+    "repro:low": {
+      "color": "0E8A16",
+      "description": "The report looks difficult to reproduce from the available information"
+    },
+    "repro:unknown": {
+      "color": "CFD3D7",
+      "description": "There is not enough information to estimate reproducibility"
+    },
+    "area:cli": {
+      "color": "5319E7",
+      "description": "The command-line todo application behavior"
+    },
+    "area:data": {
+      "color": "1D76DB",
+      "description": "Todo persistence, file storage, or data modeling"
+    },
+    "area:workflow": {
+      "color": "7057FF",
+      "description": "GitHub workflows, automation, or Oz integration"
+    }
+  },
+  "stakeholders": [
+    {
+      "name": "CLI maintainers",
+      "path_prefixes": [
+        "src/"
+      ],
+      "experts": [
+        "captainsafia"
+      ],
+      "default_labels": [
+        "area:cli",
+        "area:data"
+      ]
+    },
+    {
+      "name": "Workflow maintainers",
+      "path_prefixes": [
+        ".github/"
+      ],
+      "experts": [
+        "captainsafia"
+      ],
+      "default_labels": [
+        "area:workflow"
+      ]
+    },
+    {
+      "name": "Documentation maintainers",
+      "path_prefixes": [
+        "README.md",
+        "CONTRIBUTING.md"
+      ],
+      "experts": [
+        "captainsafia"
+      ],
+      "default_labels": [
+        "documentation"
+      ]
+    }
+  ],
+  "default_experts": [
+    "captainsafia"
+  ]
+}

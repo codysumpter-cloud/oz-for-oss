@@ -175,6 +175,40 @@ class GitHubClient:
         if labels:
             params["labels"] = labels
         return self.paginate(f"/repos/{owner}/{repo}/issues", params=params)
+    def update_issue(self, owner: str, repo: str, issue_number: int, **fields: Any) -> dict[str, Any]:
+        return self.request(
+            "PATCH",
+            f"/repos/{owner}/{repo}/issues/{issue_number}",
+            json_body=fields,
+        )
+
+    def add_labels(self, owner: str, repo: str, issue_number: int, labels: list[str]) -> list[dict[str, Any]]:
+        return self.request(
+            "POST",
+            f"/repos/{owner}/{repo}/issues/{issue_number}/labels",
+            json_body={"labels": labels},
+        )
+
+    def list_repo_labels(self, owner: str, repo: str) -> list[dict[str, Any]]:
+        return self.paginate(f"/repos/{owner}/{repo}/labels")
+
+    def create_label(
+        self,
+        owner: str,
+        repo: str,
+        *,
+        name: str,
+        color: str,
+        description: str = "",
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"name": name, "color": color}
+        if description:
+            payload["description"] = description
+        return self.request(
+            "POST",
+            f"/repos/{owner}/{repo}/labels",
+            json_body=payload,
+        )
 
     def get_contents_text(self, owner: str, repo: str, path: str, *, ref: str) -> str | None:
         response = self.request_or_none(

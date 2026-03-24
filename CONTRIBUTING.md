@@ -11,6 +11,8 @@ That decision is expressed with issue labels:
 
 Those labels are the repo's way of saying when a change is open for contribution. They are not Oz-specific, and they do not mean only one person can work on something. They just tell contributors whether we are accepting a plan first or whether we are ready for code.
 
+Other labels, such as automated triage labels for area or reproducibility, are informational only. They do not change whether an issue is ready for planning or implementation.
+
 ## When to open a plan PR
 
 Plan-only changes are accepted when they are tied to an issue that is marked `ready-to-plan`.

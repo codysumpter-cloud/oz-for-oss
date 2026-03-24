@@ -1,0 +1,290 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime, timedelta, timezone
+from textwrap import dedent
+from typing import Any
+
+from oz_workflows.actions import append_summary, warning
+from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, workspace
+from oz_workflows.github_api import GitHubClient
+from oz_workflows.oz_client import build_agent_config, run_agent
+from oz_workflows.transport import new_transport_token, poll_for_transport_payload
+from oz_workflows.triage import (
+    compose_triaged_issue_body,
+    dedupe_strings,
+    discover_issue_templates,
+    extract_original_issue_report,
+    load_triage_config,
+    select_recent_untriaged_issues,
+)
+
+
+WORKFLOW_NAME = "triage-new-issues"
+
+
+def main() -> None:
+    owner, repo = repo_parts()
+    triage_config = load_triage_config(workspace() / ".github" / "issue-triage" / "config.json")
+    configured_labels = triage_config["labels"]
+    lookback_minutes = int(optional_env("LOOKBACK_MINUTES") or "60")
+    issue_number_override = optional_env("TRIAGE_ISSUE_NUMBER")
+
+    with GitHubClient(require_env("GH_TOKEN"), repo_slug()) as github:
+        repo_labels = {
+            str(label.get("name") or ""): label
+            for label in github.list_repo_labels(owner, repo)
+            if isinstance(label, dict) and label.get("name")
+        }
+        issues = resolve_issues_to_triage(
+            github,
+            owner,
+            repo,
+            issue_number_override=issue_number_override,
+            lookback_minutes=lookback_minutes,
+        )
+        if not issues:
+            append_summary("No recent untriaged issues found.\n")
+            return
+
+        queue_text = ", ".join(f"#{issue['number']}" for issue in issues)
+        append_summary(f"Triage queue: {queue_text}\n")
+
+        agent_config = build_agent_config(
+            config_name=WORKFLOW_NAME,
+            workspace=workspace(),
+            environment_env_names=[
+                "WARP_AGENT_TRIAGE_ENVIRONMENT_ID",
+                "WARP_AGENT_ENVIRONMENT_ID",
+            ],
+        )
+
+        for issue in issues:
+            issue_number = int(issue["number"])
+            try:
+                process_issue(
+                    github,
+                    owner,
+                    repo,
+                    issue,
+                    triage_config=triage_config,
+                    configured_labels=configured_labels,
+                    repo_labels=repo_labels,
+                    agent_config=agent_config,
+                )
+            except Exception as exc:
+                warning(f"Issue triage failed for #{issue_number}: {exc}")
+                append_summary(f"- Issue #{issue_number}: triage failed ({exc}).\n")
+
+
+def resolve_issues_to_triage(
+    github: GitHubClient,
+    owner: str,
+    repo: str,
+    *,
+    issue_number_override: str,
+    lookback_minutes: int,
+) -> list[dict[str, Any]]:
+    if issue_number_override:
+        issue = github.get_issue(owner, repo, int(issue_number_override))
+        return [] if issue.get("pull_request") else [issue]
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)
+    return select_recent_untriaged_issues(
+        github.list_repo_issues(owner, repo, state="open"),
+        cutoff=cutoff,
+    )
+
+
+def process_issue(
+    github: GitHubClient,
+    owner: str,
+    repo: str,
+    issue: dict[str, Any],
+    *,
+    triage_config: dict[str, Any],
+    configured_labels: dict[str, Any],
+    repo_labels: dict[str, Any],
+    agent_config: dict[str, Any],
+) -> None:
+    issue_number = int(issue["number"])
+    template_context = discover_issue_templates(workspace())
+    comments = github.list_issue_comments(owner, repo, issue_number)
+    comments_text = format_issue_comments(comments)
+    current_body = str(issue.get("body") or "").strip()
+    original_report = extract_original_issue_report(current_body)
+    transport_token = new_transport_token()
+    prompt = dedent(
+        f"""
+        Triage GitHub issue #{issue_number} in repository {owner}/{repo}.
+
+        Issue Details:
+        - Title: {issue["title"]}
+        - Labels: {", ".join(label["name"] for label in issue.get("labels", [])) or "None"}
+        - Assignees: {", ".join(assignee["login"] for assignee in issue.get("assignees", [])) or "None"}
+        - Created at: {issue.get("created_at") or "Unknown"}
+        - Current Issue Body: {current_body or "No description provided."}
+
+        Original Issue Report:
+        {original_report or "No original issue report provided."}
+
+        Issue Comments:
+        {comments_text}
+
+        Repository Triage Configuration JSON:
+        {json.dumps(triage_config, indent=2)}
+
+        Repository Issue Template Context JSON:
+        {json.dumps(template_context, indent=2)}
+
+        Goals:
+        - Provide an initial label set for this issue.
+        - Estimate how reproducible the issue seems from the report.
+        - Infer the most likely root cause and relevant files from the current codebase when possible.
+        - Suggest subject-matter experts, preferring the stakeholder config and otherwise using recent git contributors to related files.
+        - If issue templates exist in the repository, rewrite the visible issue body so it follows the most relevant template structure as closely as possible with the information available.
+
+        Output Requirements:
+        - Use the repository's local `triage-issue` skill as the base workflow.
+        - Prefer labels from the triage configuration above.
+        - If the report is underspecified, say so directly and use `needs-info` plus `repro:unknown` when justified.
+        - Create `triage_result.json` with exactly this shape:
+          {{
+            "summary": "one-sentence triage summary",
+            "labels": ["triaged", "bug", "area:cli", "repro:medium"],
+            "reproducibility": {{"level": "high | medium | low | unknown", "reasoning": "string"}},
+            "root_cause": {{"summary": "string", "confidence": "high | medium | low", "relevant_files": ["path/to/file"]}},
+            "sme_candidates": [{{"login": "github-login", "reason": "string"}}],
+            "selected_template_path": "path or empty string",
+            "issue_body": "full visible markdown issue body without the preserved-original-report appendix"
+          }}
+        - If template files are present, choose the most relevant one and mirror its section structure in `issue_body` where practical.
+        - Keep the triage analysis in the visible issue body, and include SME `@mentions` there when useful.
+        - Do not include the preserved original-report appendix in `issue_body`; the workflow will append it automatically.
+        - Validate `triage_result.json` with `jq`.
+        - Do not update GitHub directly beyond the transport comment below.
+        - After validating the JSON, post exactly one temporary issue comment on issue #{issue_number} whose body is a single HTML comment in this exact format:
+          <!-- oz-workflow-transport {{"token":"{transport_token}","kind":"issue-triage","encoding":"base64","payload":"<BASE64_OF_TRIAGE_JSON>"}} -->
+        """
+    ).strip()
+
+    run_agent(
+        prompt=prompt,
+        skill_name="triage-issue",
+        title=f"Triage issue #{issue_number}",
+        config=agent_config,
+    )
+    payload, transport_comment_id = poll_for_transport_payload(
+        github,
+        owner,
+        repo,
+        issue_number,
+        token=transport_token,
+        kind="issue-triage",
+        timeout_seconds=300,
+    )
+    github.delete_comment(owner, repo, transport_comment_id)
+
+    result = json.loads(payload["decoded_payload"])
+    if not isinstance(result, dict):
+        raise RuntimeError("Triage result must decode to a JSON object")
+    apply_triage_result(
+        github,
+        owner,
+        repo,
+        issue,
+        result=result,
+        configured_labels=configured_labels,
+        repo_labels=repo_labels,
+    )
+
+    labels_text = ", ".join(extract_requested_labels(result)) or "no labels"
+    summary = str(result.get("summary") or "triage completed").strip()
+    append_summary(f"- Issue #{issue_number}: {summary} Labels: {labels_text}.\n")
+
+
+def apply_triage_result(
+    github: GitHubClient,
+    owner: str,
+    repo: str,
+    issue: dict[str, Any],
+    *,
+    result: dict[str, Any],
+    configured_labels: dict[str, Any],
+    repo_labels: dict[str, Any],
+) -> None:
+    issue_number = int(issue["number"])
+    requested_labels = dedupe_strings([*extract_requested_labels(result), "triaged"])
+    managed_labels: list[str] = []
+    for label_name in requested_labels:
+        if label_name in configured_labels:
+            ensure_label_exists(
+                github,
+                owner,
+                repo,
+                repo_labels=repo_labels,
+                label_name=label_name,
+                label_spec=configured_labels[label_name],
+            )
+            managed_labels.append(label_name)
+            continue
+        if label_name in repo_labels:
+            managed_labels.append(label_name)
+            continue
+        warning(f"Skipping unmanaged label '{label_name}' for issue #{issue_number}")
+    if managed_labels:
+        github.add_labels(owner, repo, issue_number, managed_labels)
+    issue_body = str(result.get("issue_body") or "").strip()
+    if issue_body:
+        current_body = str(issue.get("body") or "").strip()
+        original_report = extract_original_issue_report(current_body)
+        updated_body = compose_triaged_issue_body(issue_body, original_report)
+        if updated_body != current_body:
+            github.update_issue(owner, repo, issue_number, body=updated_body)
+
+
+def ensure_label_exists(
+    github: GitHubClient,
+    owner: str,
+    repo: str,
+    *,
+    repo_labels: dict[str, Any],
+    label_name: str,
+    label_spec: Any,
+) -> None:
+    if label_name in repo_labels:
+        return
+    if not isinstance(label_spec, dict):
+        raise RuntimeError(f"Configured label '{label_name}' must be an object")
+    color = str(label_spec.get("color") or "").strip()
+    if not color:
+        raise RuntimeError(f"Configured label '{label_name}' is missing a color")
+    created = github.create_label(
+        owner,
+        repo,
+        name=label_name,
+        color=color,
+        description=str(label_spec.get("description") or "").strip(),
+    )
+    repo_labels[label_name] = created
+
+def extract_requested_labels(result: dict[str, Any]) -> list[str]:
+    raw_labels = result.get("labels")
+    if not isinstance(raw_labels, list):
+        return []
+    return dedupe_strings(raw_labels)
+
+
+def format_issue_comments(comments: list[dict[str, Any]]) -> str:
+    if not comments:
+        return "- None"
+    formatted = []
+    for comment in comments:
+        user = (comment.get("user") or {}).get("login") or "unknown"
+        association = comment.get("author_association") or "NONE"
+        body = str(comment.get("body") or "").strip() or "(no body)"
+        formatted.append(f"- @{user} [{association}] ({comment.get('created_at')}): {body}")
+    return "\n".join(formatted)
+
+
+if __name__ == "__main__":
+    main()
