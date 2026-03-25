@@ -27,9 +27,9 @@ jobs:
       - name: Install Python workflow dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r .github/python/requirements.txt
+          python -m pip install -r src/requirements.txt
       - name: Run unready-assignment workflow
         env:
-          PYTHONPATH: .github/python
+          PYTHONPATH: src
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
-        run: python .github/python/comment_on_unready_assigned_issue.py
+        run: python src/comment_on_unready_assigned_issue.py

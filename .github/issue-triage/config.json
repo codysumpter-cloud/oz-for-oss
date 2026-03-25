@@ -45,7 +45,7 @@
     {
       "name": "Workflow and automation maintainers",
       "path_prefixes": [
-        ".github/python/",
+        "src/",
         ".github/workflows/",
         ".github/issue-triage/"
       ],

@@ -59,11 +59,11 @@ jobs:
       - name: Install Python workflow dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r .github/python/requirements.txt
+          python -m pip install -r src/requirements.txt
       - name: Run PR issue-state enforcement
         id: run_enforcement
         env:
-          PYTHONPATH: .github/python
+          PYTHONPATH: src
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           PR_NUMBER: ${{ inputs.pr_number }}
           WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
@@ -72,4 +72,4 @@ jobs:
           WARP_AGENT_MCP: ${{ vars.WARP_AGENT_MCP || '' }}
           WARP_AGENT_ENVIRONMENT_ID: ${{ vars.WARP_AGENT_ENVIRONMENT_ID || '' }}
           WARP_AGENT_ENFORCEMENT_ENVIRONMENT_ID: ${{ vars.WARP_AGENT_ENFORCEMENT_ENVIRONMENT_ID || '' }}
-        run: python .github/python/enforce_pr_issue_state.py
+        run: python src/enforce_pr_issue_state.py
