@@ -105,14 +105,14 @@ def main() -> None:
                 owner,
                 repo,
                 int(existing_prs[0]["number"]),
-                title=f"Plan: {issue_title}",
+                title=f"plan: {issue_title}",
                 body=pr_body,
             )
         else:
             pr = github.create_pull(
                 owner,
                 repo,
-                title=f"Plan: {issue_title}",
+                title=f"plan: {issue_title}",
                 head=branch_name,
                 base=default_branch,
                 body=pr_body,

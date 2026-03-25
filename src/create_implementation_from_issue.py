@@ -9,6 +9,7 @@ from oz_workflows.github_api import GitHubClient
 from oz_workflows.helpers import (
     branch_updated_since,
     build_next_steps_section,
+    conventional_commit_prefix,
     org_member_comments_text,
     resolve_plan_context_for_issue,
     triggering_comment_prompt_text,
@@ -145,12 +146,14 @@ def main() -> None:
             progress.complete("I analyzed this issue but did not produce an implementation diff.")
             return
 
+        commit_type = conventional_commit_prefix(issue.get("labels", []))
+
         if selected_plan_pr:
             github.update_pull(
                 owner,
                 repo,
                 int(selected_plan_pr["number"]),
-                title=f"Implement issue #{issue_number}: {issue_title}",
+                title=f"{commit_type}: {issue_title}",
             )
             progress.complete(
                 f"I pushed implementation updates to the linked approved plan PR: {selected_plan_pr['url']}\n\n"
@@ -169,7 +172,7 @@ def main() -> None:
             pr = github.create_pull(
                 owner,
                 repo,
-                title=f"Implement issue #{issue_number}: {issue_title}",
+                title=f"{commit_type}: {issue_title}",
                 head=target_branch,
                 base=default_branch,
                 body=pr_body,
