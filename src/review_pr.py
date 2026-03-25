@@ -30,7 +30,7 @@ def main() -> None:
             owner,
             repo,
             pr_number,
-            workflow="warp-review-pr",
+            workflow="review-pull-request",
             requester_login=requester,
         )
         progress.start("Oz is reviewing this pull request.")
@@ -98,7 +98,7 @@ def main() -> None:
         ).strip()
 
         config = build_agent_config(
-            config_name="warp-review-pr",
+            config_name="review-pull-request",
             workspace=workspace(),
             environment_env_names=[
                 "WARP_AGENT_REVIEW_ENVIRONMENT_ID",

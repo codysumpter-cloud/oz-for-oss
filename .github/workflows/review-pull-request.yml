@@ -1,4 +1,4 @@
-name: Auto PR Review Logic
+name: Review Pull Request
 on:
   workflow_call:
     inputs:
