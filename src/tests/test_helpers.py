@@ -5,6 +5,7 @@ import unittest
 from oz_workflows.helpers import (
     build_next_steps_section,
     build_plan_preview_section,
+    conventional_commit_prefix,
     extract_issue_numbers_from_text,
     org_member_comments_text,
     resolve_progress_requester_login,
@@ -120,6 +121,45 @@ class OrgMemberCommentsTextTest(unittest.TestCase):
             ),
             "- alice (2026-03-24T00:00:00Z): Earlier context",
         )
+
+class ConventionalCommitPrefixTest(unittest.TestCase):
+    def test_bug_label_returns_fix(self) -> None:
+        labels = [{"name": "bug"}, {"name": "ready-to-implement"}]
+        self.assertEqual(conventional_commit_prefix(labels), "fix")
+
+    def test_enhancement_label_returns_feat(self) -> None:
+        labels = [{"name": "enhancement"}]
+        self.assertEqual(conventional_commit_prefix(labels), "feat")
+
+    def test_feature_label_returns_feat(self) -> None:
+        labels = [{"name": "feature"}]
+        self.assertEqual(conventional_commit_prefix(labels), "feat")
+
+    def test_documentation_label_returns_docs(self) -> None:
+        labels = [{"name": "documentation"}]
+        self.assertEqual(conventional_commit_prefix(labels), "docs")
+
+    def test_no_matching_label_returns_default(self) -> None:
+        labels = [{"name": "ready-to-implement"}, {"name": "area/workflows"}]
+        self.assertEqual(conventional_commit_prefix(labels), "feat")
+
+    def test_empty_labels_returns_default(self) -> None:
+        self.assertEqual(conventional_commit_prefix([]), "feat")
+
+    def test_custom_default(self) -> None:
+        self.assertEqual(conventional_commit_prefix([], default="chore"), "chore")
+
+    def test_string_labels(self) -> None:
+        self.assertEqual(conventional_commit_prefix(["bug", "urgent"]), "fix")
+
+    def test_case_insensitive(self) -> None:
+        labels = [{"name": "Bug"}]
+        self.assertEqual(conventional_commit_prefix(labels), "fix")
+
+    def test_first_match_wins(self) -> None:
+        labels = [{"name": "bug"}, {"name": "enhancement"}]
+        self.assertEqual(conventional_commit_prefix(labels), "fix")
+
 
 class FakeGitHubClient:
     def list_issue_events(self, owner: str, repo: str, issue_number: int) -> list[dict[str, object]]:

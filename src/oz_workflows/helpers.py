@@ -216,6 +216,33 @@ class WorkflowProgressComment:
         return existing
 
 
+# Maps issue label names to conventional commit type prefixes.
+_LABEL_TO_COMMIT_TYPE: dict[str, str] = {
+    "bug": "fix",
+    "enhancement": "feat",
+    "feature": "feat",
+    "documentation": "docs",
+    "refactor": "refactor",
+    "chore": "chore",
+    "performance": "perf",
+    "test": "test",
+    "ci": "ci",
+}
+
+
+def conventional_commit_prefix(labels: list[dict[str, Any] | str], *, default: str = "feat") -> str:
+    """Derive a conventional-commit type prefix from issue labels.
+
+    Returns the first matching prefix found by scanning *labels* against a
+    known mapping, or *default* when no label matches.
+    """
+    for label in labels:
+        name = (label if isinstance(label, str) else label.get("name") or "").lower()
+        if name in _LABEL_TO_COMMIT_TYPE:
+            return _LABEL_TO_COMMIT_TYPE[name]
+    return default
+
+
 def build_plan_preview_section(owner: str, repo: str, branch_name: str, issue_number: int) -> str:
     plan_path = f"plans/issue-{issue_number}.md"
     preview_url = f"https://github.com/{owner}/{repo}/blob/{branch_name}/{plan_path}"
