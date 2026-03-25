@@ -6,6 +6,11 @@ on:
         description: Pull request number to evaluate
         required: true
         type: string
+      requester:
+        description: Login of the user whose action triggered enforcement, if any
+        required: false
+        default: ""
+        type: string
     secrets:
       GHA_APP_ID:
         required: true
@@ -66,6 +71,7 @@ jobs:
           PYTHONPATH: src
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           PR_NUMBER: ${{ inputs.pr_number }}
+          REQUESTER: ${{ inputs.requester }}
           WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
           WARP_AGENT_PROFILE: ${{ vars.WARP_AGENT_PROFILE || '' }}
           WARP_AGENT_MODEL: ${{ vars.WARP_AGENT_MODEL || '' }}

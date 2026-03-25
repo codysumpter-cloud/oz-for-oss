@@ -4,9 +4,9 @@ import json
 from textwrap import dedent
 
 from oz_workflows.actions import set_output
-from oz_workflows.env import repo_parts, repo_slug, require_env, workspace
+from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.github_api import GitHubClient
-from oz_workflows.helpers import extract_issue_numbers_from_text
+from oz_workflows.helpers import extract_issue_numbers_from_text, WorkflowProgressComment
 from oz_workflows.oz_client import build_agent_config, run_agent
 from oz_workflows.transport import new_transport_token, poll_for_transport_payload
 
@@ -14,11 +14,21 @@ from oz_workflows.transport import new_transport_token, poll_for_transport_paylo
 def main() -> None:
     owner, repo = repo_parts()
     pr_number = int(require_env("PR_NUMBER"))
+    requester = optional_env("REQUESTER")
     with GitHubClient(require_env("GH_TOKEN"), repo_slug()) as github:
         pr = github.get_pull(owner, repo, pr_number)
         if pr["state"] != "open":
             set_output("allow_review", "false")
             return
+        progress = WorkflowProgressComment(
+            github,
+            owner,
+            repo,
+            pr_number,
+            workflow="enforce-pr-issue-state",
+            requester_login=requester,
+        )
+        progress.start("Oz is checking whether this pull request is associated with a ready issue.")
 
         files = github.list_pull_files(owner, repo, pr_number)
         changed_files = [file["filename"] for file in files]
@@ -40,6 +50,9 @@ def main() -> None:
                 for label in explicit_issue.get("labels", [])
             ]
             if required_label in labels:
+                progress.complete(
+                    f"I confirmed that this pull request is associated with issue #{explicit_issue['number']} and review may continue."
+                )
                 set_output("allow_review", "true")
                 return
             close_comment = (
@@ -48,7 +61,7 @@ def main() -> None:
                 f"automatically closed. Please see our [contribution docs]({contribution_docs_url}) for guidance "
                 "on when changes are accepted for issues."
             )
-            github.create_comment(owner, repo, pr_number, close_comment)
+            progress.complete(close_comment)
             github.update_pull(owner, repo, pr_number, state="closed")
             set_output("allow_review", "false")
             return
@@ -113,6 +126,7 @@ def main() -> None:
             skill_name=None,
             title=f"Associate PR #{pr_number} with ready issue",
             config=config,
+            on_poll=lambda current_run: _on_poll(progress, current_run),
         )
         payload, comment_id = poll_for_transport_payload(
             github,
@@ -125,14 +139,22 @@ def main() -> None:
         github.delete_comment(owner, repo, comment_id)
         result = json.loads(payload["decoded_payload"])
         if result.get("matched") is True and isinstance(result.get("issue_number"), int):
+            progress.complete(
+                f"I confirmed that this pull request is associated with issue #{result['issue_number']} and review may continue."
+            )
             set_output("allow_review", "true")
             return
         close_comment = str(result.get("close_comment") or "").strip()
         if not close_comment:
             raise RuntimeError("Oz returned no issue match without a close_comment")
-        github.create_comment(owner, repo, pr_number, close_comment)
+        progress.complete(close_comment)
         github.update_pull(owner, repo, pr_number, state="closed")
         set_output("allow_review", "false")
+
+
+def _on_poll(progress: WorkflowProgressComment, run: object) -> None:
+    session_link = getattr(run, "session_link", None) or ""
+    progress.record_session_link(session_link)
 
 
 if __name__ == "__main__":

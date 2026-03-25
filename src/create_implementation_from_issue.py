@@ -12,8 +12,7 @@ from oz_workflows.helpers import (
     org_member_comments_text,
     resolve_plan_context_for_issue,
     triggering_comment_prompt_text,
-    update_status_comment,
-    upsert_status_comment,
+    WorkflowProgressComment,
 )
 from oz_workflows.oz_client import build_agent_config, run_agent
 
@@ -45,30 +44,30 @@ def main() -> None:
             if selected_plan_pr
             else f"oz-agent/implement-issue-{issue_number}"
         )
+        progress = WorkflowProgressComment(
+            github,
+            owner,
+            repo,
+            issue_number,
+            workflow="create-implementation-from-issue",
+            event_payload=event,
+        )
+        progress.start("Oz is working on an implementation for this issue.")
         should_noop = (
             not selected_plan_pr
             and not plan_context["plan_entries"]
             and len(plan_context["unapproved_plan_prs"]) > 0
         )
         if should_noop:
+            progress.complete(
+                "I did not start implementation because linked plan PR(s) exist for this issue but none are labeled `plan-approved`: "
+                + ", ".join(f"#{pr['number']}" for pr in plan_context["unapproved_plan_prs"])
+            )
             append_summary(
                 "Linked plan PR(s) exist for this issue but none are labeled `plan-approved`: "
                 + ", ".join(f"#{pr['number']}" for pr in plan_context["unapproved_plan_prs"])
             )
             return
-
-        status_comment = upsert_status_comment(
-            github,
-            owner,
-            repo,
-            issue_number,
-            event_payload=event,
-            workflow="create-implementation-from-issue",
-            status_line="Oz is working on an implementation for this issue.",
-        )
-        comment_id = int(status_comment["id"])
-        metadata = status_comment["_oz_metadata"]
-        last_session_link = {"value": ""}
         next_steps_section = build_next_steps_section(
             [
                 "Review the implementation changes in the PR.",
@@ -133,15 +132,7 @@ def main() -> None:
             skill_name="implement-issue",
             title=f"Implement issue #{issue_number}",
             config=config,
-            on_poll=lambda current_run: _on_poll(
-                github,
-                owner,
-                repo,
-                comment_id,
-                metadata,
-                last_session_link,
-                current_run,
-            ),
+            on_poll=lambda current_run: _on_poll(progress, current_run),
         )
 
         if not branch_updated_since(
@@ -151,12 +142,7 @@ def main() -> None:
             target_branch,
             created_after=run.created_at - timedelta(minutes=1),
         ):
-            github.create_comment(
-                owner,
-                repo,
-                issue_number,
-                "I analyzed this issue but did not produce an implementation diff.",
-            )
+            progress.complete("I analyzed this issue but did not produce an implementation diff.")
             return
 
         if selected_plan_pr:
@@ -166,19 +152,9 @@ def main() -> None:
                 int(selected_plan_pr["number"]),
                 title=f"Implement issue #{issue_number}: {issue_title}",
             )
-            github.create_comment(
-                owner,
-                repo,
-                int(selected_plan_pr["number"]),
-                f"Oz pushed implementation updates for Issue #{issue_number}."
-                + (f"\n\nSession: {run.session_link}" if run.session_link else ""),
-            )
-            github.create_comment(
-                owner,
-                repo,
-                issue_number,
+            progress.complete(
                 f"I pushed implementation updates to the linked approved plan PR: {selected_plan_pr['url']}\n\n"
-                f"{next_steps_section}",
+                f"{next_steps_section}"
             )
             return
 
@@ -189,13 +165,6 @@ def main() -> None:
         )
         if existing_prs:
             pr = existing_prs[0]
-            github.create_comment(
-                owner,
-                repo,
-                int(pr["number"]),
-                f"Oz pushed additional implementation updates for Issue #{issue_number}."
-                + (f"\n\nSession: {run.session_link}" if run.session_link else ""),
-            )
         else:
             pr = github.create_pull(
                 owner,
@@ -206,37 +175,15 @@ def main() -> None:
                 body=pr_body,
                 draft=True,
             )
-        github.create_comment(
-            owner,
-            repo,
-            issue_number,
+        progress.complete(
             f"I created or updated a draft implementation PR for this issue: {pr['html_url']}\n\n"
-            f"{next_steps_section}",
+            f"{next_steps_section}"
         )
 
 
-def _on_poll(
-    github: GitHubClient,
-    owner: str,
-    repo: str,
-    comment_id: int,
-    metadata: str,
-    last_session_link: dict[str, str],
-    run: object,
-) -> None:
+def _on_poll(progress: WorkflowProgressComment, run: object) -> None:
     session_link = getattr(run, "session_link", None) or ""
-    if not session_link or session_link == last_session_link["value"]:
-        return
-    update_status_comment(
-        github,
-        owner,
-        repo,
-        comment_id,
-        status_line="Oz is working on an implementation for this issue.",
-        metadata=metadata,
-        session_link=session_link,
-    )
-    last_session_link["value"] = session_link
+    progress.record_session_link(session_link)
 
 
 if __name__ == "__main__":

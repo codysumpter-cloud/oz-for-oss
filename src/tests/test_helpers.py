@@ -7,6 +7,7 @@ from oz_workflows.helpers import (
     build_plan_preview_section,
     extract_issue_numbers_from_text,
     org_member_comments_text,
+    resolve_progress_requester_login,
     triggering_comment_prompt_text,
 )
 
@@ -54,6 +55,47 @@ class TriggeringCommentPromptTextTest(unittest.TestCase):
         )
 
 
+class ResolveProgressRequesterLoginTest(unittest.TestCase):
+    def test_prefers_explicit_requester_login(self) -> None:
+        self.assertEqual(
+            resolve_progress_requester_login(
+                FakeGitHubClient(),
+                "acme",
+                "widgets",
+                12,
+                requester_login="@alice",
+            ),
+            "alice",
+        )
+
+    def test_uses_comment_author_when_present(self) -> None:
+        self.assertEqual(
+            resolve_progress_requester_login(
+                FakeGitHubClient(),
+                "acme",
+                "widgets",
+                12,
+                event_payload={
+                    "sender": {"login": "bob"},
+                    "comment": {"user": {"login": "alice"}},
+                },
+            ),
+            "alice",
+        )
+
+    def test_falls_back_to_sender_login(self) -> None:
+        self.assertEqual(
+            resolve_progress_requester_login(
+                FakeGitHubClient(),
+                "acme",
+                "widgets",
+                12,
+                event_payload={"sender": {"login": "bob"}},
+            ),
+            "bob",
+        )
+
+
 class OrgMemberCommentsTextTest(unittest.TestCase):
     def test_can_exclude_triggering_comment(self) -> None:
         self.assertEqual(
@@ -78,6 +120,10 @@ class OrgMemberCommentsTextTest(unittest.TestCase):
             ),
             "- alice (2026-03-24T00:00:00Z): Earlier context",
         )
+
+class FakeGitHubClient:
+    def list_issue_events(self, owner: str, repo: str, issue_number: int) -> list[dict[str, object]]:
+        return []
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ from textwrap import dedent
 
 from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.github_api import GitHubClient
-from oz_workflows.helpers import resolve_plan_context_for_pr
+from oz_workflows.helpers import resolve_plan_context_for_pr, WorkflowProgressComment
 from oz_workflows.oz_client import build_agent_config, run_agent
 from oz_workflows.transport import new_transport_token, poll_for_transport_payload
 
@@ -25,6 +25,15 @@ def main() -> None:
 
         if comment_id_raw:
             github.create_reaction_for_issue_comment(owner, repo, int(comment_id_raw), "eyes")
+        progress = WorkflowProgressComment(
+            github,
+            owner,
+            repo,
+            pr_number,
+            workflow="warp-review-pr",
+            requester_login=requester,
+        )
+        progress.start("Oz is reviewing this pull request.")
 
         plan_context = resolve_plan_context_for_pr(
             github,
@@ -101,6 +110,7 @@ def main() -> None:
             skill_name="review-pr",
             title=f"PR review #{pr_number}",
             config=config,
+            on_poll=lambda current_run: _on_poll(progress, current_run),
         )
         payload, transport_comment_id = poll_for_transport_payload(
             github,
@@ -132,6 +142,7 @@ def main() -> None:
                 normalized["start_side"] = normalized["side"]
             comments.append(normalized)
         if not summary and not comments:
+            progress.complete("I completed the review and did not identify any actionable feedback for this pull request.")
             return
         github.create_review(
             owner,
@@ -141,6 +152,12 @@ def main() -> None:
             event="COMMENT",
             comments=comments or None,
         )
+        progress.complete("I completed the review and posted feedback on this pull request.")
+
+
+def _on_poll(progress: WorkflowProgressComment, run: object) -> None:
+    session_link = getattr(run, "session_link", None) or ""
+    progress.record_session_link(session_link)
 
 
 if __name__ == "__main__":

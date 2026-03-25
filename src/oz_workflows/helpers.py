@@ -108,71 +108,112 @@ def resolve_oz_assigner_login(
     )
     return (matching_events[0].get("actor") or {}).get("login") or ""
 
-
-def upsert_status_comment(
+def resolve_progress_requester_login(
     github: GitHubClient,
     owner: str,
     repo: str,
     issue_number: int,
     *,
-    event_payload: dict[str, Any],
-    workflow: str,
-    status_line: str,
-) -> dict[str, Any]:
-    metadata = comment_metadata(workflow, issue_number)
-    comments = github.list_issue_comments(owner, repo, issue_number)
-    existing = next(
-        (
-            comment
-            for comment in comments
-            if isinstance(comment.get("body"), str)
-            and (metadata in comment["body"] or comment["body"].strip() == status_line)
-        ),
-        None,
-    )
-    if existing:
-        updated_body = append_comment_sections(str(existing.get("body") or ""), metadata, [status_line])
-        updated = github.update_comment(owner, repo, int(existing["id"]), updated_body)
-        updated["_oz_metadata"] = metadata
-        updated["_oz_created"] = False
-        return updated
-    assigner_login = resolve_oz_assigner_login(
+    event_payload: dict[str, Any] | None = None,
+    requester_login: str = "",
+) -> str:
+    normalized_requester = requester_login.strip().removeprefix("@")
+    if normalized_requester:
+        return normalized_requester
+    payload = event_payload or {}
+    comment = payload.get("comment")
+    if isinstance(comment, dict):
+        comment_author = (comment.get("user") or {}).get("login") or ""
+        if comment_author:
+            return comment_author
+    sender_login = (payload.get("sender") or {}).get("login") or ""
+    if sender_login:
+        return sender_login
+    return resolve_oz_assigner_login(
         github,
         owner,
         repo,
         issue_number,
-        event_payload=event_payload,
+        event_payload=payload,
     )
-    initial_sections = [status_line]
-    if assigner_login:
-        initial_sections.insert(0, f"@{assigner_login}")
-    created = github.create_comment(
-        owner,
-        repo,
-        issue_number,
-        build_comment_body("\n\n".join(initial_sections), metadata),
-    )
-    created["_oz_metadata"] = metadata
-    created["_oz_created"] = True
-    return created
 
 
-def update_status_comment(
-    github: GitHubClient,
-    owner: str,
-    repo: str,
-    comment_id: int,
-    *,
-    status_line: str,
-    metadata: str,
-    session_link: str | None = None,
-) -> None:
-    existing = github.get_comment(owner, repo, comment_id)
-    sections = [status_line]
-    if session_link:
-        sections.append(f"Sharing session at: {session_link}")
-    updated_body = append_comment_sections(str(existing.get("body") or ""), metadata, sections)
-    github.update_comment(owner, repo, comment_id, updated_body)
+class WorkflowProgressComment:
+    def __init__(
+        self,
+        github: GitHubClient,
+        owner: str,
+        repo: str,
+        issue_number: int,
+        *,
+        workflow: str,
+        event_payload: dict[str, Any] | None = None,
+        requester_login: str = "",
+    ) -> None:
+        self.github = github
+        self.owner = owner
+        self.repo = repo
+        self.issue_number = issue_number
+        self.workflow = workflow
+        self.event_payload = event_payload or {}
+        self.requester_login = requester_login
+        self.metadata = comment_metadata(workflow, issue_number)
+        self.comment_id: int | None = None
+
+    def start(self, status_line: str) -> None:
+        self._append_sections([status_line])
+
+    def record_session_link(self, session_link: str) -> None:
+        if not session_link.strip():
+            return
+        self._append_sections([f"Sharing session at: {session_link.strip()}"])
+
+    def complete(self, status_line: str) -> None:
+        self._append_sections([status_line])
+
+    def _append_sections(self, sections: list[str]) -> None:
+        normalized_sections = [section.strip() for section in sections if section and section.strip()]
+        requester = resolve_progress_requester_login(
+            self.github,
+            self.owner,
+            self.repo,
+            self.issue_number,
+            event_payload=self.event_payload,
+            requester_login=self.requester_login,
+        )
+        if requester:
+            normalized_sections.insert(0, f"@{requester}")
+        if not normalized_sections:
+            return
+        existing = self._get_or_find_existing_comment()
+        if existing is None:
+            created = self.github.create_comment(
+                self.owner,
+                self.repo,
+                self.issue_number,
+                build_comment_body("\n\n".join(normalized_sections), self.metadata),
+            )
+            self.comment_id = int(created["id"])
+            return
+        updated_body = append_comment_sections(str(existing.get("body") or ""), self.metadata, normalized_sections)
+        self.github.update_comment(self.owner, self.repo, int(existing["id"]), updated_body)
+        self.comment_id = int(existing["id"])
+
+    def _get_or_find_existing_comment(self) -> dict[str, Any] | None:
+        if self.comment_id is not None:
+            return self.github.get_comment(self.owner, self.repo, self.comment_id)
+        comments = self.github.list_issue_comments(self.owner, self.repo, self.issue_number)
+        existing = next(
+            (
+                comment
+                for comment in comments
+                if isinstance(comment.get("body"), str) and self.metadata in comment["body"]
+            ),
+            None,
+        )
+        if existing:
+            self.comment_id = int(existing["id"])
+        return existing
 
 
 def build_plan_preview_section(owner: str, repo: str, branch_name: str, issue_number: int) -> str:

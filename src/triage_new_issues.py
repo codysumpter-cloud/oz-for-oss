@@ -10,8 +10,7 @@ from oz_workflows.env import load_event, optional_env, repo_parts, repo_slug, re
 from oz_workflows.github_api import GitHubClient
 from oz_workflows.helpers import (
     triggering_comment_prompt_text,
-    update_status_comment,
-    upsert_status_comment,
+    WorkflowProgressComment,
 )
 from oz_workflows.oz_client import build_agent_config, run_agent
 from oz_workflows.transport import new_transport_token, poll_for_transport_payload
@@ -76,6 +75,7 @@ def main() -> None:
                     owner,
                     repo,
                     issue,
+                    event_payload=event,
                     triage_config=triage_config,
                     configured_labels=configured_labels,
                     repo_labels=repo_labels,
@@ -118,6 +118,7 @@ def process_issue(
     repo: str,
     issue: dict[str, Any],
     *,
+    event_payload: dict[str, Any],
     triage_config: dict[str, Any],
     configured_labels: dict[str, Any],
     repo_labels: dict[str, Any],
@@ -127,18 +128,15 @@ def process_issue(
 ) -> None:
     issue_number = int(issue["number"])
     template_context = discover_issue_templates(workspace())
-    status_comment = upsert_status_comment(
+    progress = WorkflowProgressComment(
         github,
         owner,
         repo,
         issue_number,
-        event_payload={},
         workflow=WORKFLOW_NAME,
-        status_line="Oz has started triaging this issue.",
+        event_payload=event_payload,
     )
-    comment_id = int(status_comment["id"])
-    metadata = status_comment["_oz_metadata"]
-    last_session_link = {"value": ""}
+    progress.start("Oz has started triaging this issue.")
     comments = github.list_issue_comments(owner, repo, issue_number)
     comments_text = format_issue_comments(comments, exclude_comment_id=triggering_comment_id)
     current_body = str(issue.get("body") or "").strip()
@@ -215,25 +213,9 @@ def process_issue(
         skill_name="triage-issue",
         title=f"Triage issue #{issue_number}",
         config=agent_config,
-        on_poll=lambda current_run: _on_poll(
-            github,
-            owner,
-            repo,
-            comment_id,
-            metadata,
-            last_session_link,
-            current_run,
-        ),
+        on_poll=lambda current_run: _on_poll(progress, current_run),
     )
-    _on_poll(
-        github,
-        owner,
-        repo,
-        comment_id,
-        metadata,
-        last_session_link,
-        run,
-    )
+    _on_poll(progress, run)
     payload, transport_comment_id = poll_for_transport_payload(
         github,
         owner,
@@ -260,6 +242,10 @@ def process_issue(
 
     labels_text = ", ".join(extract_requested_labels(result)) or "no labels"
     summary = str(result.get("summary") or "triage completed").strip()
+    progress.complete(
+        f"I completed triage for this issue and updated the issue with the triage result. "
+        f"Summary: {summary}. Labels: {labels_text}."
+    )
     append_summary(f"- Issue #{issue_number}: {summary} Labels: {labels_text}.\n")
 
 
@@ -334,28 +320,9 @@ def extract_requested_labels(result: dict[str, Any]) -> list[str]:
         return []
     return dedupe_strings(raw_labels)
 
-def _on_poll(
-    github: GitHubClient,
-    owner: str,
-    repo: str,
-    comment_id: int,
-    metadata: str,
-    last_session_link: dict[str, str],
-    run: object,
-) -> None:
+def _on_poll(progress: WorkflowProgressComment, run: object) -> None:
     session_link = getattr(run, "session_link", None) or ""
-    if not session_link or session_link == last_session_link["value"]:
-        return
-    update_status_comment(
-        github,
-        owner,
-        repo,
-        comment_id,
-        status_line="Oz has started triaging this issue.",
-        metadata=metadata,
-        session_link=session_link,
-    )
-    last_session_link["value"] = session_link
+    progress.record_session_link(session_link)
 
 
 def format_issue_comments(

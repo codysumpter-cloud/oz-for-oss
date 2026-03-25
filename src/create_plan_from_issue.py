@@ -11,8 +11,7 @@ from oz_workflows.helpers import (
     build_plan_preview_section,
     org_member_comments_text,
     triggering_comment_prompt_text,
-    update_status_comment,
-    upsert_status_comment,
+    WorkflowProgressComment,
 )
 from oz_workflows.oz_client import build_agent_config, run_agent
 
@@ -32,18 +31,15 @@ def main() -> None:
         comments = github.list_issue_comments(owner, repo, issue_number)
         comments_text = org_member_comments_text(comments, exclude_comment_id=triggering_comment_id)
         triggering_comment_text = triggering_comment_prompt_text(event)
-        status_comment = upsert_status_comment(
+        progress = WorkflowProgressComment(
             github,
             owner,
             repo,
             issue_number,
-            event_payload=event,
             workflow="create-plan-from-issue",
-            status_line="Oz is starting work on an implementation plan for this issue.",
+            event_payload=event,
         )
-        comment_id = int(status_comment["id"])
-        metadata = status_comment["_oz_metadata"]
-        last_session_link = {"value": ""}
+        progress.start("Oz is starting work on an implementation plan for this issue.")
 
         prompt = dedent(
             f"""
@@ -86,16 +82,7 @@ def main() -> None:
             skill_name="create-plan",
             title=f"Create plan for issue #{issue_number}",
             config=config,
-            on_poll=lambda current_run: _on_poll(
-                github,
-                owner,
-                repo,
-                comment_id,
-                metadata,
-                last_session_link,
-                current_run,
-                "Oz is starting work on an implementation plan for this issue.",
-            ),
+            on_poll=lambda current_run: _on_poll(progress, current_run),
         )
 
         if not branch_updated_since(
@@ -105,14 +92,7 @@ def main() -> None:
             branch_name,
             created_after=run.created_at - timedelta(minutes=1),
         ):
-            update_status_comment(
-                github,
-                owner,
-                repo,
-                comment_id,
-                status_line="I analyzed this issue but did not produce a plan diff.",
-                metadata=metadata,
-            )
+            progress.complete("I analyzed this issue but did not produce a plan diff.")
             return
 
         existing_prs = github.list_pulls(owner, repo, state="open", head=f"{owner}:{branch_name}")
@@ -145,43 +125,16 @@ def main() -> None:
                 "Request or make any needed plan updates before moving on to implementation.",
             ]
         )
-        update_status_comment(
-            github,
-            owner,
-            repo,
-            comment_id,
-            status_line=(
-                f"I created a plan PR for this issue: {pr['html_url']}\n\n"
-                f"{plan_preview_section}\n\n"
-                f"{next_steps_section}"
-            ),
-            metadata=metadata,
+        progress.complete(
+            f"I created a plan PR for this issue: {pr['html_url']}\n\n"
+            f"{plan_preview_section}\n\n"
+            f"{next_steps_section}"
         )
 
 
-def _on_poll(
-    github: GitHubClient,
-    owner: str,
-    repo: str,
-    comment_id: int,
-    metadata: str,
-    last_session_link: dict[str, str],
-    run: object,
-    status_line: str,
-) -> None:
+def _on_poll(progress: WorkflowProgressComment, run: object) -> None:
     session_link = getattr(run, "session_link", None) or ""
-    if not session_link or session_link == last_session_link["value"]:
-        return
-    update_status_comment(
-        github,
-        owner,
-        repo,
-        comment_id,
-        status_line=status_line,
-        metadata=metadata,
-        session_link=session_link,
-    )
-    last_session_link["value"] = session_link
+    progress.record_session_link(session_link)
 
 
 if __name__ == "__main__":

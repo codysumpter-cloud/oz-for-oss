@@ -52,6 +52,7 @@ jobs:
     uses: ./.github/workflows/enforce-pr-issue-state.yml
     with:
       pr_number: ${{ github.event.pull_request.number }}
+      requester: ${{ github.actor }}
     secrets: inherit
   review_pr_after_enforcement:
     needs: [enforce_issue_state]
