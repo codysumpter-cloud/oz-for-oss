@@ -1,6 +1,10 @@
-node_modules/
-dist/
-todos.json
-*.js.map
-*.d.ts
-!src/**/*.d.ts
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+triage_result.json
+review.json
+pr_diff.txt
+pr_description.txt
+implementation_plan_context.md

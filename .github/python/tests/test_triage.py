@@ -33,7 +33,7 @@ class LoadTriageConfigTest(unittest.TestCase):
 
 class DedupeStringsTest(unittest.TestCase):
     def test_preserves_order_while_deduplicating(self) -> None:
-        self.assertEqual(dedupe_strings(["triaged", "bug", "triaged", "bug", "area:cli"]), ["triaged", "bug", "area:cli"])
+        self.assertEqual(dedupe_strings(["triaged", "bug", "triaged", "bug", "area:workflow"]), ["triaged", "bug", "area:workflow"])
 
 
 class SelectRecentUntriagedIssuesTest(unittest.TestCase):
@@ -102,6 +102,7 @@ class PreservedOriginalReportTest(unittest.TestCase):
         self.assertIn(ORIGINAL_REPORT_END, updated)
         self.assertIn("<summary>Original issue report</summary>", updated)
         self.assertIn("Original report text", updated)
+
 class ResolveIssueNumberOverrideTest(unittest.TestCase):
     def test_uses_issue_number_from_issue_comment_event(self) -> None:
         self.assertEqual(

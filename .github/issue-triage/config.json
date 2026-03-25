@@ -36,37 +36,18 @@
       "color": "CFD3D7",
       "description": "There is not enough information to estimate reproducibility"
     },
-    "area:cli": {
-      "color": "5319E7",
-      "description": "The command-line todo application behavior"
-    },
-    "area:data": {
-      "color": "1D76DB",
-      "description": "Todo persistence, file storage, or data modeling"
-    },
     "area:workflow": {
       "color": "7057FF",
-      "description": "GitHub workflows, automation, or Oz integration"
+      "description": "GitHub workflows, Python automation, or Oz integration"
     }
   },
   "stakeholders": [
     {
-      "name": "CLI maintainers",
+      "name": "Workflow and automation maintainers",
       "path_prefixes": [
-        "src/"
-      ],
-      "experts": [
-        "captainsafia"
-      ],
-      "default_labels": [
-        "area:cli",
-        "area:data"
-      ]
-    },
-    {
-      "name": "Workflow maintainers",
-      "path_prefixes": [
-        ".github/"
+        ".github/python/",
+        ".github/workflows/",
+        ".github/issue-triage/"
       ],
       "experts": [
         "captainsafia"
@@ -76,10 +57,11 @@
       ]
     },
     {
-      "name": "Documentation maintainers",
+      "name": "Documentation and plan maintainers",
       "path_prefixes": [
         "README.md",
-        "CONTRIBUTING.md"
+        "CONTRIBUTING.md",
+        "plans/"
       ],
       "experts": [
         "captainsafia"

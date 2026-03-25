@@ -193,7 +193,7 @@ def process_issue(
         - Create `triage_result.json` with exactly this shape:
           {{
             "summary": "one-sentence triage summary",
-            "labels": ["triaged", "bug", "area:cli", "repro:medium"],
+            "labels": ["triaged", "bug", "area:workflow", "repro:medium"],
             "reproducibility": {{"level": "high | medium | low | unknown", "reasoning": "string"}},
             "root_cause": {{"summary": "string", "confidence": "high | medium | low", "relevant_files": ["path/to/file"]}},
             "sme_candidates": [{{"login": "github-login", "reason": "string"}}],
