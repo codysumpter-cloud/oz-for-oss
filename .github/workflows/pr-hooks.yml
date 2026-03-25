@@ -61,7 +61,7 @@ jobs:
       github.event.pull_request.draft == false &&
       !startsWith(github.event.pull_request.head.ref, 'cherrypick') &&
       needs.enforce_issue_state.outputs.allow_review == 'true'
-    uses: ./.github/workflows/warp_review_pr.yml
+    uses: ./.github/workflows/review-pull-request.yml
     with:
       pr_number: ${{ github.event.pull_request.number }}
       trigger_source: pull_request_target
@@ -72,7 +72,7 @@ jobs:
     if: >-
       github.event_name != 'pull_request_target' &&
       needs.resolve_review_context.outputs.should_review == 'true'
-    uses: ./.github/workflows/warp_review_pr.yml
+    uses: ./.github/workflows/review-pull-request.yml
     with:
       pr_number: ${{ needs.resolve_review_context.outputs.pr_number }}
       trigger_source: ${{ needs.resolve_review_context.outputs.trigger_source }}
