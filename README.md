@@ -7,7 +7,8 @@
 - `.github/workflows/` contains the GitHub Actions workflows that trigger Oz automation.
 - `src/` contains the Python entrypoints that those workflows execute.
 - `src/oz_workflows/` contains shared helpers for GitHub Actions outputs, environment loading, GitHub API access, transport comments, and Oz client integration.
-- `.github/issue-triage/` contains triage labels and stakeholder routing configuration.
+- `.github/issue-triage/` contains triage label definitions used during issue triage.
+- `.github/STAKEHOLDERS` maps repository path patterns to subject-matter expert GitHub usernames, using CODEOWNERS-style syntax.
 - `plans/` stores committed implementation plan artifacts associated with issues.
 
 ## Workflow surface
@@ -49,6 +50,20 @@ Common entrypoints include:
 - `src/create_implementation_from_issue.py`
 - `src/enforce_pr_issue_state.py`
 - `src/review_pr.py`
+
+## Bootstrapping triage configuration
+
+To set up or update the issue triage configuration for a repository, use the `bootstrap-issue-config` skill. This skill:
+
+1. Fetches existing labels from the repository and classifies them into area, feature, and status categories.
+2. Analyzes recent issues and issue templates to discover additional labels.
+3. Generates or updates `.github/issue-triage/config.json` with label definitions (colors and descriptions).
+4. Generates or updates `.github/STAKEHOLDERS` by inspecting CODEOWNERS, recent git contributors, and existing stakeholder information.
+5. Creates any missing labels on the repository via the GitHub API.
+
+The skill is idempotent — re-running it merges new discoveries with existing configuration rather than overwriting it.
+
+The `config.json` file contains **only** label definitions. Stakeholder ownership is managed separately in the `.github/STAKEHOLDERS` file, which uses the same glob-based syntax as GitHub CODEOWNERS files.
 
 ## Repository conventions
 

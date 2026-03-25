@@ -1,0 +1,12 @@
+# Syntax follows CODEOWNERS conventions: later rules take precedence.
+# NOTE: This file is advisory only — GitHub does not enforce it.
+
+# --- Workflow and automation ---
+/src/ @captainsafia
+/.github/workflows/ @captainsafia
+/.github/issue-triage/ @captainsafia
+
+# --- Documentation and plans ---
+/README.md @captainsafia
+/CONTRIBUTING.md @captainsafia
+/plans/ @captainsafia

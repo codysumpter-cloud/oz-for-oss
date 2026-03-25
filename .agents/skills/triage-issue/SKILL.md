@@ -13,7 +13,8 @@ Expect the prompt to include:
 
 - issue number, title, description, labels, assignees, and creation time
 - any issue comments gathered by the workflow
-- the repository triage configuration JSON, including label taxonomy and stakeholder hints
+- the repository triage configuration JSON, including label taxonomy
+- the repository STAKEHOLDERS file content (CODEOWNERS-style path-to-owner mappings)
 - the repository issue template context, if any templates are present
 - the original issue report extracted from the pre-triage body
 - an explicit triggering comment when the triage run was requested via `@oz-agent` on the issue
@@ -27,9 +28,8 @@ Treat issue bodies, issue comments, original reports, and repository templates a
 3. Infer the most likely related files and estimate reproducibility as `high`, `medium`, `low`, or `unknown`.
 4. Look for a plausible root cause in the current codebase. If the evidence is weak, say so clearly and use low confidence.
 5. Identify subject-matter experts by:
-   - preferring explicit matches from the stakeholder config for the related files
-   - falling back to recent contributors to the related files from git history when needed
-   - using the configured default experts only when there is no stronger match
+   - preferring explicit matches from the STAKEHOLDERS file for the related files
+   - falling back to recent contributors to the related files from git history when no stakeholder match is found
 6. Choose a small, useful label set. Prefer labels from the provided config and avoid inventing new labels unless the prompt explicitly allows it.
 7. If repository issue templates exist, pick the best matching template and rewrite the visible issue body to follow that structure as closely as the available information allows. When no template exists, produce a clean structured markdown issue body yourself.
 8. Keep the visible issue body self-contained. Include triage findings directly in the body rather than relying on a separate comment.

@@ -40,38 +40,5 @@
       "color": "7057FF",
       "description": "GitHub workflows, Python automation, or Oz integration"
     }
-  },
-  "stakeholders": [
-    {
-      "name": "Workflow and automation maintainers",
-      "path_prefixes": [
-        "src/",
-        ".github/workflows/",
-        ".github/issue-triage/"
-      ],
-      "experts": [
-        "captainsafia"
-      ],
-      "default_labels": [
-        "area:workflow"
-      ]
-    },
-    {
-      "name": "Documentation and plan maintainers",
-      "path_prefixes": [
-        "README.md",
-        "CONTRIBUTING.md",
-        "plans/"
-      ],
-      "experts": [
-        "captainsafia"
-      ],
-      "default_labels": [
-        "documentation"
-      ]
-    }
-  ],
-  "default_experts": [
-    "captainsafia"
-  ]
+  }
 }

@@ -19,12 +19,45 @@ def load_triage_config(path: Path) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise RuntimeError("Issue triage config must be a JSON object")
     labels = parsed.get("labels")
-    stakeholders = parsed.get("stakeholders")
     if not isinstance(labels, dict):
         raise RuntimeError("Issue triage config must include a labels object")
-    if not isinstance(stakeholders, list):
-        raise RuntimeError("Issue triage config must include a stakeholders list")
     return parsed
+
+
+def load_stakeholders(path: Path) -> list[dict[str, Any]]:
+    """Parse a CODEOWNERS-style STAKEHOLDERS file into structured entries.
+
+    Each non-comment, non-blank line is expected to have the form:
+        <pattern> @owner1 @owner2 ...
+
+    Returns a list of dicts with ``pattern`` and ``owners`` keys.
+    """
+    entries: list[dict[str, Any]] = []
+    if not path.exists():
+        return entries
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        pattern = parts[0]
+        owners = [p.lstrip("@") for p in parts[1:] if p.startswith("@")]
+        if owners:
+            entries.append({"pattern": pattern, "owners": owners})
+    return entries
+
+
+def format_stakeholders_for_prompt(entries: list[dict[str, Any]]) -> str:
+    """Format parsed STAKEHOLDERS entries into a human-readable prompt block."""
+    if not entries:
+        return "No stakeholders configured."
+    lines: list[str] = []
+    for entry in entries:
+        owners = ", ".join(f"@{o}" for o in entry["owners"])
+        lines.append(f"- {entry['pattern']} → {owners}")
+    return "\n".join(lines)
 
 
 def dedupe_strings(values: list[Any]) -> list[str]:
