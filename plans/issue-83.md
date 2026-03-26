@@ -119,9 +119,7 @@ Rename and update the following functions:
 - `build_plan_preview_section()` → `build_spec_preview_section()`: generate preview links for both `specs/{number}/product.md` and `specs/{number}/tech.md`.
 - `read_local_plan_file()` → `read_local_spec_files()`: read from `specs/{number}/product.md` and `specs/{number}/tech.md`.
 - `find_matching_plan_prs()` → `find_matching_spec_prs()`: look for branches named `oz-agent/spec-issue-{number}` instead of `oz-agent/plan-issue-{number}`. Update the file-matching logic to look for files under `specs/` instead of `plans/`.
-- `resolve_plan_context_for_issue()` → `resolve_spec_context_for_issue()`: update all internal references to use the renamed functions and new paths.
-- `resolve_plan_context_for_pr()` → `resolve_spec_context_for_pr()`: same updates.
-- `resolve_issue_number_for_pr()`: update the regex for branch name matching from `plan-issue-` to `spec-issue-`, and the file path regex from `^plans/issue-(\\d+)\\.md$` to `^specs/(\\d+)/(?:product|tech)\\.md$`.
+- `resolve_issue_number_for_pr()`: update the regex for branch name matching from `(?:plan|implement)-issue-` to `(?:spec|implement)-issue-`, and the file path regex from `^plans/issue-(\\d+)\\.md$` to `^specs/(\\d+)/(?:product|tech)\\.md$`.
 
 #### 9. Update `src/enforce_pr_issue_state.py`
 
