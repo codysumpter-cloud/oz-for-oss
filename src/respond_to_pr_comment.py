@@ -12,7 +12,7 @@ from oz_workflows.helpers import (
     coauthor_prompt_lines,
     org_member_comments_text,
     resolve_coauthor_line,
-    resolve_plan_context_for_pr,
+    resolve_spec_context_for_pr,
     review_thread_comments_text,
     WorkflowProgressComment,
 )
@@ -148,26 +148,26 @@ def _run_implementation(
     )
     progress.start("Oz is working on changes requested in this PR.")
 
-    plan_context = resolve_plan_context_for_pr(
+    spec_context = resolve_spec_context_for_pr(
         github,
         owner,
         repo,
         pr,
         workspace=workspace(),
     )
-    plan_sections: list[str] = []
-    selected_plan_pr = plan_context.get("selected_plan_pr")
-    if plan_context.get("plan_context_source") == "approved-pr" and selected_plan_pr:
-        plan_sections.append(
-            f"Linked approved plan PR: #{selected_plan_pr['number']} ({selected_plan_pr['url']})"
+    spec_sections: list[str] = []
+    selected_spec_pr = spec_context.get("selected_spec_pr")
+    if spec_context.get("spec_context_source") == "approved-pr" and selected_spec_pr:
+        spec_sections.append(
+            f"Linked approved spec PR: #{selected_spec_pr['number']} ({selected_spec_pr['url']})"
         )
-    elif plan_context.get("plan_context_source") == "directory":
-        plan_sections.append("Repository plan context was found in `plans/`.")
-    for entry in plan_context.get("plan_entries", []):
-        plan_sections.append(f"## {entry['path']}\n\n{entry['content']}")
-    plan_context_text = (
-        "\n\n".join(plan_sections).strip()
-        or "No approved or repository plan context was found."
+    elif spec_context.get("spec_context_source") == "directory":
+        spec_sections.append("Repository spec context was found in `specs/`.")
+    for entry in spec_context.get("spec_entries", []):
+        spec_sections.append(f"## {entry['path']}\n\n{entry['content']}")
+    spec_context_text = (
+        "\n\n".join(spec_sections).strip()
+        or "No approved or repository spec context was found."
     )
 
     prompt = dedent(
@@ -186,8 +186,8 @@ def _run_implementation(
         {context_label}:
         {additional_context or '- None'}
 
-        Plan Context:
-        {plan_context_text}
+        Spec Context:
+        {spec_context_text}
 
         Cloud Workflow Requirements:
         - Use the repository's local `implement-issue` skill as the base workflow.

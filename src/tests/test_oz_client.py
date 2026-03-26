@@ -38,7 +38,7 @@ class SkillSpecTest(unittest.TestCase):
         )
 
     def test_preserves_already_qualified_skill_spec(self) -> None:
-        qualified = "warpdotdev/oz-oss-testbed:.agents/skills/create-plan/SKILL.md"
+        qualified = "warpdotdev/oz-oss-testbed:.agents/skills/create-tech-spec/SKILL.md"
         self.assertEqual(skill_spec(qualified), qualified)
 
 

@@ -12,14 +12,14 @@ Review the current pull request and write the output to `review.json`.
 - The working directory is the PR branch checkout.
 - The workflow usually provides an annotated diff in `pr_diff.txt`.
 - The workflow usually provides the PR description in `pr_description.txt`.
-- If `implementation_plan_context.md` exists, it contains plan context for implementation-vs-plan validation.
+- If `spec_context.md` exists, it contains spec context for implementation-vs-spec validation.
 - Focus on files and lines changed by this PR.
 - Default behavior: do not post comments or reviews to GitHub directly. If the prompt explicitly says you are running in a cloud-environment workflow and asks you to return `review.json` through a temporary machine-readable transport comment, you may create that temporary transport comment only.
 
 ## Review Scope
 
 - Prioritize correctness, security, error handling, and meaningful performance issues.
-- When `implementation_plan_context.md` exists, use the repository's local `check-impl-against-plan` skill and treat material plan drift as a review concern.
+- When `spec_context.md` exists, use the repository's local `check-impl-against-spec` skill and treat material spec drift as a review concern.
 - Include style or nit comments only when you can provide a concrete suggestion block.
 - If a concern involves untouched code, mention it in the summary instead of an inline comment.
 
@@ -114,5 +114,5 @@ If the prompt says you are in a cloud-environment workflow and the expected loca
 
 - Create `pr_description.txt` yourself from the PR body or GitHub metadata provided in the prompt.
 - Fetch the PR branch and base branch, then generate `pr_diff.txt` yourself in the annotated format above before reviewing.
-- If the prompt includes plan context to materialize, write it to `implementation_plan_context.md` before running the review.
+- If the prompt includes spec context to materialize, write it to `spec_context.md` before running the review.
 - Still produce `review.json`, validate it, and then return it exactly as the prompt requests.

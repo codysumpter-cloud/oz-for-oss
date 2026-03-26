@@ -9,9 +9,9 @@ class CommentUpdateTest(unittest.TestCase):
     def test_appends_instead_of_replacing(self) -> None:
         metadata = "<!-- meta -->"
         existing = build_comment_body("@alice\n\nOz is working on this issue.\n\nSharing session at: https://example.test/session/123", metadata)
-        updated = append_comment_sections(existing, metadata, ["I created a plan PR for this issue: https://example.test/pr/1"])
+        updated = append_comment_sections(existing, metadata, ["I created a spec PR for this issue: https://example.test/pr/1"])
         self.assertIn("Sharing session at: https://example.test/session/123", updated)
-        self.assertIn("I created a plan PR for this issue: https://example.test/pr/1", updated)
+        self.assertIn("I created a spec PR for this issue: https://example.test/pr/1", updated)
         self.assertTrue(updated.endswith(metadata))
     def test_progress_comment_keeps_history_in_single_comment(self) -> None:
         github = FakeGitHubClient()
@@ -20,19 +20,19 @@ class CommentUpdateTest(unittest.TestCase):
             "acme",
             "widgets",
             42,
-            workflow="create-plan-from-issue",
+            workflow="create-spec-from-issue",
             requester_login="alice",
         )
-        progress.start("Oz is starting work on an implementation plan for this issue.")
+        progress.start("Oz is starting work on product and tech specs for this issue.")
         progress.record_session_link("https://example.test/session/123")
-        progress.complete("I created a plan PR for this issue: https://example.test/pr/1")
+        progress.complete("I created a spec PR for this issue: https://example.test/pr/1")
 
         self.assertEqual(len(github.comments), 1)
         body = github.comments[0]["body"]
         self.assertIn("@alice", body)
-        self.assertIn("Oz is starting work on an implementation plan for this issue.", body)
+        self.assertIn("Oz is starting work on product and tech specs for this issue.", body)
         self.assertIn("Sharing session at: https://example.test/session/123", body)
-        self.assertIn("I created a plan PR for this issue: https://example.test/pr/1", body)
+        self.assertIn("I created a spec PR for this issue: https://example.test/pr/1", body)
 
 
 class FakeGitHubClient:

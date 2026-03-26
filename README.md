@@ -9,14 +9,14 @@
 - `src/oz_workflows/` contains shared helpers for GitHub Actions outputs, environment loading, GitHub API access, transport comments, and Oz client integration.
 - `.github/issue-triage/` contains triage label definitions used during issue triage.
 - `.github/STAKEHOLDERS` maps repository path patterns to subject-matter expert GitHub usernames, using CODEOWNERS-style syntax.
-- `plans/` stores committed implementation plan artifacts associated with issues.
+- `specs/` stores committed product and technical spec artifacts associated with issues, organized as `specs/issue-{number}/product.md` and `specs/issue-{number}/tech.md`.
 
 ## Workflow surface
 
 This repository currently automates:
 
 - issue triage
-- implementation-plan creation
+- product and tech spec creation
 - issue implementation scaffolding
 - PR issue-state enforcement
 - PR review orchestration
@@ -46,7 +46,7 @@ The scripts under `src/` are designed to run inside GitHub Actions, so they expe
 Common entrypoints include:
 
 - `src/triage_new_issues.py`
-- `src/create_plan_from_issue.py`
+- `src/create_spec_from_issue.py`
 - `src/create_implementation_from_issue.py`
 - `src/enforce_pr_issue_state.py`
 - `src/review_pr.py`

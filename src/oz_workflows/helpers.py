@@ -336,10 +336,16 @@ def coauthor_prompt_lines(coauthor_line: str) -> str:
     return "- Do not include any Co-Authored-By lines in commit messages."
 
 
-def build_plan_preview_section(owner: str, repo: str, branch_name: str, issue_number: int) -> str:
-    plan_path = f"plans/issue-{issue_number}.md"
-    preview_url = f"https://github.com/{owner}/{repo}/blob/{branch_name}/{plan_path}"
-    return f"Preview generated plan: [{plan_path}]({preview_url})"
+def build_spec_preview_section(owner: str, repo: str, branch_name: str, issue_number: int) -> str:
+    product_path = f"specs/issue-{issue_number}/product.md"
+    tech_path = f"specs/issue-{issue_number}/tech.md"
+    product_url = f"https://github.com/{owner}/{repo}/blob/{branch_name}/{product_path}"
+    tech_url = f"https://github.com/{owner}/{repo}/blob/{branch_name}/{tech_path}"
+    return (
+        f"Preview generated specs:\n"
+        f"- Product spec: [{product_path}]({product_url})\n"
+        f"- Tech spec: [{tech_path}]({tech_url})"
+    )
 
 
 def _summarize_commits(commits: list[dict[str, Any]]) -> str:
@@ -434,14 +440,14 @@ def branch_updated_since(
     return committed_at >= created_after
 
 
-def find_matching_plan_prs(
+def find_matching_spec_prs(
     github: GitHubClient,
     owner: str,
     repo: str,
     issue_number: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    expected_plan_branch = f"oz-agent/plan-issue-{issue_number}"
-    matching = github.list_pulls(owner, repo, state="all", head=f"{owner}:{expected_plan_branch}")
+    expected_spec_branch = f"oz-agent/spec-issue-{issue_number}"
+    matching = github.list_pulls(owner, repo, state="all", head=f"{owner}:{expected_spec_branch}")
     approved: list[dict[str, Any]] = []
     unapproved: list[dict[str, Any]] = []
     for pr in matching:
@@ -450,10 +456,10 @@ def find_matching_plan_prs(
             for label in pr.get("labels", [])
         ]
         files = github.list_pull_files(owner, repo, int(pr["number"]))
-        plan_files = [
+        spec_files = [
             file["filename"]
             for file in files
-            if file["filename"].startswith("plans/")
+            if file["filename"].startswith("specs/")
         ]
         entry = {
             "number": pr["number"],
@@ -461,7 +467,7 @@ def find_matching_plan_prs(
             "updated_at": pr["updated_at"],
             "head_ref_name": pr["head"]["ref"],
             "head_repo_full_name": (pr.get("head") or {}).get("repo", {}).get("full_name", ""),
-            "plan_files": plan_files,
+            "spec_files": spec_files,
         }
         if "plan-approved" in labels:
             approved.append(entry)
@@ -472,14 +478,18 @@ def find_matching_plan_prs(
     return approved, unapproved
 
 
-def read_local_plan_file(workspace: Path, issue_number: int) -> tuple[str, str] | None:
-    path = workspace / "plans" / f"issue-{issue_number}.md"
-    if not path.exists():
-        return None
-    return (f"plans/issue-{issue_number}.md", path.read_text(encoding="utf-8").strip())
+def read_local_spec_files(workspace: Path, issue_number: int) -> list[tuple[str, str]]:
+    spec_dir = workspace / "specs" / f"issue-{issue_number}"
+    results: list[tuple[str, str]] = []
+    for name in ("product.md", "tech.md"):
+        path = spec_dir / name
+        if path.exists():
+            rel = f"specs/issue-{issue_number}/{name}"
+            results.append((rel, path.read_text(encoding="utf-8").strip()))
+    return results
 
 
-def resolve_plan_context_for_issue(
+def resolve_spec_context_for_issue(
     github: GitHubClient,
     owner: str,
     repo: str,
@@ -487,33 +497,33 @@ def resolve_plan_context_for_issue(
     *,
     workspace: Path,
 ) -> dict[str, Any]:
-    approved, unapproved = find_matching_plan_prs(github, owner, repo, issue_number)
+    approved, unapproved = find_matching_spec_prs(github, owner, repo, issue_number)
     selected = approved[0] if approved else None
-    local_plan = read_local_plan_file(workspace, issue_number)
+    local_specs = read_local_spec_files(workspace, issue_number)
     if selected and selected["head_repo_full_name"] != f"{owner}/{repo}":
         raise RuntimeError(
-            f"Linked approved plan PR #{selected['number']} uses branch "
+            f"Linked approved spec PR #{selected['number']} uses branch "
             f"{selected['head_repo_full_name']}:{selected['head_ref_name']}, which this workflow cannot push to."
         )
 
-    plan_context_source = "approved-pr" if selected else "directory" if local_plan else ""
-    plan_entries: list[dict[str, str]] = []
+    spec_context_source = "approved-pr" if selected else "directory" if local_specs else ""
+    spec_entries: list[dict[str, str]] = []
     if selected:
-        for path in selected["plan_files"]:
+        for path in selected["spec_files"]:
             content = github.get_contents_text(owner, repo, path, ref=selected["head_ref_name"])
             if content is None:
                 continue
-            plan_entries.append({"path": path, "content": content.strip()})
-    elif local_plan:
-        path, content = local_plan
-        plan_entries.append({"path": path, "content": content})
+            spec_entries.append({"path": path, "content": content.strip()})
+    elif local_specs:
+        for path, content in local_specs:
+            spec_entries.append({"path": path, "content": content})
 
     return {
-        "selected_plan_pr": selected,
-        "approved_plan_prs": approved,
-        "unapproved_plan_prs": unapproved,
-        "plan_context_source": plan_context_source,
-        "plan_entries": plan_entries,
+        "selected_spec_pr": selected,
+        "approved_spec_prs": approved,
+        "unapproved_spec_prs": unapproved,
+        "spec_context_source": spec_context_source,
+        "spec_entries": spec_entries,
     }
 
 
@@ -606,16 +616,16 @@ def resolve_issue_number_for_pr(
 ) -> int | None:
     branch_issue_matches = [
         int(match.group(1))
-        for match in re.finditer(r"(?:^|/)(?:plan|implement)-issue-(\d+)(?:$|[/-])", pr["head"]["ref"])
+        for match in re.finditer(r"(?:^|/)(?:spec|implement)-issue-(\d+)(?:$|[/-])", pr["head"]["ref"])
     ]
-    plan_file_issue_numbers = [
+    spec_file_issue_numbers = [
         int(match.group(1))
         for filename in changed_files
-        for match in [re.match(r"^plans/issue-(\d+)\.md$", filename)]
+        for match in [re.match(r"^specs/issue-(\d+)/(?:product|tech)\.md$", filename)]
         if match
     ]
     explicit_issue_numbers = extract_issue_numbers_from_text(owner, repo, pr.get("body") or "")
-    candidates = list(dict.fromkeys(branch_issue_matches + plan_file_issue_numbers + explicit_issue_numbers))
+    candidates = list(dict.fromkeys(branch_issue_matches + spec_file_issue_numbers + explicit_issue_numbers))
     for candidate in candidates:
         issue = github.get_issue(owner, repo, candidate)
         if not issue.get("pull_request"):
@@ -623,7 +633,7 @@ def resolve_issue_number_for_pr(
     return None
 
 
-def resolve_plan_context_for_pr(
+def resolve_spec_context_for_pr(
     github: GitHubClient,
     owner: str,
     repo: str,
@@ -637,16 +647,16 @@ def resolve_plan_context_for_pr(
     if not issue_number:
         return {
             "issue_number": None,
-            "plan_context_source": "",
-            "selected_plan_pr": None,
-            "plan_entries": [],
+            "spec_context_source": "",
+            "selected_spec_pr": None,
+            "spec_entries": [],
         }
-    plan_context = resolve_plan_context_for_issue(
+    spec_context = resolve_spec_context_for_issue(
         github,
         owner,
         repo,
         issue_number,
         workspace=workspace,
     )
-    plan_context["issue_number"] = issue_number
-    return plan_context
+    spec_context["issue_number"] = issue_number
+    return spec_context
