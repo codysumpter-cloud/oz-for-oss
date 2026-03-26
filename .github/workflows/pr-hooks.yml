@@ -30,16 +30,8 @@ jobs:
       focus: ${{ steps.resolve.outputs.focus }}
       comment_id: ${{ steps.resolve.outputs.comment_id }}
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install Python workflow dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r src/requirements.txt
+      - name: Setup Oz environment
+        uses: ./.github/actions/setup-oz-env
       - name: Resolve review context
         id: resolve
         env:
