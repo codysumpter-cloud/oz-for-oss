@@ -261,6 +261,27 @@ def conventional_commit_prefix(labels: list[dict[str, Any] | str], *, default: s
     return default
 
 
+# Accounts created on or after this date use the ``ID+login`` noreply format.
+# See https://docs.github.com/en/account-and-profile/reference/email-addresses-reference#your-noreply-email-address
+_NOREPLY_ID_CUTOFF = datetime(2017, 7, 18, tzinfo=timezone.utc)
+
+
+def _noreply_email(login: str, user_id: int | None, created_at: str | None) -> str:
+    """Build the GitHub noreply email for *login*.
+
+    GitHub uses two noreply formats depending on account age:
+    * Before 2017-07-18: ``login@users.noreply.github.com``
+    * On or after 2017-07-18: ``ID+login@users.noreply.github.com``
+    """
+    if created_at is not None and user_id is not None:
+        try:
+            if parse_datetime(created_at) >= _NOREPLY_ID_CUTOFF:
+                return f"{user_id}+{login}@users.noreply.github.com"
+        except (ValueError, TypeError):
+            pass
+    return f"{login}@users.noreply.github.com"
+
+
 def resolve_coauthor_line(
     github: GitHubClient,
     event_payload: dict[str, Any],
@@ -270,10 +291,14 @@ def resolve_coauthor_line(
     The triggering user is determined from the event payload (comment author,
     then sender).  Their public profile is fetched via ``GET /users/{login}``
     (accessible to GitHub App installation tokens, unlike ``GET /user``) to
-    obtain a display name.
+    obtain a display name and account creation date.
 
-    Returns a formatted ``Co-Authored-By: Name <login@users.noreply.github.com>``
-    string, or an empty string if the user cannot be resolved.
+    The noreply email format is derived from the account creation date:
+    accounts created before 2017-07-18 use ``login@users.noreply.github.com``,
+    while newer accounts use ``ID+login@users.noreply.github.com``.
+
+    Returns a formatted ``Co-Authored-By`` string, or an empty string if the
+    user cannot be resolved.
     """
     comment = event_payload.get("comment")
     login: str = ""
@@ -290,7 +315,9 @@ def resolve_coauthor_line(
         user = None
 
     name = (user.get("name") if user else None) or login
-    email = f"{login}@users.noreply.github.com"
+    user_id = user.get("id") if user else None
+    created_at = user.get("created_at") if user else None
+    email = _noreply_email(login, user_id, created_at)
     return f"Co-Authored-By: {name} <{email}>"
 
 
