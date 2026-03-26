@@ -3,9 +3,11 @@ from __future__ import annotations
 import unittest
 
 from oz_workflows.helpers import (
+    _summarize_commits,
     all_review_comments_text,
     build_next_steps_section,
     build_plan_preview_section,
+    build_pr_body,
     conventional_commit_prefix,
     extract_issue_numbers_from_text,
     org_member_comments_text,
@@ -219,9 +221,101 @@ class AllReviewCommentsTextTest(unittest.TestCase):
         self.assertEqual(all_review_comments_text(comments), "")
 
 
+class SummarizeCommitsTest(unittest.TestCase):
+    def test_extracts_first_line_of_each_commit(self) -> None:
+        commits = [
+            {"commit": {"message": "Add feature X\n\nMore details here"}},
+            {"commit": {"message": "Fix typo in docs"}},
+        ]
+        self.assertEqual(
+            _summarize_commits(commits),
+            "- Add feature X\n- Fix typo in docs",
+        )
+
+    def test_skips_merge_commits(self) -> None:
+        commits = [
+            {"commit": {"message": "Merge branch 'main' into feature"}},
+            {"commit": {"message": "Real change"}},
+        ]
+        self.assertEqual(_summarize_commits(commits), "- Real change")
+
+    def test_skips_empty_messages(self) -> None:
+        commits = [
+            {"commit": {"message": ""}},
+            {"commit": {"message": "Valid commit"}},
+        ]
+        self.assertEqual(_summarize_commits(commits), "- Valid commit")
+
+    def test_returns_empty_string_for_no_commits(self) -> None:
+        self.assertEqual(_summarize_commits([]), "")
+
+
+class BuildPrBodyTest(unittest.TestCase):
+    def test_implementation_pr_includes_closing_keyword(self) -> None:
+        github = FakeGitHubClientWithCompare([
+            {"commit": {"message": "Implement the thing"}},
+        ])
+        body = build_pr_body(
+            github, "acme", "widgets",
+            issue_number=42,
+            head="feature-branch",
+            base="main",
+            closing_keyword="Closes",
+        )
+        self.assertIn("Closes #42", body)
+        self.assertIn("- Implement the thing", body)
+
+    def test_plan_pr_omits_closing_keyword(self) -> None:
+        github = FakeGitHubClientWithCompare([
+            {"commit": {"message": "Add plan"}},
+        ])
+        body = build_pr_body(
+            github, "acme", "widgets",
+            issue_number=42,
+            head="plan-branch",
+            base="main",
+            closing_keyword="",
+        )
+        self.assertNotIn("Closes", body)
+        self.assertIn("Related issue: #42", body)
+        self.assertIn("- Add plan", body)
+
+    def test_includes_session_link(self) -> None:
+        github = FakeGitHubClientWithCompare([])
+        body = build_pr_body(
+            github, "acme", "widgets",
+            issue_number=7,
+            head="branch",
+            base="main",
+            session_link="https://example.com/session",
+            closing_keyword="Fixes",
+        )
+        self.assertIn("Session: https://example.com/session", body)
+
+    def test_no_changes_section_when_no_commits(self) -> None:
+        github = FakeGitHubClientWithCompare([])
+        body = build_pr_body(
+            github, "acme", "widgets",
+            issue_number=7,
+            head="branch",
+            base="main",
+            closing_keyword="Closes",
+        )
+        self.assertNotIn("## Changes", body)
+        self.assertIn("Closes #7", body)
+
+
 class FakeGitHubClient:
     def list_issue_events(self, owner: str, repo: str, issue_number: int) -> list[dict[str, object]]:
         return []
+
+
+class FakeGitHubClientWithCompare:
+    def __init__(self, commits: list[dict[str, object]]) -> None:
+        self._commits = commits
+
+    def compare_commits(self, owner: str, repo: str, base: str, head: str) -> dict[str, object]:
+        return {"commits": self._commits}
 
 
 if __name__ == "__main__":

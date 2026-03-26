@@ -306,3 +306,15 @@ class GitHubClient:
 
     def get_commit(self, owner: str, repo: str, sha: str) -> dict[str, Any]:
         return self.request("GET", f"/repos/{owner}/{repo}/commits/{sha}")
+
+    def compare_commits(
+        self,
+        owner: str,
+        repo: str,
+        base: str,
+        head: str,
+    ) -> dict[str, Any] | None:
+        return self.request_or_none(
+            "GET",
+            f"/repos/{owner}/{repo}/compare/{base}...{head}",
+        )

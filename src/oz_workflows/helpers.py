@@ -249,6 +249,64 @@ def build_plan_preview_section(owner: str, repo: str, branch_name: str, issue_nu
     return f"Preview generated plan: [{plan_path}]({preview_url})"
 
 
+def _summarize_commits(commits: list[dict[str, Any]]) -> str:
+    """Build a bulleted summary from a list of GitHub commit objects.
+
+    Each bullet is the first line of the commit message.  Merge commits and
+    empty messages are skipped.
+    """
+    lines: list[str] = []
+    for commit in commits:
+        msg = (commit.get("commit") or {}).get("message") or ""
+        first_line = msg.split("\n", 1)[0].strip()
+        if not first_line:
+            continue
+        # Skip merge commits produced by GitHub
+        if first_line.startswith("Merge "):
+            continue
+        lines.append(f"- {first_line}")
+    return "\n".join(lines)
+
+
+def build_pr_body(
+    github: GitHubClient,
+    owner: str,
+    repo: str,
+    *,
+    issue_number: int,
+    head: str,
+    base: str,
+    session_link: str = "",
+    closing_keyword: str = "Closes",
+) -> str:
+    """Build a descriptive PR body with an optional GitHub closing keyword.
+
+    *closing_keyword* controls the keyword placed before the issue reference.
+    Pass an empty string to omit the closing reference entirely (e.g. for plan
+    PRs where the issue should stay open).
+    """
+    sections: list[str] = []
+
+    # Closing / reference line
+    if closing_keyword:
+        sections.append(f"{closing_keyword} #{issue_number}")
+    else:
+        sections.append(f"Related issue: #{issue_number}")
+
+    # Commit summary
+    comparison = github.compare_commits(owner, repo, base, head)
+    commits = (comparison or {}).get("commits") or []
+    summary = _summarize_commits(commits)
+    if summary:
+        sections.append(f"## Changes\n{summary}")
+
+    # Session link
+    if session_link:
+        sections.append(f"Session: {session_link}")
+
+    return "\n\n".join(sections)
+
+
 def build_next_steps_section(steps: list[str]) -> str:
     normalized_steps = [step.strip() for step in steps if step and step.strip()]
     if not normalized_steps:
