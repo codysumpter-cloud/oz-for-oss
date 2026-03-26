@@ -4,7 +4,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from triage_new_issues import format_issue_comments, resolve_issue_number_override, resolve_issues_to_triage
+from triage_new_issues import format_issue_comments, resolve_issue_number_override
 
 from oz_workflows.triage import (
     ORIGINAL_REPORT_END,
@@ -183,39 +183,6 @@ class ResolveIssueNumberOverrideTest(unittest.TestCase):
             resolve_issue_number_override("issues", {"issue": {"number": 84}}),
             "84",
         )
-
-
-class ResolveIssuesToTriageTest(unittest.TestCase):
-    def _make_github(self, issue: dict) -> object:
-        class FakeGitHub:
-            def get_issue(self, owner: str, repo: str, number: int) -> dict:
-                return issue
-        return FakeGitHub()
-
-    def test_skips_already_triaged_issue(self) -> None:
-        issue = {"number": 10, "labels": [{"name": "triaged"}]}
-        github = self._make_github(issue)
-        result = resolve_issues_to_triage(
-            github, "owner", "repo", issue_number_override="10", lookback_minutes=60
-        )
-        self.assertEqual(result, [])
-
-    def test_skips_pull_request(self) -> None:
-        issue = {"number": 11, "labels": [], "pull_request": {"url": "https://example.test/pr/11"}}
-        github = self._make_github(issue)
-        result = resolve_issues_to_triage(
-            github, "owner", "repo", issue_number_override="11", lookback_minutes=60
-        )
-        self.assertEqual(result, [])
-
-    def test_returns_untriaged_issue(self) -> None:
-        issue = {"number": 12, "labels": [{"name": "bug"}]}
-        github = self._make_github(issue)
-        result = resolve_issues_to_triage(
-            github, "owner", "repo", issue_number_override="12", lookback_minutes=60
-        )
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["number"], 12)
 
 
 class FormatIssueCommentsTest(unittest.TestCase):

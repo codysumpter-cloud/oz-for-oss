@@ -20,7 +20,6 @@ from oz_workflows.triage import (
     discover_issue_templates,
     extract_original_issue_report,
     format_stakeholders_for_prompt,
-    issue_has_label,
     load_stakeholders,
     load_triage_config,
     select_recent_untriaged_issues,
@@ -110,9 +109,7 @@ def resolve_issues_to_triage(
 ) -> list[dict[str, Any]]:
     if issue_number_override:
         issue = github.get_issue(owner, repo, int(issue_number_override))
-        if issue.get("pull_request") or issue_has_label(issue, "triaged"):
-            return []
-        return [issue]
+        return [] if issue.get("pull_request") else [issue]
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)
     return select_recent_untriaged_issues(
         github.list_repo_issues(owner, repo, state="open"),
