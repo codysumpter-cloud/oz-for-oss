@@ -4,7 +4,22 @@ import os
 import unittest
 from unittest.mock import patch
 
-from oz_workflows.oz_client import skill_spec
+from oz_workflows.oz_client import build_oz_client, skill_spec
+
+
+class BuildOzClientTest(unittest.TestCase):
+    @patch.dict(
+        os.environ,
+        {"WARP_API_KEY": "fake-key", "STAGING_ORIGIN_TOKEN": "fake-token"},
+        clear=False,
+    )
+    @patch("oz_workflows.oz_client.OzAPI")
+    def test_default_headers_include_api_source(self, mock_oz_api: unittest.mock.MagicMock) -> None:
+        build_oz_client()
+        _args, kwargs = mock_oz_api.call_args
+        headers = kwargs["default_headers"]
+        self.assertEqual(headers["x-oz-api-source"], "GITHUB_ACTION")
+        self.assertEqual(headers["X-Warp-Origin-Token"], "fake-token")
 
 
 class SkillSpecTest(unittest.TestCase):
