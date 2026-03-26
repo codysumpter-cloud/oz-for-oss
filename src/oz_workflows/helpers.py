@@ -171,6 +171,24 @@ class WorkflowProgressComment:
     def complete(self, status_line: str) -> None:
         self._append_sections([status_line])
 
+    def cleanup(self) -> None:
+        """Delete the progress comment if one exists from this or a previous run."""
+        if self.comment_id is not None:
+            try:
+                self.github.delete_comment(self.owner, self.repo, self.comment_id)
+            except Exception:
+                pass
+            self.comment_id = None
+            return
+        existing = self._get_or_find_existing_comment()
+        if existing is not None:
+            try:
+                self.github.delete_comment(self.owner, self.repo, int(existing["id"]))
+            except Exception:
+                pass
+            self.comment_id = None
+            self.comment_id = None
+
     def _append_sections(self, sections: list[str]) -> None:
         normalized_sections = [section.strip() for section in sections if section and section.strip()]
         requester = resolve_progress_requester_login(
