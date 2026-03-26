@@ -11,6 +11,15 @@ from oz_workflows.oz_client import build_agent_config, run_agent
 from oz_workflows.transport import new_transport_token, poll_for_transport_payload
 
 
+# PR author associations that indicate org membership.
+_ORG_MEMBER_ASSOCIATIONS = {"MEMBER", "OWNER"}
+
+
+def _is_pr_author_org_member(pr: dict) -> bool:
+    """Return True if the PR author is an organization member or owner."""
+    return pr.get("author_association", "") in _ORG_MEMBER_ASSOCIATIONS
+
+
 def main() -> None:
     owner, repo = repo_parts()
     pr_number = int(require_env("PR_NUMBER"))
@@ -19,6 +28,9 @@ def main() -> None:
         pr = github.get_pull(owner, repo, pr_number)
         if pr["state"] != "open":
             set_output("allow_review", "false")
+            return
+        if _is_pr_author_org_member(pr):
+            set_output("allow_review", "true")
             return
         progress = WorkflowProgressComment(
             github,
