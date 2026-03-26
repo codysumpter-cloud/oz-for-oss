@@ -35,6 +35,8 @@ Reuse the same steps pattern as other workflows: create app token → checkout �
 
 Pass env vars: `GH_TOKEN`, `WARP_API_KEY`, standard `WARP_AGENT_*` vars, plus `WARP_AGENT_IMPLEMENTATION_ENVIRONMENT_ID` / `WARP_AGENT_ENVIRONMENT_ID`.
 
+Permissions: `contents: write`, `id-token: write`, `issues: write`, `pull-requests: write` (matching existing workflow patterns).
+
 ### 2. New Python script — `src/respond_to_pr_comment.py`
 
 Follows the pattern of `create_implementation_from_issue.py`.
@@ -117,4 +119,4 @@ Filters to MEMBER/OWNER and formats all review comments grouped by file path and
 1. **Overlap with `pr-hooks.yml`**: The `issue_comment` trigger for this new workflow overlaps with `pr-hooks.yml` which also listens to `issue_comment`. The new workflow's `if:` guard checks for `@oz-agent` in the body (not `/oz-review`), so they should not conflict. However, care is needed to ensure the guards are mutually exclusive.
 2. **Review comment thread identification**: GitHub's review comment API uses `in_reply_to_id` for threading. A comment that starts a thread has no `in_reply_to_id`, and all replies point to the first comment's `id`. This is straightforward to implement but should be tested.
 3. **Large context**: When `@oz-agent` is mentioned in a top-level comment, pulling all review threads could produce a very large context. Consider truncation or summarization if needed in practice.
-4. **Associated issue resolution**: The agent should also resolve any linked issue to pull in plan context, reusing `resolve_plan_context_for_pr()` from `helpers.py`.
+4. **Associated issue resolution**: The script should resolve any linked issue to pull in plan context, reusing `resolve_plan_context_for_pr()` from `helpers.py`. This is demonstrated by `review_pr.py` and should be incorporated into the prompt-building step of Section 2.
