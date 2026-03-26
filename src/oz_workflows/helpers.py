@@ -331,7 +331,7 @@ def coauthor_prompt_lines(coauthor_line: str) -> str:
     if coauthor_line:
         return (
             f"- Include the following co-author attribution at the end of every commit message: {coauthor_line}\n"
-            "- Do not attempt to resolve the co-author identity yourself (e.g. via GET /user). Use exactly the line provided above."
+            f"            - Do not attempt to resolve the co-author identity yourself (e.g. via GET /user). Use exactly the line provided above."
         )
     return "- Do not include any Co-Authored-By lines in commit messages."
 
