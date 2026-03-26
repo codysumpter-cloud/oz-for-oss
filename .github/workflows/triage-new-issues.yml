@@ -24,7 +24,7 @@ concurrency:
 jobs:
   triage_issues:
     if: |
-      !contains(github.event.issue.labels.*.name, 'triaged') &&
+      (github.event_name == 'issue_comment' || !contains(github.event.issue.labels.*.name, 'triaged')) &&
       (github.event_name != 'issue_comment' || (!github.event.issue.pull_request && contains(github.event.comment.body, '@oz-agent')))
     runs-on: ubuntu-latest
     permissions:
