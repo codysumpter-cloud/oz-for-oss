@@ -54,6 +54,15 @@ jobs:
       pr_number: ${{ github.event.pull_request.number }}
       requester: ${{ github.actor }}
     secrets: inherit
+  run_tests_after_enforcement:
+    needs: [enforce_issue_state]
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.pull_request.state == 'open' &&
+      needs.enforce_issue_state.outputs.allow_review == 'true'
+    uses: ./.github/workflows/run-tests.yml
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
   review_pr_after_enforcement:
     needs: [enforce_issue_state]
     if: >-
