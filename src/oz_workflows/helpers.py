@@ -256,6 +256,7 @@ def _summarize_commits(commits: list[dict[str, Any]]) -> str:
     empty messages are skipped.
     """
     lines: list[str] = []
+    max_lines = 15
     for commit in commits:
         msg = (commit.get("commit") or {}).get("message") or ""
         first_line = msg.split("\n", 1)[0].strip()
@@ -265,6 +266,9 @@ def _summarize_commits(commits: list[dict[str, Any]]) -> str:
         if first_line.startswith("Merge "):
             continue
         lines.append(f"- {first_line}")
+    if len(lines) > max_lines:
+        lines = lines[:max_lines] + [f"- … and {len(lines) - max_lines} more commits"]
+    return "\n".join(lines)
     return "\n".join(lines)
 
 
