@@ -8,9 +8,11 @@ from oz_workflows.helpers import (
     build_next_steps_section,
     build_plan_preview_section,
     build_pr_body,
+    coauthor_prompt_lines,
     conventional_commit_prefix,
     extract_issue_numbers_from_text,
     org_member_comments_text,
+    resolve_coauthor_line,
     resolve_progress_requester_login,
     review_thread_comments_text,
     triggering_comment_prompt_text,
@@ -306,8 +308,76 @@ class BuildPrBodyTest(unittest.TestCase):
 
 
 class FakeGitHubClient:
+    def __init__(self, *, users: dict[str, dict[str, object]] | None = None) -> None:
+        self._users = users or {}
+
     def list_issue_events(self, owner: str, repo: str, issue_number: int) -> list[dict[str, object]]:
         return []
+
+    def get_user(self, username: str) -> dict[str, object] | None:
+        return self._users.get(username)
+
+
+class ResolveCoauthorLineTest(unittest.TestCase):
+    def test_resolves_from_comment_author_with_name(self) -> None:
+        github = FakeGitHubClient(users={"alice": {"name": "Alice Smith", "login": "alice"}})
+        event = {"comment": {"user": {"login": "alice"}}, "sender": {"login": "bot"}}
+        self.assertEqual(
+            resolve_coauthor_line(github, event),
+            "Co-Authored-By: Alice Smith <alice@users.noreply.github.com>",
+        )
+
+    def test_resolves_from_sender_when_no_comment(self) -> None:
+        github = FakeGitHubClient(users={"bob": {"name": "Bob Jones", "login": "bob"}})
+        event = {"sender": {"login": "bob"}}
+        self.assertEqual(
+            resolve_coauthor_line(github, event),
+            "Co-Authored-By: Bob Jones <bob@users.noreply.github.com>",
+        )
+
+    def test_falls_back_to_login_when_name_is_none(self) -> None:
+        github = FakeGitHubClient(users={"alice": {"name": None, "login": "alice"}})
+        event = {"comment": {"user": {"login": "alice"}}}
+        self.assertEqual(
+            resolve_coauthor_line(github, event),
+            "Co-Authored-By: alice <alice@users.noreply.github.com>",
+        )
+
+    def test_falls_back_to_login_when_get_user_returns_none(self) -> None:
+        github = FakeGitHubClient(users={})
+        event = {"sender": {"login": "unknown-user"}}
+        self.assertEqual(
+            resolve_coauthor_line(github, event),
+            "Co-Authored-By: unknown-user <unknown-user@users.noreply.github.com>",
+        )
+
+    def test_returns_empty_when_no_login_available(self) -> None:
+        github = FakeGitHubClient()
+        event: dict[str, object] = {}
+        self.assertEqual(resolve_coauthor_line(github, event), "")
+
+    def test_handles_get_user_exception(self) -> None:
+        class ErrorClient(FakeGitHubClient):
+            def get_user(self, username: str) -> dict[str, object] | None:
+                raise RuntimeError("API error")
+
+        github = ErrorClient()
+        event = {"sender": {"login": "alice"}}
+        self.assertEqual(
+            resolve_coauthor_line(github, event),
+            "Co-Authored-By: alice <alice@users.noreply.github.com>",
+        )
+
+
+class CoauthorPromptLinesTest(unittest.TestCase):
+    def test_returns_include_directive_when_line_provided(self) -> None:
+        result = coauthor_prompt_lines("Co-Authored-By: Alice <alice@users.noreply.github.com>")
+        self.assertIn("Co-Authored-By: Alice <alice@users.noreply.github.com>", result)
+        self.assertIn("Do not attempt to resolve the co-author identity yourself", result)
+
+    def test_returns_omit_directive_when_empty(self) -> None:
+        result = coauthor_prompt_lines("")
+        self.assertIn("Do not include any Co-Authored-By lines", result)
 
 
 class FakeGitHubClientWithCompare:

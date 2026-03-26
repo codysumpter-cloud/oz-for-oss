@@ -10,8 +10,10 @@ from oz_workflows.helpers import (
     branch_updated_since,
     build_next_steps_section,
     build_pr_body,
+    coauthor_prompt_lines,
     conventional_commit_prefix,
     org_member_comments_text,
+    resolve_coauthor_line,
     resolve_plan_context_for_issue,
     triggering_comment_prompt_text,
     WorkflowProgressComment,
@@ -88,6 +90,9 @@ def main() -> None:
             plan_sections.append(f"## {entry['path']}\n\n{entry['content']}")
         plan_context_text = "\n\n".join(plan_sections).strip() or "No approved or repository plan context was found."
 
+        coauthor_line = resolve_coauthor_line(github, event)
+        coauthor_directives = coauthor_prompt_lines(coauthor_line)
+
         prompt = dedent(
             f"""
             Create an implementation update for GitHub issue #{issue_number} in repository {owner}/{repo}.
@@ -117,6 +122,7 @@ def main() -> None:
             - If you produce changes, commit them to `{target_branch}` and push that branch to origin.
             - Do not open or update the pull request yourself.
             - If no implementation diff is warranted, do not push the branch.
+            {coauthor_directives}
             """
         ).strip()
 

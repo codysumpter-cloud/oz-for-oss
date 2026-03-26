@@ -261,6 +261,54 @@ def conventional_commit_prefix(labels: list[dict[str, Any] | str], *, default: s
     return default
 
 
+def resolve_coauthor_line(
+    github: GitHubClient,
+    event_payload: dict[str, Any],
+) -> str:
+    """Resolve a ``Co-Authored-By`` line from the event that triggered the workflow.
+
+    The triggering user is determined from the event payload (comment author,
+    then sender).  Their public profile is fetched via ``GET /users/{login}``
+    (accessible to GitHub App installation tokens, unlike ``GET /user``) to
+    obtain a display name.
+
+    Returns a formatted ``Co-Authored-By: Name <login@users.noreply.github.com>``
+    string, or an empty string if the user cannot be resolved.
+    """
+    comment = event_payload.get("comment")
+    login: str = ""
+    if isinstance(comment, dict):
+        login = (comment.get("user") or {}).get("login") or ""
+    if not login:
+        login = (event_payload.get("sender") or {}).get("login") or ""
+    if not login:
+        return ""
+
+    try:
+        user = github.get_user(login)
+    except Exception:
+        user = None
+
+    name = (user.get("name") if user else None) or login
+    email = f"{login}@users.noreply.github.com"
+    return f"Co-Authored-By: {name} <{email}>"
+
+
+def coauthor_prompt_lines(coauthor_line: str) -> str:
+    """Return prompt directive lines for co-authorship.
+
+    When *coauthor_line* is non-empty the agent is told to include it in every
+    commit message.  Otherwise the agent is told to omit any ``Co-Authored-By``
+    lines.
+    """
+    if coauthor_line:
+        return (
+            f"- Include the following co-author attribution at the end of every commit message: {coauthor_line}\n"
+            "- Do not attempt to resolve the co-author identity yourself (e.g. via GET /user). Use exactly the line provided above."
+        )
+    return "- Do not include any Co-Authored-By lines in commit messages."
+
+
 def build_plan_preview_section(owner: str, repo: str, branch_name: str, issue_number: int) -> str:
     plan_path = f"plans/issue-{issue_number}.md"
     preview_url = f"https://github.com/{owner}/{repo}/blob/{branch_name}/{plan_path}"

@@ -10,7 +10,9 @@ from oz_workflows.helpers import (
     build_next_steps_section,
     build_plan_preview_section,
     build_pr_body,
+    coauthor_prompt_lines,
     org_member_comments_text,
+    resolve_coauthor_line,
     triggering_comment_prompt_text,
     WorkflowProgressComment,
 )
@@ -42,6 +44,9 @@ def main() -> None:
         )
         progress.start("Oz is starting work on an implementation plan for this issue.")
 
+        coauthor_line = resolve_coauthor_line(github, event)
+        coauthor_directives = coauthor_prompt_lines(coauthor_line)
+
         prompt = dedent(
             f"""
             Create a plan update for GitHub issue #{issue_number} in repository {owner}/{repo}.
@@ -66,6 +71,7 @@ def main() -> None:
             - If you produce plan changes, commit only the plan changes to branch `{branch_name}` and push that branch to origin.
             - Do not open or update the pull request yourself.
             - If there is no worthwhile plan diff, do not push the branch.
+            {coauthor_directives}
             """
         ).strip()
 
