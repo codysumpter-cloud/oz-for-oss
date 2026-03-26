@@ -30,18 +30,43 @@ jobs:
       id-token: write
       issues: write
     steps:
-      - name: Setup Oz environment
-        id: setup
-        uses: ./.github/actions/setup-oz-env
+      - name: Create GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.GHA_APP_ID }}
           private-key: ${{ secrets.GHA_PRIVATE_KEY }}
-          gcp-auth: 'true'
-          fetch-depth: '0'
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Authenticate to Google Cloud for staging secret access
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/643991131484/locations/global/workloadIdentityPools/github-actions/providers/warp-terraform
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+      - name: Resolve staging origin token
+        run: |
+          STAGING_ORIGIN_TOKEN="$(gcloud --project=warp-server-staging secrets versions access latest --secret=staging-origin-token)"
+          echo "::add-mask::$STAGING_ORIGIN_TOKEN"
+          {
+            echo 'STAGING_ORIGIN_TOKEN<<EOF'
+            printf '%s\n' "$STAGING_ORIGIN_TOKEN"
+            echo EOF
+          } >> "$GITHUB_ENV"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Python workflow dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r src/requirements.txt
       - name: Run issue triage workflow
         env:
           PYTHONPATH: src
-          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
           LOOKBACK_MINUTES: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.lookback_minutes || '60' }}
           TRIAGE_ISSUE_NUMBER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || '' }}
           WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
