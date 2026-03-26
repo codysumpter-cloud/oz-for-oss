@@ -175,14 +175,16 @@ Rename to `.agents/skills/check-impl-against-spec/SKILL.md`:
 
 - Update any tests that reference `plans/`, `ready-to-plan`, or plan-related helper functions to use the new names and paths.
 - Specifically, tests calling `read_local_plan_file()`, `find_matching_plan_prs()`, or `resolve_plan_context_for_issue()` need to use the renamed functions and updated path expectations.
-
-### File change summary
-
 New files:
 - `.agents/skills/create-product-spec/SKILL.md`
 - `.agents/skills/create-tech-spec/SKILL.md`
 - `.github/workflows/create-spec-from-issue.yml`
 - `src/create_spec_from_issue.py`
+- `specs/.gitkeep`
+- `specs/56/tech.md` (migrated from `plans/issue-56.md`)
+- `specs/65/tech.md` (migrated from `plans/issue-65.md`)
+- `specs/83/product.md` (migrated from product spec section of `plans/issue-83.md`)
+- `specs/83/tech.md` (migrated from tech spec section of `plans/issue-83.md`)
 - `specs/.gitkeep`
 - `specs/issue-56/tech.md` (migrated from `plans/issue-56.md`)
 - `specs/issue-65/tech.md` (migrated from `plans/issue-65.md`)
@@ -209,10 +211,6 @@ Modified files:
 - `CONTRIBUTING.md`
 - `README.md`
 - `src/tests/` (update references)
-
-### Risks and open questions
-
-1. **Skill invocation model** (resolved): Use a single-run approach. The agent is invoked once with a prompt that references both `create-product-spec` and `create-tech-spec` skill files. The `skill_name` parameter is omitted from `run_agent()` and the prompt includes the skill file paths for the agent to read via prompting.
-2. **`implementation_plan_context.md` naming** (resolved): Rename to `spec_context.md` for clarity. This introduces churn in `implement-issue`, `review-pr`, and `check-impl-against-spec` skills plus `create_implementation_from_issue.py`, but the clarity is worth it.
+5. **Two-skill vs one-skill approach for agent invocation**: Since the workflow runs a single Oz agent, and the agent can be given both skills in one prompt, we should invoke the agent once with instructions to use both `create-product-spec` and `create-tech-spec` sequentially. The `skill_name` parameter in `run_agent()` currently takes a single skill name — we will pass `skill_name=None` and embed explicit instructions in the prompt to read both `.agents/skills/create-product-spec/SKILL.md` and `.agents/skills/create-tech-spec/SKILL.md` by path. This avoids changes to `run_agent()` itself.
 3. **`plan-approved` label**: The issue discussion says `plan-approved` is still targeted at the tech spec. No rename needed for this label — it continues to gate the transition from spec to implementation.
 4. **Existing open PRs**: Any in-flight PRs on `oz-agent/plan-issue-*` branches will not be automatically migrated. This is acceptable since back-compat is explicitly not required.
