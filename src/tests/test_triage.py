@@ -13,6 +13,8 @@ from oz_workflows.triage import (
     dedupe_strings,
     discover_issue_templates,
     extract_original_issue_report,
+    format_stakeholders_for_prompt,
+    load_stakeholders,
     load_triage_config,
     select_recent_untriaged_issues,
 )
@@ -23,12 +25,78 @@ class LoadTriageConfigTest(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.json"
             config_path.write_text(
-                '{"labels":{"triaged":{"color":"0E8A16","description":"done"}},"stakeholders":[]}',
+                '{"labels":{"triaged":{"color":"0E8A16","description":"done"}}}',
                 encoding="utf-8",
             )
             parsed = load_triage_config(config_path)
             self.assertIn("labels", parsed)
-            self.assertIn("stakeholders", parsed)
+            self.assertNotIn("stakeholders", parsed)
+            self.assertNotIn("default_experts", parsed)
+
+    def test_loads_config_without_stakeholders_key(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.json"
+            config_path.write_text(
+                '{"labels":{"bug":{"color":"D73A4A","description":"bug"}}}',
+                encoding="utf-8",
+            )
+            parsed = load_triage_config(config_path)
+            self.assertIn("labels", parsed)
+
+    def test_rejects_config_without_labels(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.json"
+            config_path.write_text('{"other": "value"}', encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                load_triage_config(config_path)
+
+
+class LoadStakeholdersTest(unittest.TestCase):
+    def test_parses_stakeholders_file(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "STAKEHOLDERS"
+            path.write_text(
+                "# Comment line\n"
+                "/src/ @alice @bob\n"
+                "\n"
+                "/docs/ @carol\n",
+                encoding="utf-8",
+            )
+            entries = load_stakeholders(path)
+            self.assertEqual(len(entries), 2)
+            self.assertEqual(entries[0]["pattern"], "/src/")
+            self.assertEqual(entries[0]["owners"], ["alice", "bob"])
+            self.assertEqual(entries[1]["pattern"], "/docs/")
+            self.assertEqual(entries[1]["owners"], ["carol"])
+
+    def test_returns_empty_for_missing_file(self) -> None:
+        entries = load_stakeholders(Path("/nonexistent/STAKEHOLDERS"))
+        self.assertEqual(entries, [])
+
+    def test_skips_lines_without_owners(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "STAKEHOLDERS"
+            path.write_text("/src/\n/docs/ @alice\n", encoding="utf-8")
+            entries = load_stakeholders(path)
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["pattern"], "/docs/")
+
+
+class FormatStakeholdersForPromptTest(unittest.TestCase):
+    def test_formats_entries(self) -> None:
+        entries = [
+            {"pattern": "/src/", "owners": ["alice", "bob"]},
+            {"pattern": "/docs/", "owners": ["carol"]},
+        ]
+        result = format_stakeholders_for_prompt(entries)
+        self.assertIn("/src/", result)
+        self.assertIn("@alice", result)
+        self.assertIn("@bob", result)
+        self.assertIn("@carol", result)
+
+    def test_returns_fallback_for_empty(self) -> None:
+        result = format_stakeholders_for_prompt([])
+        self.assertEqual(result, "No stakeholders configured.")
 
 
 class DedupeStringsTest(unittest.TestCase):

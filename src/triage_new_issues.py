@@ -19,6 +19,8 @@ from oz_workflows.triage import (
     dedupe_strings,
     discover_issue_templates,
     extract_original_issue_report,
+    format_stakeholders_for_prompt,
+    load_stakeholders,
     load_triage_config,
     select_recent_untriaged_issues,
 )
@@ -33,6 +35,8 @@ def main() -> None:
     event_name = optional_env("GITHUB_EVENT_NAME")
     triage_config = load_triage_config(workspace() / ".github" / "issue-triage" / "config.json")
     configured_labels = triage_config["labels"]
+    stakeholder_entries = load_stakeholders(workspace() / ".github" / "STAKEHOLDERS")
+    stakeholders_text = format_stakeholders_for_prompt(stakeholder_entries)
     lookback_minutes = int(optional_env("LOOKBACK_MINUTES") or "60")
     issue_number_override = resolve_issue_number_override(event_name, event)
     triggering_comment_id = int((event.get("comment") or {}).get("id") or 0) or None
@@ -82,6 +86,7 @@ def main() -> None:
                     agent_config=agent_config,
                     triggering_comment_id=triggering_comment_id,
                     triggering_comment_text=triggering_comment_text,
+                    stakeholders_text=stakeholders_text,
                 )
             except Exception as exc:
                 warning(f"Issue triage failed for #{issue_number}: {exc}")
@@ -125,6 +130,7 @@ def process_issue(
     agent_config: dict[str, Any],
     triggering_comment_id: int | None,
     triggering_comment_text: str,
+    stakeholders_text: str,
 ) -> None:
     issue_number = int(issue["number"])
     template_context = discover_issue_templates(workspace())
@@ -164,6 +170,9 @@ def process_issue(
 
         Repository Triage Configuration JSON:
         {json.dumps(triage_config, indent=2)}
+
+        Repository Stakeholders:
+        {stakeholders_text}
 
         Repository Issue Template Context JSON:
         {json.dumps(template_context, indent=2)}
