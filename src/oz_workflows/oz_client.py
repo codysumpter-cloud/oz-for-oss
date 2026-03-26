@@ -19,6 +19,7 @@ def build_oz_client() -> OzAPI:
         base_url="https://staging.warp.dev/api/v1",
         default_headers={
             "X-Warp-Origin-Token": require_env("STAGING_ORIGIN_TOKEN"),
+            "x-oz-api-source": "GITHUB_ACTION",
         },
     )
 
