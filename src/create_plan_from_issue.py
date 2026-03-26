@@ -9,6 +9,7 @@ from oz_workflows.helpers import (
     branch_updated_since,
     build_next_steps_section,
     build_plan_preview_section,
+    build_pr_body,
     org_member_comments_text,
     triggering_comment_prompt_text,
     WorkflowProgressComment,
@@ -96,9 +97,15 @@ def main() -> None:
             return
 
         existing_prs = github.list_pulls(owner, repo, state="open", head=f"{owner}:{branch_name}")
-        pr_body = (
-            f"Automated plan update for issue #{issue_number}."
-            + (f"\n\nSession: {run.session_link}" if run.session_link else "")
+        pr_body = build_pr_body(
+            github,
+            owner,
+            repo,
+            issue_number=issue_number,
+            head=branch_name,
+            base=default_branch,
+            session_link=getattr(run, "session_link", None) or "",
+            closing_keyword="",
         )
         if existing_prs:
             pr = github.update_pull(

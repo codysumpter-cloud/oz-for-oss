@@ -9,6 +9,7 @@ from oz_workflows.github_api import GitHubClient
 from oz_workflows.helpers import (
     branch_updated_since,
     build_next_steps_section,
+    build_pr_body,
     conventional_commit_prefix,
     org_member_comments_text,
     resolve_plan_context_for_issue,
@@ -162,12 +163,23 @@ def main() -> None:
             return
 
         existing_prs = github.list_pulls(owner, repo, state="open", head=f"{owner}:{target_branch}")
-        pr_body = (
-            f"Automated implementation update for issue #{issue_number}."
-            + (f"\n\nSession: {run.session_link}" if run.session_link else "")
+        pr_body = build_pr_body(
+            github,
+            owner,
+            repo,
+            issue_number=issue_number,
+            head=target_branch,
+            base=default_branch,
+            session_link=getattr(run, "session_link", None) or "",
+            closing_keyword="Closes",
         )
         if existing_prs:
-            pr = existing_prs[0]
+            pr = github.update_pull(
+                owner,
+                repo,
+                int(existing_prs[0]["number"]),
+                body=pr_body,
+            )
         else:
             pr = github.create_pull(
                 owner,
