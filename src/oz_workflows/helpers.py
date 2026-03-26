@@ -261,6 +261,81 @@ def conventional_commit_prefix(labels: list[dict[str, Any] | str], *, default: s
     return default
 
 
+# Accounts created on or after this date use the ``ID+login`` noreply format.
+# See https://docs.github.com/en/account-and-profile/reference/email-addresses-reference#your-noreply-email-address
+_NOREPLY_ID_CUTOFF = datetime(2017, 7, 18, tzinfo=timezone.utc)
+
+
+def _noreply_email(login: str, user_id: int | None, created_at: str | None) -> str:
+    """Build the GitHub noreply email for *login*.
+
+    GitHub uses two noreply formats depending on account age:
+    * Before 2017-07-18: ``login@users.noreply.github.com``
+    * On or after 2017-07-18: ``ID+login@users.noreply.github.com``
+    """
+    if created_at is not None and user_id is not None:
+        try:
+            if parse_datetime(created_at) >= _NOREPLY_ID_CUTOFF:
+                return f"{user_id}+{login}@users.noreply.github.com"
+        except (ValueError, TypeError):
+            pass
+    return f"{login}@users.noreply.github.com"
+
+
+def resolve_coauthor_line(
+    github: GitHubClient,
+    event_payload: dict[str, Any],
+) -> str:
+    """Resolve a ``Co-Authored-By`` line from the event that triggered the workflow.
+
+    The triggering user is determined from the event payload (comment author,
+    then sender).  Their public profile is fetched via ``GET /users/{login}``
+    (accessible to GitHub App installation tokens, unlike ``GET /user``) to
+    obtain a display name and account creation date.
+
+    The noreply email format is derived from the account creation date:
+    accounts created before 2017-07-18 use ``login@users.noreply.github.com``,
+    while newer accounts use ``ID+login@users.noreply.github.com``.
+
+    Returns a formatted ``Co-Authored-By`` string, or an empty string if the
+    user cannot be resolved.
+    """
+    comment = event_payload.get("comment")
+    login: str = ""
+    if isinstance(comment, dict):
+        login = (comment.get("user") or {}).get("login") or ""
+    if not login:
+        login = (event_payload.get("sender") or {}).get("login") or ""
+    if not login:
+        return ""
+
+    try:
+        user = github.get_user(login)
+    except Exception:
+        user = None
+
+    name = (user.get("name") if user else None) or login
+    user_id = user.get("id") if user else None
+    created_at = user.get("created_at") if user else None
+    email = _noreply_email(login, user_id, created_at)
+    return f"Co-Authored-By: {name} <{email}>"
+
+
+def coauthor_prompt_lines(coauthor_line: str) -> str:
+    """Return prompt directive lines for co-authorship.
+
+    When *coauthor_line* is non-empty the agent is told to include it in every
+    commit message.  Otherwise the agent is told to omit any ``Co-Authored-By``
+    lines.
+    """
+    if coauthor_line:
+        return (
+            f"- Include the following co-author attribution at the end of every commit message: {coauthor_line}\n"
+            f"            - Do not attempt to resolve the co-author identity yourself (e.g. via GET /user). Use exactly the line provided above."
+        )
+    return "- Do not include any Co-Authored-By lines in commit messages."
+
+
 def build_plan_preview_section(owner: str, repo: str, branch_name: str, issue_number: int) -> str:
     plan_path = f"plans/issue-{issue_number}.md"
     preview_url = f"https://github.com/{owner}/{repo}/blob/{branch_name}/{plan_path}"

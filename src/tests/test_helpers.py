@@ -8,9 +8,11 @@ from oz_workflows.helpers import (
     build_next_steps_section,
     build_plan_preview_section,
     build_pr_body,
+    coauthor_prompt_lines,
     conventional_commit_prefix,
     extract_issue_numbers_from_text,
     org_member_comments_text,
+    resolve_coauthor_line,
     resolve_progress_requester_login,
     review_thread_comments_text,
     triggering_comment_prompt_text,
@@ -306,8 +308,111 @@ class BuildPrBodyTest(unittest.TestCase):
 
 
 class FakeGitHubClient:
+    def __init__(self, *, users: dict[str, dict[str, object]] | None = None) -> None:
+        self._users = users or {}
+
     def list_issue_events(self, owner: str, repo: str, issue_number: int) -> list[dict[str, object]]:
         return []
+
+    def get_user(self, username: str) -> dict[str, object] | None:
+        return self._users.get(username)
+
+
+class ResolveCoauthorLineTest(unittest.TestCase):
+    def test_resolves_old_format_for_pre_cutoff_account(self) -> None:
+        github = FakeGitHubClient(users={"alice": {"name": "Alice Smith", "login": "alice", "id": 100, "created_at": "2015-01-01T00:00:00Z"}})
+        event = {"comment": {"user": {"login": "alice"}}, "sender": {"login": "bot"}}
+        self.assertEqual(
+            resolve_coauthor_line(github, event),
+            "Co-Authored-By: Alice Smith <alice@users.noreply.github.com>",
+        )
+
+    def test_resolves_new_format_for_post_cutoff_account(self) -> None:
+        github = FakeGitHubClient(users={"alice": {"name": "Alice Smith", "login": "alice", "id": 12345678, "created_at": "2020-06-15T00:00:00Z"}})
+        event = {"comment": {"user": {"login": "alice"}}, "sender": {"login": "bot"}}
+        self.assertEqual(
+            resolve_coauthor_line(github, event),
+            "Co-Authored-By: Alice Smith <12345678+alice@users.noreply.github.com>",
+        )
+
+    def test_resolves_from_sender_when_no_comment(self) -> None:
+        github = FakeGitHubClient(users={"bob": {"name": "Bob Jones", "login": "bob", "id": 200, "created_at": "2016-03-01T00:00:00Z"}})
+        event = {"sender": {"login": "bob"}}
+        self.assertEqual(
+            resolve_coauthor_line(github, event),
+            "Co-Authored-By: Bob Jones <bob@users.noreply.github.com>",
+        )
+
+    def test_falls_back_to_login_when_name_is_none(self) -> None:
+        github = FakeGitHubClient(users={"alice": {"name": None, "login": "alice", "id": 99999, "created_at": "2023-01-01T00:00:00Z"}})
+        event = {"comment": {"user": {"login": "alice"}}}
+        self.assertEqual(
+            resolve_coauthor_line(github, event),
+            "Co-Authored-By: alice <99999+alice@users.noreply.github.com>",
+        )
+
+    def test_falls_back_to_login_when_get_user_returns_none(self) -> None:
+        github = FakeGitHubClient(users={})
+        event = {"sender": {"login": "unknown-user"}}
+        self.assertEqual(
+            resolve_coauthor_line(github, event),
+            "Co-Authored-By: unknown-user <unknown-user@users.noreply.github.com>",
+        )
+
+    def test_returns_empty_when_no_login_available(self) -> None:
+        github = FakeGitHubClient()
+        event: dict[str, object] = {}
+        self.assertEqual(resolve_coauthor_line(github, event), "")
+
+    def test_handles_get_user_exception(self) -> None:
+        class ErrorClient(FakeGitHubClient):
+            def get_user(self, username: str) -> dict[str, object] | None:
+                raise RuntimeError("API error")
+
+        github = ErrorClient()
+        event = {"sender": {"login": "alice"}}
+        self.assertEqual(
+            resolve_coauthor_line(github, event),
+            "Co-Authored-By: alice <alice@users.noreply.github.com>",
+        )
+
+    def test_cutoff_boundary_uses_new_format(self) -> None:
+        """An account created exactly on the cutoff date uses the ID+login format."""
+        github = FakeGitHubClient(users={"edge": {"name": "Edge User", "login": "edge", "id": 55555, "created_at": "2017-07-18T00:00:00Z"}})
+        event = {"sender": {"login": "edge"}}
+        self.assertEqual(
+            resolve_coauthor_line(github, event),
+            "Co-Authored-By: Edge User <55555+edge@users.noreply.github.com>",
+        )
+
+    def test_old_format_when_no_id_in_profile(self) -> None:
+        """Falls back to old format when user profile has no id."""
+        github = FakeGitHubClient(users={"alice": {"name": "Alice", "login": "alice", "created_at": "2023-01-01T00:00:00Z"}})
+        event = {"sender": {"login": "alice"}}
+        self.assertEqual(
+            resolve_coauthor_line(github, event),
+            "Co-Authored-By: Alice <alice@users.noreply.github.com>",
+        )
+
+    def test_old_format_when_no_created_at_in_profile(self) -> None:
+        """Falls back to old format when user profile has no created_at."""
+        github = FakeGitHubClient(users={"alice": {"name": "Alice", "login": "alice", "id": 12345}})
+        event = {"sender": {"login": "alice"}}
+        self.assertEqual(
+            resolve_coauthor_line(github, event),
+            "Co-Authored-By: Alice <alice@users.noreply.github.com>",
+        )
+
+
+class CoauthorPromptLinesTest(unittest.TestCase):
+    def test_returns_include_directive_when_line_provided(self) -> None:
+        result = coauthor_prompt_lines("Co-Authored-By: Alice <alice@users.noreply.github.com>")
+        self.assertIn("Co-Authored-By: Alice <alice@users.noreply.github.com>", result)
+        self.assertIn("Do not attempt to resolve the co-author identity yourself", result)
+
+    def test_returns_omit_directive_when_empty(self) -> None:
+        result = coauthor_prompt_lines("")
+        self.assertIn("Do not include any Co-Authored-By lines", result)
 
 
 class FakeGitHubClientWithCompare:

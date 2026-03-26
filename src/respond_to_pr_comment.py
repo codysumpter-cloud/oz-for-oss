@@ -9,7 +9,9 @@ from oz_workflows.helpers import (
     all_review_comments_text,
     branch_updated_since,
     build_next_steps_section,
+    coauthor_prompt_lines,
     org_member_comments_text,
+    resolve_coauthor_line,
     resolve_plan_context_for_pr,
     review_thread_comments_text,
     WorkflowProgressComment,
@@ -132,6 +134,9 @@ def _run_implementation(
     pr_title = pr.get("title") or ""
     pr_body = pr.get("body") or ""
 
+    coauthor_line = resolve_coauthor_line(github, event)
+    coauthor_directives = coauthor_prompt_lines(coauthor_line)
+
     progress = WorkflowProgressComment(
         github,
         owner,
@@ -194,6 +199,7 @@ def _run_implementation(
         - If you produce changes, commit them to `{head_branch}` and push that branch to origin.
         - Do not open or update the pull request yourself.
         - If no implementation diff is warranted, do not push the branch.
+        {coauthor_directives}
         """
     ).strip()
 
