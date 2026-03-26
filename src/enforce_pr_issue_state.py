@@ -35,6 +35,11 @@ def main() -> None:
         has_code_changes = any(not filename.lower().endswith(".md") for filename in changed_files)
         change_kind = "implementation" if has_code_changes else "plan"
         required_label = "ready-to-implement" if has_code_changes else "ready-to-plan"
+        pr_labels = [
+            label if isinstance(label, str) else label.get("name")
+            for label in pr.get("labels", [])
+        ]
+        has_plan_approved = "plan-approved" in pr_labels
         contribution_docs_url = f"https://github.com/{owner}/{repo}/blob/main/CONTRIBUTING.md"
 
         explicit_issue = None
@@ -49,7 +54,7 @@ def main() -> None:
                 label if isinstance(label, str) else label.get("name")
                 for label in explicit_issue.get("labels", [])
             ]
-            if required_label in labels:
+            if required_label in labels or (not has_code_changes and has_plan_approved):
                 progress.complete(
                     f"I confirmed that this pull request is associated with issue #{explicit_issue['number']} and review may continue."
                 )
@@ -64,6 +69,13 @@ def main() -> None:
             progress.complete(close_comment)
             github.update_pull(owner, repo, pr_number, state="closed")
             set_output("allow_review", "false")
+            return
+
+        if not has_code_changes and has_plan_approved:
+            progress.complete(
+                "This pull request contains only Markdown changes and has a `plan-approved` label. Allowing review to continue."
+            )
+            set_output("allow_review", "true")
             return
 
         ready_issues = [
