@@ -3,12 +3,14 @@ from __future__ import annotations
 import unittest
 
 from oz_workflows.helpers import (
+    all_review_comments_text,
     build_next_steps_section,
     build_plan_preview_section,
     conventional_commit_prefix,
     extract_issue_numbers_from_text,
     org_member_comments_text,
     resolve_progress_requester_login,
+    review_thread_comments_text,
     triggering_comment_prompt_text,
 )
 
@@ -159,6 +161,62 @@ class ConventionalCommitPrefixTest(unittest.TestCase):
     def test_first_match_wins(self) -> None:
         labels = [{"name": "bug"}, {"name": "enhancement"}]
         self.assertEqual(conventional_commit_prefix(labels), "fix")
+
+
+class ReviewThreadCommentsTextTest(unittest.TestCase):
+    def test_extracts_thread_for_trigger_comment(self) -> None:
+        comments = [
+            {"id": 10, "author_association": "MEMBER", "user": {"login": "alice"}, "created_at": "2026-01-01T00:00:00Z", "body": "Root comment", "path": "src/main.py"},
+            {"id": 11, "in_reply_to_id": 10, "author_association": "MEMBER", "user": {"login": "bob"}, "created_at": "2026-01-01T01:00:00Z", "body": "Reply in thread", "path": "src/main.py"},
+            {"id": 20, "author_association": "MEMBER", "user": {"login": "carol"}, "created_at": "2026-01-01T02:00:00Z", "body": "Different thread", "path": "src/other.py"},
+        ]
+        result = review_thread_comments_text(comments, trigger_comment_id=11)
+        self.assertIn("alice", result)
+        self.assertIn("bob", result)
+        self.assertNotIn("carol", result)
+
+    def test_filters_non_org_members(self) -> None:
+        comments = [
+            {"id": 10, "author_association": "MEMBER", "user": {"login": "alice"}, "created_at": "2026-01-01T00:00:00Z", "body": "Root", "path": "f.py"},
+            {"id": 11, "in_reply_to_id": 10, "author_association": "NONE", "user": {"login": "outsider"}, "created_at": "2026-01-01T01:00:00Z", "body": "External reply", "path": "f.py"},
+        ]
+        result = review_thread_comments_text(comments, trigger_comment_id=10)
+        self.assertIn("alice", result)
+        self.assertNotIn("outsider", result)
+
+    def test_returns_empty_when_no_org_members(self) -> None:
+        comments = [
+            {"id": 10, "author_association": "NONE", "user": {"login": "outsider"}, "created_at": "2026-01-01T00:00:00Z", "body": "Comment", "path": "f.py"},
+        ]
+        self.assertEqual(review_thread_comments_text(comments, trigger_comment_id=10), "")
+
+
+class AllReviewCommentsTextTest(unittest.TestCase):
+    def test_groups_by_file_path(self) -> None:
+        comments = [
+            {"id": 1, "author_association": "MEMBER", "user": {"login": "alice"}, "created_at": "2026-01-01T00:00:00Z", "body": "Fix here", "path": "src/a.py"},
+            {"id": 2, "author_association": "MEMBER", "user": {"login": "bob"}, "created_at": "2026-01-01T01:00:00Z", "body": "And here", "path": "src/b.py"},
+        ]
+        result = all_review_comments_text(comments)
+        self.assertIn("File: src/a.py", result)
+        self.assertIn("File: src/b.py", result)
+        self.assertIn("alice", result)
+        self.assertIn("bob", result)
+
+    def test_filters_non_org_members(self) -> None:
+        comments = [
+            {"id": 1, "author_association": "MEMBER", "user": {"login": "alice"}, "created_at": "2026-01-01T00:00:00Z", "body": "Good", "path": "f.py"},
+            {"id": 2, "author_association": "NONE", "user": {"login": "outsider"}, "created_at": "2026-01-01T01:00:00Z", "body": "Bad", "path": "f.py"},
+        ]
+        result = all_review_comments_text(comments)
+        self.assertIn("alice", result)
+        self.assertNotIn("outsider", result)
+
+    def test_returns_empty_when_no_org_members(self) -> None:
+        comments = [
+            {"id": 1, "author_association": "CONTRIBUTOR", "user": {"login": "ext"}, "created_at": "2026-01-01T00:00:00Z", "body": "Hi", "path": "f.py"},
+        ]
+        self.assertEqual(all_review_comments_text(comments), "")
 
 
 class FakeGitHubClient:
