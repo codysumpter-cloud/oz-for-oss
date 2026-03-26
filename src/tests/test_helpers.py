@@ -6,7 +6,7 @@ from oz_workflows.helpers import (
     _summarize_commits,
     all_review_comments_text,
     build_next_steps_section,
-    build_plan_preview_section,
+    build_spec_preview_section,
     build_pr_body,
     coauthor_prompt_lines,
     conventional_commit_prefix,
@@ -25,12 +25,12 @@ class ExtractIssueNumbersTest(unittest.TestCase):
         self.assertEqual(extract_issue_numbers_from_text("acme", "widgets", text), [12, 34])
 
 
-class BuildPlanPreviewSectionTest(unittest.TestCase):
-    def test_builds_markdown_link_for_plan_branch(self) -> None:
-        self.assertEqual(
-            build_plan_preview_section("warpdotdev", "oz-oss-testbed", "oz-agent/plan-issue-20", 20),
-            "Preview generated plan: [plans/issue-20.md](https://github.com/warpdotdev/oz-oss-testbed/blob/oz-agent/plan-issue-20/plans/issue-20.md)",
-        )
+class BuildSpecPreviewSectionTest(unittest.TestCase):
+    def test_builds_markdown_links_for_spec_branch(self) -> None:
+        result = build_spec_preview_section("warpdotdev", "oz-oss-testbed", "oz-agent/spec-issue-20", 20)
+        self.assertIn("Preview generated specs:", result)
+        self.assertIn("[specs/issue-20/product.md](https://github.com/warpdotdev/oz-oss-testbed/blob/oz-agent/spec-issue-20/specs/issue-20/product.md)", result)
+        self.assertIn("[specs/issue-20/tech.md](https://github.com/warpdotdev/oz-oss-testbed/blob/oz-agent/spec-issue-20/specs/issue-20/tech.md)", result)
 
 
 class BuildNextStepsSectionTest(unittest.TestCase):

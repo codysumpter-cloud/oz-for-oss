@@ -31,8 +31,8 @@ def main() -> None:
         files = github.list_pull_files(owner, repo, pr_number)
         changed_files = [file["filename"] for file in files]
         has_code_changes = any(not filename.lower().endswith(".md") for filename in changed_files)
-        change_kind = "implementation" if has_code_changes else "plan"
-        required_label = "ready-to-implement" if has_code_changes else "ready-to-plan"
+        change_kind = "implementation" if has_code_changes else "spec"
+        required_label = "ready-to-implement" if has_code_changes else "ready-to-spec"
         pr_labels = [
             label if isinstance(label, str) else label.get("name")
             for label in pr.get("labels", [])

@@ -14,7 +14,7 @@ from oz_workflows.helpers import (
     conventional_commit_prefix,
     org_member_comments_text,
     resolve_coauthor_line,
-    resolve_plan_context_for_issue,
+    resolve_spec_context_for_issue,
     triggering_comment_prompt_text,
     WorkflowProgressComment,
 )
@@ -35,17 +35,17 @@ def main() -> None:
         comments = github.list_issue_comments(owner, repo, issue_number)
         comments_text = org_member_comments_text(comments, exclude_comment_id=triggering_comment_id)
         triggering_comment_text = triggering_comment_prompt_text(event)
-        plan_context = resolve_plan_context_for_issue(
+        spec_context = resolve_spec_context_for_issue(
             github,
             owner,
             repo,
             issue_number,
             workspace=workspace(),
         )
-        selected_plan_pr = plan_context["selected_plan_pr"]
+        selected_spec_pr = spec_context["selected_spec_pr"]
         target_branch = (
-            selected_plan_pr["head_ref_name"]
-            if selected_plan_pr
+            selected_spec_pr["head_ref_name"]
+            if selected_spec_pr
             else f"oz-agent/implement-issue-{issue_number}"
         )
         progress = WorkflowProgressComment(
@@ -58,18 +58,18 @@ def main() -> None:
         )
         progress.start("Oz is working on an implementation for this issue.")
         should_noop = (
-            not selected_plan_pr
-            and not plan_context["plan_entries"]
-            and len(plan_context["unapproved_plan_prs"]) > 0
+            not selected_spec_pr
+            and not spec_context["spec_entries"]
+            and len(spec_context["unapproved_spec_prs"]) > 0
         )
         if should_noop:
             progress.complete(
-                "I did not start implementation because linked plan PR(s) exist for this issue but none are labeled `plan-approved`: "
-                + ", ".join(f"#{pr['number']}" for pr in plan_context["unapproved_plan_prs"])
+                "I did not start implementation because linked spec PR(s) exist for this issue but none are labeled `plan-approved`: "
+                + ", ".join(f"#{pr['number']}" for pr in spec_context["unapproved_spec_prs"])
             )
             append_summary(
-                "Linked plan PR(s) exist for this issue but none are labeled `plan-approved`: "
-                + ", ".join(f"#{pr['number']}" for pr in plan_context["unapproved_plan_prs"])
+                "Linked spec PR(s) exist for this issue but none are labeled `plan-approved`: "
+                + ", ".join(f"#{pr['number']}" for pr in spec_context["unapproved_spec_prs"])
             )
             return
         next_steps_section = build_next_steps_section(
@@ -79,16 +79,16 @@ def main() -> None:
             ]
         )
 
-        plan_sections = []
-        if plan_context["plan_context_source"] == "approved-pr" and selected_plan_pr:
-            plan_sections.append(
-                f"Linked approved plan PR: #{selected_plan_pr['number']} ({selected_plan_pr['url']})"
+        spec_sections = []
+        if spec_context["spec_context_source"] == "approved-pr" and selected_spec_pr:
+            spec_sections.append(
+                f"Linked approved spec PR: #{selected_spec_pr['number']} ({selected_spec_pr['url']})"
             )
-        elif plan_context["plan_context_source"] == "directory":
-            plan_sections.append("Repository plan file(s) associated with this issue were found in `plans/`.")
-        for entry in plan_context["plan_entries"]:
-            plan_sections.append(f"## {entry['path']}\n\n{entry['content']}")
-        plan_context_text = "\n\n".join(plan_sections).strip() or "No approved or repository plan context was found."
+        elif spec_context["spec_context_source"] == "directory":
+            spec_sections.append("Repository spec file(s) associated with this issue were found in `specs/`.")
+        for entry in spec_context["spec_entries"]:
+            spec_sections.append(f"## {entry['path']}\n\n{entry['content']}")
+        spec_context_text = "\n\n".join(spec_sections).strip() or "No approved or repository spec context was found."
 
         coauthor_line = resolve_coauthor_line(github, event)
         coauthor_directives = coauthor_prompt_lines(coauthor_line)
@@ -110,7 +110,7 @@ def main() -> None:
             {triggering_comment_text or "- None"}
 
             Plan Context:
-            {plan_context_text}
+            {spec_context_text}
 
             Cloud Workflow Requirements:
             - Use the repository's local `implement-issue` skill as the base workflow.
@@ -155,15 +155,15 @@ def main() -> None:
 
         commit_type = conventional_commit_prefix(issue.get("labels", []))
 
-        if selected_plan_pr:
+        if selected_spec_pr:
             github.update_pull(
                 owner,
                 repo,
-                int(selected_plan_pr["number"]),
+                int(selected_spec_pr["number"]),
                 title=f"{commit_type}: {issue_title}",
             )
             progress.complete(
-                f"I pushed implementation updates to the linked approved plan PR: {selected_plan_pr['url']}\n\n"
+                f"I pushed implementation updates to the linked approved spec PR: {selected_spec_pr['url']}\n\n"
                 f"{next_steps_section}"
             )
             return

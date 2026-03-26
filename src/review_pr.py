@@ -5,7 +5,7 @@ from textwrap import dedent
 
 from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.github_api import GitHubClient
-from oz_workflows.helpers import resolve_plan_context_for_pr, WorkflowProgressComment
+from oz_workflows.helpers import resolve_spec_context_for_pr, WorkflowProgressComment
 from oz_workflows.oz_client import build_agent_config, run_agent
 from oz_workflows.transport import new_transport_token, poll_for_transport_payload
 
@@ -35,28 +35,28 @@ def main() -> None:
         )
         progress.start("Oz is reviewing this pull request.")
 
-        plan_context = resolve_plan_context_for_pr(
+        spec_context = resolve_spec_context_for_pr(
             github,
             owner,
             repo,
             pr,
             workspace=workspace(),
         )
-        plan_sections = []
-        selected_plan_pr = plan_context.get("selected_plan_pr")
-        if plan_context.get("plan_context_source") == "approved-pr" and selected_plan_pr:
-            plan_sections.append(
-                f"Linked approved plan PR: #{selected_plan_pr['number']} ({selected_plan_pr['url']})"
+        spec_sections = []
+        selected_spec_pr = spec_context.get("selected_spec_pr")
+        if spec_context.get("spec_context_source") == "approved-pr" and selected_spec_pr:
+            spec_sections.append(
+                f"Linked approved spec PR: #{selected_spec_pr['number']} ({selected_spec_pr['url']})"
             )
-        elif plan_context.get("plan_context_source") == "directory":
-            plan_sections.append("Repository plan context was found in `plans/`.")
-        for entry in plan_context.get("plan_entries", []):
-            plan_sections.append(f"## {entry['path']}\n\n{entry['content']}")
-        plan_context_text = "\n\n".join(plan_sections).strip() or "No approved or repository plan context was found for this PR."
+        elif spec_context.get("spec_context_source") == "directory":
+            spec_sections.append("Repository spec context was found in `specs/`.")
+        for entry in spec_context.get("spec_entries", []):
+            spec_sections.append(f"## {entry['path']}\n\n{entry['content']}")
+        spec_context_text = "\n\n".join(spec_sections).strip() or "No approved or repository spec context was found for this PR."
         issue_line = (
-            f"#{plan_context['issue_number']}"
-            if plan_context.get("issue_number")
-            else "No associated issue resolved for plan lookup."
+            f"#{spec_context['issue_number']}"
+            if spec_context.get("issue_number")
+            else "No associated issue resolved for spec lookup."
         )
 
         transport_token = new_transport_token()
@@ -82,15 +82,15 @@ def main() -> None:
             - {focus_line}
             - Issue: {issue_line}
 
-            Plan Context:
-            {plan_context_text}
+            Spec Context:
+            {spec_context_text}
 
             Cloud Workflow Requirements:
             - Use the repository's local `review-pr` skill as the base workflow.
             - You are running in a cloud environment rather than a local workflow checkout.
             - Fetch the PR branch, generate `pr_description.txt`, and generate `pr_diff.txt` yourself before applying the review skill.
             - The annotated diff must use the same prefixes as the old workflow: `[OLD:n]`, `[NEW:n]`, and `[OLD:n,NEW:m]`.
-            - If plan context is present above, write it to `implementation_plan_context.md` before reviewing so the repository's `check-impl-against-plan` skill can be used.
+            - If spec context is present above, write it to `spec_context.md` before reviewing so the repository's `check-impl-against-spec` skill can be used.
             - Do not post the final review directly.
             - After you create and validate `review.json`, post exactly one temporary issue comment on PR #{pr_number} whose body is a single HTML comment in this exact format:
               <!-- oz-workflow-transport {{"token":"{transport_token}","kind":"review-json","encoding":"base64","payload":"<BASE64_OF_REVIEW_JSON>"}} -->

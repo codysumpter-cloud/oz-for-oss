@@ -21,7 +21,7 @@ def main() -> None:
         )
         progress.start("Oz is checking whether this assignment is ready for work.")
         progress.complete(
-            "This issue is assigned to Oz, but it is not labeled `ready-to-plan` or `ready-to-implement`, so there is no work to do yet.",
+            "This issue is assigned to Oz, but it is not labeled `ready-to-spec` or `ready-to-implement`, so there is no work to do yet.",
         )
         github.remove_assignees(owner, repo, issue_number, [assignee_login])
 

@@ -7,4 +7,4 @@ triage_result.json
 review.json
 pr_diff.txt
 pr_description.txt
-implementation_plan_context.md
+spec_context.md
