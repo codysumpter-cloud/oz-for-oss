@@ -9,7 +9,7 @@ Reorient the repository's planning workflow from a single "plan" artifact to a t
 
 #### Directory structure
 - The current top-level `plans/` directory is renamed to `specs/`.
-- Each issue gets its own subdirectory: `specs/{issue-number}/`.
+- Each issue gets its own subdirectory: `specs/issue-{issue-number}/`.
 - Within each subdirectory, two files are produced:
   - `product.md` — describes the intended behavior, user-facing goals, and acceptance criteria.
   - `tech.md` — describes the implementation approach, file changes, risks, and technical details (equivalent to today's plan).
@@ -17,13 +17,13 @@ Reorient the repository's planning workflow from a single "plan" artifact to a t
 #### Label-driven workflow
 The current `ready-to-plan` label is replaced by `ready-to-spec` everywhere. The lifecycle becomes:
 
-1. **`ready-to-spec`** — When oz-agent is assigned and the issue has this label, the agent generates both `product.md` (from the issue thread) and `tech.md` (from the product spec and issue thread). Both are committed to a single PR on branch `oz-agent/spec-issue-{number}`.
+1. **`ready-to-spec`** — When oz-agent is assigned and the issue has this label, the agent generates both `product.md` (from the issue thread) and `tech.md` (from the product spec and issue thread) in a single agent run. Both are committed to a single PR on branch `oz-agent/spec-issue-{number}`.
 2. **`plan-approved`** — Remains targeted at the tech spec. When a reviewer is satisfied with the technical approach in the PR, they add this label. The existing `plan-approved` label semantics stay the same — it signals that the tech spec is accepted.
 3. **`ready-to-implement`** — When the issue is marked `ready-to-implement`, the implementation workflow produces code changes on the same PR branch (or a linked branch), using the approved tech spec as context. This behavior is unchanged from today.
 
 #### PR structure
 - The spec PR is titled `spec: {issue title}` (replacing `plan: {issue title}`).
-- The PR contains both `specs/{issue-number}/product.md` and `specs/{issue-number}/tech.md`.
+- The PR contains both `specs/issue-{issue-number}/product.md` and `specs/issue-{issue-number}/tech.md`.
 - Reviewers can iterate on product and tech spec content in the same PR.
 
 #### Agent skills
@@ -62,13 +62,13 @@ Per the triggering comment, backward compatibility with the current `plans/` dir
 
 - Delete `plans/.gitkeep` and any existing plan files (`plans/issue-56.md`, `plans/issue-65.md`).
 - Create `specs/.gitkeep`.
-- Migrate existing plans to `specs/56/tech.md` and `specs/65/tech.md` (treat them as tech specs since that's what they are).
+- Migrate existing plans to `specs/issue-56/tech.md` and `specs/issue-65/tech.md` (treat them as tech specs since that's what they are).
 
 #### 2. New skill: `create-product-spec`
 
 Create `.agents/skills/create-product-spec/SKILL.md`:
 - Inputs: issue number, title, description, labels, assignees, issue comments.
-- Instructs the agent to produce `specs/{issue-number}/product.md`.
+- Instructs the agent to produce `specs/issue-{issue-number}/product.md`.
 - Content guidance: describe intended behavior, user goals, acceptance criteria, scope boundaries, and open product questions.
 - Do not include implementation details — those belong in the tech spec.
 - Follow the same cloud-workflow conventions as the current `create-plan` skill (default no-commit; cloud mode allows commit/push when instructed).
@@ -77,7 +77,7 @@ Create `.agents/skills/create-product-spec/SKILL.md`:
 
 Create `.agents/skills/create-tech-spec/SKILL.md`:
 - Inputs: issue number, title, description, labels, assignees, issue comments, plus the product spec content when available.
-- Instructs the agent to produce `specs/{issue-number}/tech.md`.
+- Instructs the agent to produce `specs/issue-{issue-number}/tech.md`.
 - Content guidance: problem/goal, current-state observations, proposed changes with file-level detail, risks, dependencies, open technical questions.
 - This is the direct successor to the `create-plan` skill content, adapted for the new path.
 - Follow the same cloud-workflow conventions.
@@ -99,10 +99,7 @@ Create `.github/workflows/create-spec-from-issue.yml` and delete `create-plan-fr
 
 Replace `src/create_plan_from_issue.py` with `src/create_spec_from_issue.py`:
 - Branch naming: `oz-agent/spec-issue-{number}`.
-- The agent prompt instructs the agent to:
-  1. Use the `create-product-spec` skill to produce `specs/{issue-number}/product.md`.
-  2. Use the `create-tech-spec` skill to produce `specs/{issue-number}/tech.md`.
-  3. Commit both files to the spec branch.
+- The agent prompt instructs the agent to produce both `specs/issue-{issue-number}/product.md` and `specs/issue-{issue-number}/tech.md` in a single run. Both skill files are referenced in the prompt text; the `skill_name` parameter is omitted from `run_agent()` and the agent reads both skills via prompting.
 - PR title: `spec: {issue title}`.
 - Update progress messages from "implementation plan" to "spec".
 - Update the preview section to point to both spec files.
@@ -110,16 +107,19 @@ Replace `src/create_plan_from_issue.py` with `src/create_spec_from_issue.py`:
 #### 7. Update `src/create_implementation_from_issue.py`
 
 - Update `resolve_plan_context_for_issue()` calls — the function itself will be renamed (see below), but the call sites need to use the new name.
+- Pass both the product spec and the tech spec as context into the implementation agent prompt. The implementation workflow should read both `specs/issue-{number}/product.md` and `specs/issue-{number}/tech.md` and include their contents in `spec_context.md`.
 - Update progress messages from "plan" to "spec" where visible to users.
 
 #### 8. Update `src/oz_workflows/helpers.py`
 
 Rename and update the following functions:
 
-- `build_plan_preview_section()` → `build_spec_preview_section()`: generate preview links for both `specs/{number}/product.md` and `specs/{number}/tech.md`.
-- `read_local_plan_file()` → `read_local_spec_files()`: read from `specs/{number}/product.md` and `specs/{number}/tech.md`.
+- `build_plan_preview_section()` → `build_spec_preview_section()`: generate preview links for both `specs/issue-{number}/product.md` and `specs/issue-{number}/tech.md`.
+- `read_local_plan_file()` → `read_local_spec_files()`: read from `specs/issue-{number}/product.md` and `specs/issue-{number}/tech.md`.
 - `find_matching_plan_prs()` → `find_matching_spec_prs()`: look for branches named `oz-agent/spec-issue-{number}` instead of `oz-agent/plan-issue-{number}`. Update the file-matching logic to look for files under `specs/` instead of `plans/`.
-- `resolve_issue_number_for_pr()`: update the regex for branch name matching from `(?:plan|implement)-issue-` to `(?:spec|implement)-issue-`, and the file path regex from `^plans/issue-(\\d+)\\.md$` to `^specs/(\\d+)/(?:product|tech)\\.md$`.
+- `resolve_plan_context_for_issue()` → `resolve_spec_context_for_issue()`: update all internal references to use the renamed functions and new paths.
+- `resolve_plan_context_for_pr()` → `resolve_spec_context_for_pr()`: same updates.
+- `resolve_issue_number_for_pr()`: update the regex for branch name matching from `(?:plan|implement)-issue-` to `(?:spec|implement)-issue-`, and the file path regex from `^plans/issue-(\\d+)\\.md$` to `^specs/issue-(\\d+)/(?:product|tech)\\.md$`.
 
 #### 9. Update `src/enforce_pr_issue_state.py`
 
@@ -139,17 +139,20 @@ Rename and update the following functions:
 
 Rename to `.agents/skills/check-impl-against-spec/SKILL.md`:
 - Update all references from "plan" to "spec" (specifically tech spec).
-- The file `implementation_plan_context.md` can be renamed to `spec_context.md` or kept as-is for simplicity — the content just comes from tech spec files now. Keeping the filename unchanged minimizes churn in the `implement-issue` and `review-pr` skills, so prefer keeping `implementation_plan_context.md` for now but updating the prose to say "tech spec context" instead of "plan context".
+- Rename `implementation_plan_context.md` to `spec_context.md` for clarity, even though it introduces churn in the `implement-issue` and `review-pr` skills.
+- The skill should verify the implementation against both the product spec (for overall structure and correctness) and the tech spec (for implementation details).
 
 #### 13. Update `implement-issue` skill
 
-- Update references from "plan" to "tech spec" in the prose.
-- The skill should note that `implementation_plan_context.md` now contains tech spec content.
+- Update references from "plan" to "spec" in the prose.
+- Rename `implementation_plan_context.md` references to `spec_context.md`.
+- The skill should note that `spec_context.md` contains both product and tech spec content.
 
 #### 14. Update `review-pr` skill
 
 - Update the reference to `check-impl-against-plan` → `check-impl-against-spec`.
-- Update prose from "plan" to "tech spec".
+- Update prose from "plan" to "spec".
+- Rename `implementation_plan_context.md` references to `spec_context.md`.
 
 #### 15. Update `CONTRIBUTING.md`
 
@@ -181,8 +184,8 @@ New files:
 - `.github/workflows/create-spec-from-issue.yml`
 - `src/create_spec_from_issue.py`
 - `specs/.gitkeep`
-- `specs/56/tech.md` (migrated from `plans/issue-56.md`)
-- `specs/65/tech.md` (migrated from `plans/issue-65.md`)
+- `specs/issue-56/tech.md` (migrated from `plans/issue-56.md`)
+- `specs/issue-65/tech.md` (migrated from `plans/issue-65.md`)
 
 Deleted files:
 - `.agents/skills/create-plan/SKILL.md`
@@ -209,8 +212,7 @@ Modified files:
 
 ### Risks and open questions
 
-1. **Skill invocation model**: The current workflow runs a single agent with a single skill. The new spec workflow needs the agent to produce two files (product.md and tech.md). The simplest approach is a single agent run with a prompt that instructs it to produce both, referencing both skills. An alternative is two sequential agent runs. The single-run approach is simpler and avoids extra API calls — recommend starting there.
-2. **`implementation_plan_context.md` naming**: Renaming this scratch file to something like `spec_context.md` would be cleaner, but it touches three skills and the implementation Python script. Keeping the existing filename and updating only the prose reduces churn. Either approach works; this plan assumes keeping the filename.
+1. **Skill invocation model** (resolved): Use a single-run approach. The agent is invoked once with a prompt that references both `create-product-spec` and `create-tech-spec` skill files. The `skill_name` parameter is omitted from `run_agent()` and the prompt includes the skill file paths for the agent to read via prompting.
+2. **`implementation_plan_context.md` naming** (resolved): Rename to `spec_context.md` for clarity. This introduces churn in `implement-issue`, `review-pr`, and `check-impl-against-spec` skills plus `create_implementation_from_issue.py`, but the clarity is worth it.
 3. **`plan-approved` label**: The issue discussion says `plan-approved` is still targeted at the tech spec. No rename needed for this label — it continues to gate the transition from spec to implementation.
 4. **Existing open PRs**: Any in-flight PRs on `oz-agent/plan-issue-*` branches will not be automatically migrated. This is acceptable since back-compat is explicitly not required.
-5. **Two-skill vs one-skill approach for agent invocation**: Since the workflow runs a single Oz agent, and the agent can be given both skills in one prompt, we should invoke the agent once with instructions to use both `create-product-spec` and `create-tech-spec` sequentially. The `skill_name` parameter in `run_agent()` currently takes a single skill name — we may need to adjust the prompt to reference both skills by name or change to a composite approach.
