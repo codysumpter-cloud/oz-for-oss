@@ -28,8 +28,6 @@ def main() -> None:
             workflow="enforce-pr-issue-state",
             requester_login=requester,
         )
-        progress.start("Oz is checking whether this pull request is associated with a ready issue.")
-
         files = github.list_pull_files(owner, repo, pr_number)
         changed_files = [file["filename"] for file in files]
         has_code_changes = any(not filename.lower().endswith(".md") for filename in changed_files)
@@ -55,9 +53,7 @@ def main() -> None:
                 for label in explicit_issue.get("labels", [])
             ]
             if required_label in labels or (not has_code_changes and has_plan_approved):
-                progress.complete(
-                    f"I confirmed that this pull request is associated with issue #{explicit_issue['number']} and review may continue."
-                )
+                progress.cleanup()
                 set_output("allow_review", "true")
                 return
             close_comment = (
@@ -72,9 +68,7 @@ def main() -> None:
             return
 
         if not has_code_changes and has_plan_approved:
-            progress.complete(
-                "This pull request contains only Markdown changes and has a `plan-approved` label. Allowing review to continue."
-            )
+            progress.cleanup()
             set_output("allow_review", "true")
             return
 
@@ -125,6 +119,7 @@ def main() -> None:
             """
         ).strip()
 
+        session_links: list[str] = []
         config = build_agent_config(
             config_name="enforce-pr-issue-state",
             workspace=workspace(),
@@ -138,7 +133,7 @@ def main() -> None:
             skill_name=None,
             title=f"Associate PR #{pr_number} with ready issue",
             config=config,
-            on_poll=lambda current_run: _on_poll(progress, current_run),
+            on_poll=lambda current_run: _capture_session_link(session_links, current_run),
         )
         payload, comment_id = poll_for_transport_payload(
             github,
@@ -151,22 +146,24 @@ def main() -> None:
         github.delete_comment(owner, repo, comment_id)
         result = json.loads(payload["decoded_payload"])
         if result.get("matched") is True and isinstance(result.get("issue_number"), int):
-            progress.complete(
-                f"I confirmed that this pull request is associated with issue #{result['issue_number']} and review may continue."
-            )
+            progress.cleanup()
             set_output("allow_review", "true")
             return
         close_comment = str(result.get("close_comment") or "").strip()
         if not close_comment:
             raise RuntimeError("Oz returned no issue match without a close_comment")
-        progress.complete(close_comment)
+        final_sections = [close_comment]
+        if session_links:
+            final_sections.append(f"Session: {session_links[-1]}")
+        progress.complete("\n\n".join(final_sections))
         github.update_pull(owner, repo, pr_number, state="closed")
         set_output("allow_review", "false")
 
 
-def _on_poll(progress: WorkflowProgressComment, run: object) -> None:
-    session_link = getattr(run, "session_link", None) or ""
-    progress.record_session_link(session_link)
+def _capture_session_link(session_links: list[str], run: object) -> None:
+    session_link = (getattr(run, "session_link", None) or "").strip()
+    if session_link and (not session_links or session_links[-1] != session_link):
+        session_links.append(session_link)
 
 
 if __name__ == "__main__":
