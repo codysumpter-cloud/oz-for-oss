@@ -1,0 +1,68 @@
+name: Respond to PR Comment
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+concurrency:
+  group: respond-to-pr-comment-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+jobs:
+  respond:
+    if: >-
+      contains(github.event.comment.body, '@oz-agent') &&
+      (github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'OWNER') &&
+      github.event.comment.user.login != 'github-actions[bot]' &&
+      (github.event_name == 'pull_request_review_comment' || (github.event_name == 'issue_comment' && github.event.issue.pull_request))
+    name: Respond to PR comment
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Create GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.GHA_APP_ID }}
+          private-key: ${{ secrets.GHA_PRIVATE_KEY }}
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Authenticate to Google Cloud for staging secret access
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/643991131484/locations/global/workloadIdentityPools/github-actions/providers/warp-terraform
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+      - name: Resolve staging origin token
+        run: |
+          STAGING_ORIGIN_TOKEN="$(gcloud --project=warp-server-staging secrets versions access latest --secret=staging-origin-token)"
+          echo "::add-mask::$STAGING_ORIGIN_TOKEN"
+          {
+            echo 'STAGING_ORIGIN_TOKEN<<EOF'
+            printf '%s\n' "$STAGING_ORIGIN_TOKEN"
+            echo EOF
+          } >> "$GITHUB_ENV"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Python workflow dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r src/requirements.txt
+      - name: Run respond-to-pr-comment workflow
+        env:
+          PYTHONPATH: src
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
+          WARP_AGENT_PROFILE: ${{ vars.WARP_AGENT_PROFILE || '' }}
+          WARP_AGENT_MODEL: ${{ vars.WARP_AGENT_MODEL || '' }}
+          WARP_AGENT_MCP: ${{ vars.WARP_AGENT_MCP || '' }}
+          WARP_AGENT_ENVIRONMENT_ID: ${{ vars.WARP_AGENT_ENVIRONMENT_ID || '' }}
+          WARP_AGENT_IMPLEMENTATION_ENVIRONMENT_ID: ${{ vars.WARP_AGENT_IMPLEMENTATION_ENVIRONMENT_ID || '' }}
+        run: python src/respond_to_pr_comment.py

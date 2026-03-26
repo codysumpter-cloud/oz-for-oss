@@ -362,6 +362,76 @@ def resolve_plan_context_for_issue(
     }
 
 
+def _is_org_member(comment: dict[str, Any]) -> bool:
+    return comment.get("author_association") in {"MEMBER", "OWNER"}
+
+
+def _format_review_comment(comment: dict[str, Any]) -> str:
+    login = (comment.get("user") or {}).get("login") or "unknown"
+    created = comment.get("created_at") or ""
+    body = comment.get("body") or ""
+    path = comment.get("path") or ""
+    prefix = f"{path}: " if path else ""
+    return f"- {prefix}{login} ({created}): {body}"
+
+
+def review_thread_comments_text(
+    all_review_comments: list[dict[str, Any]],
+    trigger_comment_id: int,
+) -> str:
+    """Extract and format the review thread containing *trigger_comment_id*.
+
+    Thread identification uses ``in_reply_to_id``: the root comment has no
+    ``in_reply_to_id`` and replies point to the root's ``id``.
+    """
+    by_id: dict[int, dict[str, Any]] = {int(c["id"]): c for c in all_review_comments}
+
+    # Walk up from the trigger comment to find the thread root.
+    root_id = trigger_comment_id
+    while True:
+        comment = by_id.get(root_id)
+        if not comment:
+            break
+        parent = comment.get("in_reply_to_id")
+        if parent is None or int(parent) not in by_id:
+            break
+        root_id = int(parent)
+
+    # Collect all comments in this thread.
+    thread = [
+        c
+        for c in all_review_comments
+        if int(c["id"]) == root_id or c.get("in_reply_to_id") == root_id
+    ]
+    filtered = [c for c in thread if _is_org_member(c)]
+    if not filtered:
+        return ""
+    return "\n".join(_format_review_comment(c) for c in filtered)
+
+
+def all_review_comments_text(review_comments: list[dict[str, Any]]) -> str:
+    """Format all review comments grouped by file path, filtered to org members."""
+    filtered = [c for c in review_comments if _is_org_member(c)]
+    if not filtered:
+        return ""
+
+    by_path: dict[str, list[dict[str, Any]]] = {}
+    for c in filtered:
+        path = c.get("path") or "(no file)"
+        by_path.setdefault(path, []).append(c)
+
+    sections: list[str] = []
+    for path, comments in by_path.items():
+        lines = [f"File: {path}"]
+        for c in comments:
+            login = (c.get("user") or {}).get("login") or "unknown"
+            created = c.get("created_at") or ""
+            body = c.get("body") or ""
+            lines.append(f"  - {login} ({created}): {body}")
+        sections.append("\n".join(lines))
+    return "\n\n".join(sections)
+
+
 def extract_issue_numbers_from_text(owner: str, repo: str, text: str) -> list[int]:
     issue_numbers = {int(match.group(1)) for match in ISSUE_PATTERN.finditer(text or "")}
     same_repo_url_pattern = re.compile(

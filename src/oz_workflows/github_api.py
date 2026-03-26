@@ -285,6 +285,22 @@ class GitHubClient:
             json_body=payload,
         )
 
+    def list_pull_review_comments(self, owner: str, repo: str, pull_number: int) -> list[dict[str, Any]]:
+        return self.paginate(f"/repos/{owner}/{repo}/pulls/{pull_number}/comments")
+
+    def create_reaction_for_pull_request_review_comment(
+        self,
+        owner: str,
+        repo: str,
+        comment_id: int,
+        content: str,
+    ) -> dict[str, Any]:
+        return self.request(
+            "POST",
+            f"/repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions",
+            json_body={"content": content},
+        )
+
     def get_ref(self, owner: str, repo: str, ref: str) -> dict[str, Any] | None:
         return self.request_or_none("GET", f"/repos/{owner}/{repo}/git/ref/{ref}")
 
