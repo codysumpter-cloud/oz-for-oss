@@ -253,7 +253,7 @@ def process_issue(
     summary = str(result.get("summary") or "triage completed").strip()
     progress.complete(
         f"I completed triage for this issue and updated the issue with the triage result. "
-        f"Summary: {summary}."
+        f"Summary: {summary}"
     )
     append_summary(f"- Issue #{issue_number}: {summary} Labels: {labels_text}.\n")
 
