@@ -6,7 +6,9 @@ from oz_workflows.actions import notice, set_output
 from oz_workflows.env import load_event, optional_env
 
 
-SLASH_COMMAND_PATTERN = re.compile(r"(?:^|\s)/oz-review\b([\s\S]*)", re.IGNORECASE)
+SLASH_COMMAND_PATTERN = re.compile(
+    r"(?:^|\s)(?:/oz-review|@oz-agent\s+/review)\b([\s\S]*)", re.IGNORECASE
+)
 
 
 def main() -> None:
