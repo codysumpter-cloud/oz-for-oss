@@ -18,13 +18,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          has_code=false
-          while IFS= read -r file; do
-            if [[ ! "$file" =~ \.md$ ]]; then
-              has_code=true
-              break
-            fi
-          done < <(gh api --paginate "repos/${{ github.repository }}/pulls/${{ inputs.pr_number }}/files" --jq '.[].filename')
+          has_code=true
+          if files=$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ inputs.pr_number }}/files" --jq '.[].filename') && [ -n "$files" ]; then
+            has_code=false
+            while IFS= read -r file; do
+              if [[ ! "$file" =~ \.md$ ]]; then
+                has_code=true
+                break
+              fi
+            done <<< "$files"
+          fi
           echo "has_code_changes=$has_code" >> "$GITHUB_OUTPUT"
       - name: Checkout PR
         if: steps.filter.outputs.has_code_changes == 'true'
