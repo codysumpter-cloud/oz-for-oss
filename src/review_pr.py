@@ -64,7 +64,7 @@ def main() -> None:
             f"Additional focus from @{requester}: {focus}"
             if focus
             else (
-                f"The review was requested by @{requester} via /oz-review. Perform a general review if no extra guidance was provided."
+                f"The review was requested by @{requester} via a review command. Perform a general review if no extra guidance was provided."
                 if trigger_source == "issue_comment"
                 else "Perform a general review of the pull request."
             )
