@@ -8,6 +8,9 @@ from typing import Any
 from .github_api import GitHubClient
 
 
+# Author associations that indicate organization membership.
+ORG_MEMBER_ASSOCIATIONS: set[str] = {"MEMBER", "OWNER"}
+
 ISSUE_PATTERN = re.compile(r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?|implements?|issue)\s*:?\s+#(\d+)", re.IGNORECASE)
 
 
@@ -23,7 +26,7 @@ def org_member_comments_text(
     selected = [
         comment
         for comment in comments
-        if comment.get("author_association") in {"MEMBER", "OWNER"}
+        if comment.get("author_association") in ORG_MEMBER_ASSOCIATIONS
         and int(comment.get("id") or 0) != exclude_comment_id
     ]
     if not selected:
@@ -528,7 +531,7 @@ def resolve_spec_context_for_issue(
 
 
 def _is_org_member(comment: dict[str, Any]) -> bool:
-    return comment.get("author_association") in {"MEMBER", "OWNER"}
+    return comment.get("author_association") in ORG_MEMBER_ASSOCIATIONS
 
 
 def _format_review_comment(comment: dict[str, Any]) -> str:

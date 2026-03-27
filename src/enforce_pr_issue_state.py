@@ -6,9 +6,14 @@ from textwrap import dedent
 from oz_workflows.actions import set_output
 from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.github_api import GitHubClient
-from oz_workflows.helpers import extract_issue_numbers_from_text, WorkflowProgressComment
+from oz_workflows.helpers import extract_issue_numbers_from_text, ORG_MEMBER_ASSOCIATIONS, WorkflowProgressComment
 from oz_workflows.oz_client import build_agent_config, run_agent
 from oz_workflows.transport import new_transport_token, poll_for_transport_payload
+
+
+def _is_pr_author_org_member(pr: dict) -> bool:
+    """Return True if the PR author is an organization member or owner."""
+    return pr.get("author_association", "") in ORG_MEMBER_ASSOCIATIONS
 
 
 def main() -> None:
@@ -19,6 +24,9 @@ def main() -> None:
         pr = github.get_pull(owner, repo, pr_number)
         if pr["state"] != "open":
             set_output("allow_review", "false")
+            return
+        if _is_pr_author_org_member(pr):
+            set_output("allow_review", "true")
             return
         progress = WorkflowProgressComment(
             github,
