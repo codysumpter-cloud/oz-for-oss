@@ -2,21 +2,22 @@ from __future__ import annotations
 
 import unittest
 
-from enforce_pr_issue_state import _is_pr_author_org_member, _ORG_MEMBER_ASSOCIATIONS
+from enforce_pr_issue_state import _is_pr_author_org_member
+from oz_workflows.helpers import ORG_MEMBER_ASSOCIATIONS
 
 
 class IsOrgMemberAssociationsTest(unittest.TestCase):
     def test_member_association_is_recognized(self) -> None:
-        self.assertIn("MEMBER", _ORG_MEMBER_ASSOCIATIONS)
+        self.assertIn("MEMBER", ORG_MEMBER_ASSOCIATIONS)
 
     def test_owner_association_is_recognized(self) -> None:
-        self.assertIn("OWNER", _ORG_MEMBER_ASSOCIATIONS)
+        self.assertIn("OWNER", ORG_MEMBER_ASSOCIATIONS)
 
     def test_contributor_is_not_recognized(self) -> None:
-        self.assertNotIn("CONTRIBUTOR", _ORG_MEMBER_ASSOCIATIONS)
+        self.assertNotIn("CONTRIBUTOR", ORG_MEMBER_ASSOCIATIONS)
 
     def test_none_is_not_recognized(self) -> None:
-        self.assertNotIn("NONE", _ORG_MEMBER_ASSOCIATIONS)
+        self.assertNotIn("NONE", ORG_MEMBER_ASSOCIATIONS)
 
 
 class IsPrAuthorOrgMemberTest(unittest.TestCase):
