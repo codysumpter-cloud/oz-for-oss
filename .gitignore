@@ -8,3 +8,10 @@ review.json
 pr_diff.txt
 pr_description.txt
 spec_context.md
+
+# Web app
+web/.next/
+web/node_modules/
+web/.env.local
+web/.env
+!web/.env.example
