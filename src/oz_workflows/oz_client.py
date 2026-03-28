@@ -28,17 +28,12 @@ def build_agent_config(
     *,
     config_name: str,
     workspace: Path,
-    environment_env_names: list[str],
+    environment_env_name: str = "WARP_ENVIRONMENT_ID",
 ) -> dict[str, Any]:
-    environment_id = ""
-    for env_name in environment_env_names:
-        value = optional_env(env_name)
-        if value:
-            environment_id = value
-            break
+    environment_id = optional_env(environment_env_name)
     if not environment_id:
         raise RuntimeError(
-            f"Missing Oz environment configuration. Set one of: {', '.join(environment_env_names)}"
+            f"Missing Oz environment configuration. Set {environment_env_name}"
         )
 
     config: dict[str, Any] = {

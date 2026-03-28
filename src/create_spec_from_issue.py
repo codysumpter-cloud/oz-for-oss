@@ -78,10 +78,6 @@ def main() -> None:
         config = build_agent_config(
             config_name="create-spec-from-issue",
             workspace=workspace(),
-            environment_env_names=[
-                "WARP_AGENT_SPEC_ENVIRONMENT_ID",
-                "WARP_AGENT_ENVIRONMENT_ID",
-            ],
         )
 
         run = run_agent(
