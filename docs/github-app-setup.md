@@ -1,6 +1,8 @@
 # GitHub App Setup
 
-All workflows in this repository authenticate with the GitHub API through a GitHub App installation. The app token is created at the start of each workflow run using the [`actions/create-github-app-token`](https://github.com/actions/create-github-app-token) action with two repository secrets: `GHA_APP_ID` and `GHA_PRIVATE_KEY`.
+All workflows in this repository authenticate with the GitHub API through a dedicated GitHub App installation. This app is **separate** from the GitHub App that Warp uses when running Oz cloud agents. It exists specifically to make durable writes to GitHub on behalf of Oz (such as posting comments, creating branches, and updating pull requests) and provides a security boundary between actions the agent can take on GitHub and what the repository's workflow scripts deterministically execute.
+
+The app token is created at the start of each workflow run using the [`actions/create-github-app-token`](https://github.com/actions/create-github-app-token) action with two repository secrets: `GHA_APP_ID` and `GHA_PRIVATE_KEY`.
 
 This guide walks through creating the app, configuring its permissions, installing it on your repository, and populating the required secrets.
 
@@ -73,35 +75,6 @@ gh secret set GHA_APP_ID --body "<YOUR_APP_ID>"
 # Set the private key from the downloaded .pem file
 gh secret set GHA_PRIVATE_KEY < /path/to/your-app.private-key.pem
 ```
-
-### Option C: Bootstrap script
-
-This repository includes a helper script that wraps the `gh` commands above:
-
-```sh
-scripts/setup-github-app-secrets.sh --app-id <APP_ID> --private-key /path/to/key.pem
-```
-
-See [scripts/setup-github-app-secrets.sh](../scripts/setup-github-app-secrets.sh) for details.
-
-## 5. Other required secrets and variables
-
-Beyond the GitHub App, the workflows also reference:
-
-| Secret / Variable | Type | Purpose |
-|---|---|---|
-| `WARP_API_KEY` | Secret | Authenticates with the Warp API to run Oz agents. |
-| `WARP_AGENT_PROFILE` | Variable (optional) | Oz agent profile override. |
-| `WARP_AGENT_MODEL` | Variable (optional) | Oz agent model override. |
-| `WARP_AGENT_MCP` | Variable (optional) | Oz agent MCP configuration. |
-| `WARP_AGENT_ENVIRONMENT_ID` | Variable (optional) | Default Oz cloud environment ID. |
-| `WARP_AGENT_TRIAGE_ENVIRONMENT_ID` | Variable (optional) | Environment ID for triage runs. |
-| `WARP_AGENT_SPEC_ENVIRONMENT_ID` | Variable (optional) | Environment ID for spec creation runs. |
-| `WARP_AGENT_IMPLEMENTATION_ENVIRONMENT_ID` | Variable (optional) | Environment ID for implementation runs. |
-| `WARP_AGENT_REVIEW_ENVIRONMENT_ID` | Variable (optional) | Environment ID for PR review runs. |
-| `WARP_AGENT_ENFORCEMENT_ENVIRONMENT_ID` | Variable (optional) | Environment ID for PR enforcement runs. |
-
-Set secrets under **Settings → Secrets and variables → Actions → Secrets** and variables under **Settings → Secrets and variables → Actions → Variables**.
 
 ## Verifying the setup
 

@@ -24,13 +24,9 @@ This repository currently automates:
 
 ## GitHub App setup
 
-The workflows authenticate with the GitHub API using a GitHub App installation. Before the workflows can run you need to create a GitHub App, install it on the repository, and store the app credentials as repository secrets (`GHA_APP_ID` and `GHA_PRIVATE_KEY`).
+The workflows authenticate with the GitHub API using a dedicated GitHub App installation (separate from the app Warp uses to run Oz cloud agents). Before the workflows can run you need to create a GitHub App, install it on the repository, and store the app credentials as repository secrets (`GHA_APP_ID` and `GHA_PRIVATE_KEY`).
 
-See [docs/github-app-setup.md](docs/github-app-setup.md) for a step-by-step walkthrough. A helper script is also available:
-
-```sh
-scripts/setup-github-app-secrets.sh --app-id <APP_ID> --private-key /path/to/key.pem
-```
+See [docs/github-app-setup.md](docs/github-app-setup.md) for a step-by-step walkthrough.
 
 ## Local development
 
