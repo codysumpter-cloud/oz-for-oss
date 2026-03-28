@@ -5,7 +5,7 @@ from textwrap import dedent
 
 from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.github_api import GitHubClient
-from oz_workflows.helpers import resolve_spec_context_for_pr, WorkflowProgressComment
+from oz_workflows.helpers import is_spec_only_pr, resolve_spec_context_for_pr, WorkflowProgressComment
 from oz_workflows.oz_client import build_agent_config, run_agent
 from oz_workflows.transport import new_transport_token, poll_for_transport_payload
 
@@ -59,6 +59,10 @@ def main() -> None:
             else "No associated issue resolved for spec lookup."
         )
 
+        changed_files: list[str] = spec_context.get("changed_files", [])
+        spec_only = is_spec_only_pr(changed_files)
+        skill_name = "review-spec" if spec_only else "review-pr"
+
         transport_token = new_transport_token()
         focus_line = (
             f"Additional focus from @{requester}: {focus}"
@@ -86,7 +90,7 @@ def main() -> None:
             {spec_context_text}
 
             Cloud Workflow Requirements:
-            - Use the repository's local `review-pr` skill as the base workflow.
+            - Use the repository's local `{skill_name}` skill as the base workflow.
             - You are running in a cloud environment rather than a local workflow checkout.
             - Fetch the PR branch, generate `pr_description.txt`, and generate `pr_diff.txt` yourself before applying the review skill.
             - The annotated diff must use the same prefixes as the old workflow: `[OLD:n]`, `[NEW:n]`, and `[OLD:n,NEW:m]`.
@@ -107,7 +111,7 @@ def main() -> None:
         )
         run_agent(
             prompt=prompt,
-            skill_name="review-pr",
+            skill_name=skill_name,
             title=f"PR review #{pr_number}",
             config=config,
             on_poll=lambda current_run: _on_poll(progress, current_run),
