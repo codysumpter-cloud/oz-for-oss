@@ -11,6 +11,7 @@ from oz_workflows.helpers import (
     coauthor_prompt_lines,
     conventional_commit_prefix,
     extract_issue_numbers_from_text,
+    is_spec_only_pr,
     org_member_comments_text,
     resolve_coauthor_line,
     resolve_progress_requester_login,
@@ -413,6 +414,23 @@ class CoauthorPromptLinesTest(unittest.TestCase):
     def test_returns_omit_directive_when_empty(self) -> None:
         result = coauthor_prompt_lines("")
         self.assertIn("Do not include any Co-Authored-By lines", result)
+
+
+class IsSpecOnlyPrTest(unittest.TestCase):
+    def test_all_specs_files(self) -> None:
+        self.assertTrue(is_spec_only_pr(["specs/issue-42/product.md", "specs/issue-42/tech.md"]))
+
+    def test_single_spec_file(self) -> None:
+        self.assertTrue(is_spec_only_pr(["specs/issue-10/product.md"]))
+
+    def test_mixed_files(self) -> None:
+        self.assertFalse(is_spec_only_pr(["specs/issue-42/product.md", "src/review_pr.py"]))
+
+    def test_no_spec_files(self) -> None:
+        self.assertFalse(is_spec_only_pr(["src/main.py", "README.md"]))
+
+    def test_empty_file_list(self) -> None:
+        self.assertFalse(is_spec_only_pr([]))
 
 
 class FakeGitHubClientWithCompare:

@@ -636,6 +636,16 @@ def resolve_issue_number_for_pr(
     return None
 
 
+def is_spec_only_pr(changed_files: list[str]) -> bool:
+    """Return True when every changed file lives under ``specs/``.
+
+    An empty file list is not considered a spec-only PR.
+    """
+    return bool(changed_files) and all(
+        filename.startswith("specs/") for filename in changed_files
+    )
+
+
 def resolve_spec_context_for_pr(
     github: GitHubClient,
     owner: str,
@@ -653,6 +663,7 @@ def resolve_spec_context_for_pr(
             "spec_context_source": "",
             "selected_spec_pr": None,
             "spec_entries": [],
+            "changed_files": changed_files,
         }
     spec_context = resolve_spec_context_for_issue(
         github,
@@ -662,4 +673,5 @@ def resolve_spec_context_for_pr(
         workspace=workspace,
     )
     spec_context["issue_number"] = issue_number
+    spec_context["changed_files"] = changed_files
     return spec_context
