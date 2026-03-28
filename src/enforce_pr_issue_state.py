@@ -131,10 +131,6 @@ def main() -> None:
         config = build_agent_config(
             config_name="enforce-pr-issue-state",
             workspace=workspace(),
-            environment_env_names=[
-                "WARP_AGENT_ENFORCEMENT_ENVIRONMENT_ID",
-                "WARP_AGENT_ENVIRONMENT_ID",
-            ],
         )
         run_agent(
             prompt=prompt,

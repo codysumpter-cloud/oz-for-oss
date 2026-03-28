@@ -76,6 +76,5 @@ jobs:
           WARP_AGENT_PROFILE: ${{ vars.WARP_AGENT_PROFILE || '' }}
           WARP_AGENT_MODEL: ${{ vars.WARP_AGENT_MODEL || '' }}
           WARP_AGENT_MCP: ${{ vars.WARP_AGENT_MCP || '' }}
-          WARP_AGENT_ENVIRONMENT_ID: ${{ vars.WARP_AGENT_ENVIRONMENT_ID || '' }}
-          WARP_AGENT_ENFORCEMENT_ENVIRONMENT_ID: ${{ vars.WARP_AGENT_ENFORCEMENT_ENVIRONMENT_ID || '' }}
+          WARP_ENVIRONMENT_ID: ${{ vars.WARP_ENVIRONMENT_ID || '' }}
         run: python src/enforce_pr_issue_state.py
