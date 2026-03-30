@@ -21,7 +21,7 @@ concurrency:
 jobs:
   resolve_review_context:
     if: github.event_name != 'pull_request_target'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     outputs:
       should_review: ${{ steps.resolve.outputs.should_review }}
       pr_number: ${{ steps.resolve.outputs.pr_number }}

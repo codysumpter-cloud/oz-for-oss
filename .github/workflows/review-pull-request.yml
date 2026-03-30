@@ -34,7 +34,7 @@ on:
         required: true
 jobs:
   review_pr:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     env:
       WARP_ENVIRONMENT_ID: ${{ vars.WARP_ENVIRONMENT_ID || '' }}
       WARP_AGENT_ENVIRONMENT_ID: ${{ vars.WARP_AGENT_ENVIRONMENT_ID || vars.WARP_ENVIRONMENT_ID || '' }}
