@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import re
 import time
@@ -21,9 +22,14 @@ def parse_transport_comment(body: str) -> dict[str, Any] | None:
     match = TRANSPORT_PATTERN.search(body)
     if not match:
         return None
-    payload = json.loads(match.group("payload"))
-    encoded = payload.get("payload", "")
-    decoded = base64.b64decode(encoded).decode("utf-8")
+    try:
+        payload = json.loads(match.group("payload"))
+        if not isinstance(payload, dict):
+            return None
+        encoded = payload.get("payload", "")
+        decoded = base64.b64decode(encoded, validate=True).decode("utf-8")
+    except (TypeError, ValueError, json.JSONDecodeError, binascii.Error, UnicodeDecodeError):
+        return None
     payload["decoded_payload"] = decoded
     return payload
 
