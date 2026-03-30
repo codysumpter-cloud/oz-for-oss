@@ -70,3 +70,4 @@ The `config.json` file contains **only** label definitions. Stakeholder ownershi
 - Production logic in this repository lives in the Python automation and workflow definitions, not in a shipping application binary or CLI.
 - Shared workflow and hub-action helpers should live in `src/oz_workflows/` so they can be reused by multiple workflow entrypoints.
 - Workflow dependency installation is driven by `src/requirements.txt`.
+- Any third-party module imported directly from `src/` or `src/oz_workflows/` should also be declared directly in `src/requirements.txt`, even if it is currently available transitively through another dependency.

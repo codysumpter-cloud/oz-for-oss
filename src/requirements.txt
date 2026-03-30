@@ -1,1 +1,2 @@
+httpx
 git+https://github.com/warpdotdev/oz-sdk-python@main
