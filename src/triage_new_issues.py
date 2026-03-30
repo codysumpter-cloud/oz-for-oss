@@ -77,7 +77,7 @@ def triage_heuristics_prompt(owner: str, repo: str) -> str:
         - Distinguish observed symptoms from reporter hypotheses and proposed fixes.
         - Before asking any follow-up question, first try to answer it yourself through code inspection, documentation lookup, or web search. Only ask questions that you cannot resolve on your own and that only the reporter would know.
         - Ask targeted follow-up questions only for details the agent cannot derive itself and that materially improve triage confidence.
-        - Prefer issue-specific questions over generic "please share more info" requests.
+        - Prefer issue-specific questions over generic “please share more info” requests.
         """
     ).strip()
 
