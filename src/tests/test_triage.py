@@ -4,7 +4,14 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from triage_new_issues import format_issue_comments, resolve_issue_number_override
+from triage_new_issues import (
+    apply_triage_result,
+    build_follow_up_comment,
+    extract_follow_up_questions,
+    format_issue_comments,
+    resolve_issue_number_override,
+    sync_follow_up_comment,
+)
 
 from oz_workflows.triage import (
     ORIGINAL_REPORT_END,
@@ -207,6 +214,149 @@ class FormatIssueCommentsTest(unittest.TestCase):
             exclude_comment_id=2,
         )
         self.assertEqual(rendered, "- @alice [MEMBER] (2026-03-24T00:00:00Z): Earlier context")
+
+    def test_skips_managed_oz_comments(self) -> None:
+        rendered = format_issue_comments(
+            [
+                {
+                    "id": 1,
+                    "author_association": "NONE",
+                    "created_at": "2026-03-24T00:00:00Z",
+                    "body": "Visible reporter comment",
+                    "user": {"login": "alice"},
+                },
+                {
+                    "id": 2,
+                    "author_association": "NONE",
+                    "created_at": "2026-03-24T01:00:00Z",
+                    "body": "Managed status\n\n<!-- oz-agent-metadata: {\"type\":\"issue-status\"} -->",
+                    "user": {"login": "oz-agent"},
+                },
+            ]
+        )
+        self.assertEqual(rendered, "- @alice [NONE] (2026-03-24T00:00:00Z): Visible reporter comment")
+
+
+class ExtractFollowUpQuestionsTest(unittest.TestCase):
+    def test_normalizes_strings_and_objects(self) -> None:
+        questions = extract_follow_up_questions(
+            {
+                "follow_up_questions": [
+                    "What Warp version is affected?",
+                    {"question": "What Warp version is affected?"},
+                    {"question": "Does this reproduce in another shell?"},
+                    "",
+                ]
+            }
+        )
+        self.assertEqual(
+            questions,
+            [
+                "What Warp version is affected?",
+                "Does this reproduce in another shell?",
+            ],
+        )
+
+
+class ApplyTriageResultTest(unittest.TestCase):
+    def test_replaces_primary_and_repro_labels(self) -> None:
+        github = FakeTriageGitHubClient()
+        issue = {
+            "number": 42,
+            "labels": [
+                {"name": "bug"},
+                {"name": "repro:unknown"},
+                {"name": "triaged"},
+                {"name": "area:workflow"},
+            ],
+            "body": "Original body",
+        }
+        apply_triage_result(
+            github,
+            "acme",
+            "widgets",
+            issue,
+            result={
+                "labels": ["enhancement", "repro:high", "area:workflow"],
+                "issue_body": "## Updated",
+            },
+            configured_labels={
+                "triaged": {"color": "0E8A16", "description": "done"},
+                "enhancement": {"color": "A2EEEF", "description": "enh"},
+                "repro:high": {"color": "B60205", "description": "repro"},
+                "area:workflow": {"color": "7057FF", "description": "area"},
+            },
+            repo_labels={
+                "triaged": {"name": "triaged"},
+                "bug": {"name": "bug"},
+                "enhancement": {"name": "enhancement"},
+                "repro:unknown": {"name": "repro:unknown"},
+                "repro:high": {"name": "repro:high"},
+                "area:workflow": {"name": "area:workflow"},
+            },
+        )
+        self.assertEqual(github.removed_labels, ["bug", "repro:unknown"])
+        self.assertEqual(github.added_labels, ["enhancement", "repro:high", "area:workflow", "triaged"])
+        self.assertEqual(github.updated_issue_body, compose_triaged_issue_body("## Updated", "Original body"))
+
+
+class SyncFollowUpCommentTest(unittest.TestCase):
+    def test_creates_and_deletes_managed_follow_up_comment(self) -> None:
+        github = FakeTriageGitHubClient()
+        issue = {"number": 42, "user": {"login": "alice"}}
+        sync_follow_up_comment(
+            github,
+            "acme",
+            "widgets",
+            issue,
+            questions=["What Warp version is affected?"],
+        )
+        self.assertEqual(len(github.comments), 1)
+        self.assertEqual(
+            github.comments[0]["body"],
+            build_follow_up_comment(issue, ["What Warp version is affected?"]),
+        )
+        sync_follow_up_comment(github, "acme", "widgets", issue, questions=[])
+        self.assertEqual(github.deleted_comment_ids, [1])
+
+
+class FakeTriageGitHubClient:
+    def __init__(self) -> None:
+        self.comments: list[dict[str, object]] = []
+        self.added_labels: list[str] = []
+        self.removed_labels: list[str] = []
+        self.updated_issue_body = ""
+        self.deleted_comment_ids: list[int] = []
+
+    def add_labels(self, owner: str, repo: str, issue_number: int, labels: list[str]) -> list[dict[str, object]]:
+        self.added_labels = list(labels)
+        return [{"name": label} for label in labels]
+
+    def remove_label(self, owner: str, repo: str, issue_number: int, label_name: str) -> None:
+        self.removed_labels.append(label_name)
+
+    def update_issue(self, owner: str, repo: str, issue_number: int, **fields: object) -> dict[str, object]:
+        self.updated_issue_body = str(fields.get("body") or "")
+        return {"number": issue_number, "body": self.updated_issue_body}
+
+    def list_issue_comments(self, owner: str, repo: str, issue_number: int) -> list[dict[str, object]]:
+        return [dict(comment) for comment in self.comments]
+
+    def create_comment(self, owner: str, repo: str, issue_number: int, body: str) -> dict[str, object]:
+        comment = {"id": len(self.comments) + 1, "body": body}
+        self.comments.append(comment)
+        return dict(comment)
+
+    def update_comment(self, owner: str, repo: str, comment_id: int, body: str) -> dict[str, object]:
+        for comment in self.comments:
+            if int(comment["id"]) == comment_id:
+                comment["body"] = body
+                return dict(comment)
+        raise AssertionError(f"Missing comment {comment_id}")
+
+    def delete_comment(self, owner: str, repo: str, comment_id: int) -> None:
+        self.deleted_comment_ids.append(comment_id)
+        self.comments = [comment for comment in self.comments if int(comment["id"]) != comment_id]
 
 
 if __name__ == "__main__":

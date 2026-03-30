@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -175,6 +176,7 @@ class GitHubClient:
         if labels:
             params["labels"] = labels
         return self.paginate(f"/repos/{owner}/{repo}/issues", params=params)
+
     def update_issue(self, owner: str, repo: str, issue_number: int, **fields: Any) -> dict[str, Any]:
         return self.request(
             "PATCH",
@@ -187,6 +189,12 @@ class GitHubClient:
             "POST",
             f"/repos/{owner}/{repo}/issues/{issue_number}/labels",
             json_body={"labels": labels},
+        )
+
+    def remove_label(self, owner: str, repo: str, issue_number: int, label_name: str) -> None:
+        self.request(
+            "DELETE",
+            f"/repos/{owner}/{repo}/issues/{issue_number}/labels/{quote(label_name, safe='')}",
         )
 
     def list_repo_labels(self, owner: str, repo: str) -> list[dict[str, Any]]:

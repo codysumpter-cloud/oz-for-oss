@@ -4,7 +4,9 @@ import os
 import unittest
 from unittest.mock import patch
 
-from oz_workflows.oz_client import build_oz_client, skill_spec
+from pathlib import Path
+
+from oz_workflows.oz_client import build_agent_config, build_oz_client, skill_spec
 
 
 class BuildOzClientTest(unittest.TestCase):
@@ -40,6 +42,39 @@ class SkillSpecTest(unittest.TestCase):
     def test_preserves_already_qualified_skill_spec(self) -> None:
         qualified = "warpdotdev/oz-oss-testbed:.agents/skills/create-tech-spec/SKILL.md"
         self.assertEqual(skill_spec(qualified), qualified)
+
+
+class BuildAgentConfigTest(unittest.TestCase):
+    @patch.dict(os.environ, {"WARP_ENVIRONMENT_ID": "legacy-env"}, clear=False)
+    def test_falls_back_to_legacy_environment_variable(self) -> None:
+        config = build_agent_config(
+            config_name="review-pull-request",
+            workspace=Path("/tmp"),
+            environment_env_names=[
+                "WARP_AGENT_REVIEW_ENVIRONMENT_ID",
+                "WARP_AGENT_ENVIRONMENT_ID",
+            ],
+        )
+        self.assertEqual(config["environment_id"], "legacy-env")
+
+    @patch.dict(
+        os.environ,
+        {
+            "WARP_ENVIRONMENT_ID": "legacy-env",
+            "WARP_AGENT_ENVIRONMENT_ID": "agent-env",
+        },
+        clear=False,
+    )
+    def test_prefers_explicit_agent_environment_variable(self) -> None:
+        config = build_agent_config(
+            config_name="review-pull-request",
+            workspace=Path("/tmp"),
+            environment_env_names=[
+                "WARP_AGENT_REVIEW_ENVIRONMENT_ID",
+                "WARP_AGENT_ENVIRONMENT_ID",
+            ],
+        )
+        self.assertEqual(config["environment_id"], "agent-env")
 
 
 if __name__ == "__main__":
