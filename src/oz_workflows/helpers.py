@@ -111,6 +111,7 @@ def resolve_oz_assigner_login(
     )
     return (matching_events[0].get("actor") or {}).get("login") or ""
 
+
 def resolve_progress_requester_login(
     github: GitHubClient,
     owner: str,
@@ -189,7 +190,6 @@ class WorkflowProgressComment:
                 self.github.delete_comment(self.owner, self.repo, int(existing["id"]))
             except Exception:
                 pass
-            self.comment_id = None
             self.comment_id = None
 
     def _append_sections(self, sections: list[str]) -> None:
@@ -370,7 +370,6 @@ def _summarize_commits(commits: list[dict[str, Any]]) -> str:
         lines.append(f"- {first_line}")
     if len(lines) > max_lines:
         lines = lines[:max_lines] + [f"- … and {len(lines) - max_lines} more commits"]
-    return "\n".join(lines)
     return "\n".join(lines)
 
 
