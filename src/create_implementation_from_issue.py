@@ -1,11 +1,12 @@
 from __future__ import annotations
+from contextlib import closing
 
 from datetime import timedelta
 from textwrap import dedent
+from github import Auth, Github
 
 from oz_workflows.actions import append_summary
 from oz_workflows.env import load_event, repo_parts, repo_slug, workspace, require_env
-from oz_workflows.github_api import GitHubClient
 from oz_workflows.helpers import (
     branch_updated_since,
     build_next_steps_section,
@@ -29,10 +30,11 @@ def main() -> None:
     issue_title = issue["title"]
     default_branch = event["repository"]["default_branch"]
     triggering_comment_id = int((event.get("comment") or {}).get("id") or 0) or None
-
-    with GitHubClient(require_env("GH_TOKEN"), repo_slug()) as github:
-        github.add_assignees(owner, repo, issue_number, ["oz-agent"])
-        comments = github.list_issue_comments(owner, repo, issue_number)
+    with closing(Github(auth=Auth.Token(require_env("GH_TOKEN")))) as client:
+        github = client.get_repo(repo_slug())
+        issue_data = github.get_issue(issue_number)
+        issue_data.add_to_assignees("oz-agent")
+        comments = list(issue_data.get_comments())
         comments_text = org_member_comments_text(comments, exclude_comment_id=triggering_comment_id)
         triggering_comment_text = triggering_comment_prompt_text(event)
         spec_context = resolve_spec_context_for_issue(
@@ -90,7 +92,7 @@ def main() -> None:
             spec_sections.append(f"## {entry['path']}\n\n{entry['content']}")
         spec_context_text = "\n\n".join(spec_sections).strip() or "No approved or repository spec context was found."
 
-        coauthor_line = resolve_coauthor_line(github, event)
+        coauthor_line = resolve_coauthor_line(client, event)
         coauthor_directives = coauthor_prompt_lines(coauthor_line)
 
         prompt = dedent(
@@ -152,19 +154,14 @@ def main() -> None:
         commit_type = conventional_commit_prefix(issue.get("labels", []))
 
         if selected_spec_pr:
-            github.update_pull(
-                owner,
-                repo,
-                int(selected_spec_pr["number"]),
-                title=f"{commit_type}: {issue_title}",
-            )
+            github.get_pull(int(selected_spec_pr["number"])).edit(title=f"{commit_type}: {issue_title}")
             progress.complete(
                 f"I pushed implementation updates to the linked approved spec PR: {selected_spec_pr['url']}\n\n"
                 f"{next_steps_section}"
             )
             return
 
-        existing_prs = github.list_pulls(owner, repo, state="open", head=f"{owner}:{target_branch}")
+        existing_prs = list(github.get_pulls(state="open", head=f"{owner}:{target_branch}"))
         pr_body = build_pr_body(
             github,
             owner,
@@ -176,16 +173,10 @@ def main() -> None:
             closing_keyword="Closes",
         )
         if existing_prs:
-            pr = github.update_pull(
-                owner,
-                repo,
-                int(existing_prs[0]["number"]),
-                body=pr_body,
-            )
+            pr = existing_prs[0]
+            pr.edit(body=pr_body)
         else:
             pr = github.create_pull(
-                owner,
-                repo,
                 title=f"{commit_type}: {issue_title}",
                 head=target_branch,
                 base=default_branch,
@@ -193,7 +184,7 @@ def main() -> None:
                 draft=True,
             )
         progress.complete(
-            f"I created or updated a draft implementation PR for this issue: {pr['html_url']}\n\n"
+            f"I created or updated a draft implementation PR for this issue: {pr.html_url}\n\n"
             f"{next_steps_section}"
         )
 

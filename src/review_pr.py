@@ -1,10 +1,11 @@
 from __future__ import annotations
+from contextlib import closing
 
 import json
 from textwrap import dedent
+from github import Auth, Github
 
 from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, workspace
-from oz_workflows.github_api import GitHubClient
 from oz_workflows.helpers import is_spec_only_pr, resolve_spec_context_for_pr, WorkflowProgressComment
 from oz_workflows.oz_client import build_agent_config, run_agent
 from oz_workflows.transport import new_transport_token, poll_for_transport_payload
@@ -17,14 +18,13 @@ def main() -> None:
     requester = require_env("REQUESTER")
     focus = optional_env("REVIEW_FOCUS")
     comment_id_raw = optional_env("COMMENT_ID")
-
-    with GitHubClient(require_env("GH_TOKEN"), repo_slug()) as github:
-        pr = github.get_pull(owner, repo, pr_number)
-        if pr["state"] != "open":
+    with closing(Github(auth=Auth.Token(require_env("GH_TOKEN")))) as client:
+        github = client.get_repo(repo_slug())
+        pr = github.get_pull(pr_number)
+        if pr.state != "open":
             return
-
         if comment_id_raw:
-            github.create_reaction_for_issue_comment(owner, repo, int(comment_id_raw), "eyes")
+            pr.get_issue_comment(int(comment_id_raw)).create_reaction("eyes")
         progress = WorkflowProgressComment(
             github,
             owner,
@@ -78,10 +78,10 @@ def main() -> None:
             Review pull request #{pr_number} in repository {owner}/{repo}.
 
             Pull Request Context:
-            - Title: {pr['title']}
-            - Body: {pr.get('body') or 'No description provided.'}
-            - Base branch: {pr['base']['ref']}
-            - Head branch: {pr['head']['ref']}
+            - Title: {pr.title}
+            - Body: {pr.body or 'No description provided.'}
+            - Base branch: {pr.base.ref}
+            - Head branch: {pr.head.ref}
             - Trigger: {trigger_source}
             - {focus_line}
             - Issue: {issue_line}
@@ -120,7 +120,7 @@ def main() -> None:
             token=transport_token,
             kind="review-json",
         )
-        github.delete_comment(owner, repo, transport_comment_id)
+        pr.get_issue_comment(transport_comment_id).delete()
         review = json.loads(payload["decoded_payload"])
         summary = str(review.get("summary") or "").strip()
         comments = []
@@ -144,14 +144,10 @@ def main() -> None:
         if not summary and not comments:
             progress.complete("I completed the review and did not identify any actionable feedback for this pull request.")
             return
-        github.create_review(
-            owner,
-            repo,
-            pr_number,
-            body=summary or "Automated review by Oz",
-            event="COMMENT",
-            comments=comments or None,
-        )
+        if comments:
+            pr.create_review(body=summary or "Automated review by Oz", event="COMMENT", comments=comments)
+        else:
+            pr.create_review(body=summary or "Automated review by Oz", event="COMMENT")
         progress.complete("I completed the review and posted feedback on this pull request.")
 
 

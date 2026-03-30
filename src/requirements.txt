@@ -1,1 +1,2 @@
 git+https://github.com/warpdotdev/oz-sdk-python@main
+PyGithub>=2.9.0,<3

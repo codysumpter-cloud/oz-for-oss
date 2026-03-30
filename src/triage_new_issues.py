@@ -1,13 +1,15 @@
 from __future__ import annotations
+from contextlib import closing
 
 import json
 from datetime import datetime, timedelta, timezone
 from textwrap import dedent
 from typing import Any
+from github import Auth, Github
+from github.Repository import Repository
 
 from oz_workflows.actions import append_summary, warning
 from oz_workflows.env import load_event, optional_env, repo_parts, repo_slug, require_env, workspace
-from oz_workflows.github_api import GitHubClient
 from oz_workflows.helpers import (
     build_comment_body,
     triggering_comment_prompt_text,
@@ -31,6 +33,30 @@ WORKFLOW_NAME = "triage-new-issues"
 PRIMARY_TRIAGE_LABELS = {"bug", "enhancement", "documentation", "needs-info"}
 REPRO_LABEL_PREFIX = "repro:"
 OZ_AGENT_METADATA_PREFIX = "<!-- oz-agent-metadata:"
+
+
+def _field(item: Any, name: str, default: Any = None) -> Any:
+    if isinstance(item, dict):
+        return item.get(name, default)
+    return getattr(item, name, default)
+
+
+def _login(item: Any) -> str:
+    if isinstance(item, dict):
+        return str(item.get("login") or "")
+    return str(getattr(item, "login", "") or "")
+
+
+def _timestamp_text(value: Any) -> str:
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return str(value or "")
+
+
+def _label_name(label: Any) -> str:
+    if isinstance(label, str):
+        return label
+    return str(_field(label, "name", "") or "")
 
 
 def triage_heuristics_prompt(owner: str, repo: str) -> str:
@@ -66,12 +92,12 @@ def main() -> None:
     issue_number_override = resolve_issue_number_override(event_name, event)
     triggering_comment_id = int((event.get("comment") or {}).get("id") or 0) or None
     triggering_comment_text = triggering_comment_prompt_text(event)
-
-    with GitHubClient(require_env("GH_TOKEN"), repo_slug()) as github:
+    with closing(Github(auth=Auth.Token(require_env("GH_TOKEN")))) as client:
+        github = client.get_repo(repo_slug())
         repo_labels = {
-            str(label.get("name") or ""): label
-            for label in github.list_repo_labels(owner, repo)
-            if isinstance(label, dict) and label.get("name")
+            str(label.name or ""): label
+            for label in github.get_labels()
+            if label.name
         }
         issues = resolve_issues_to_triage(
             github,
@@ -83,8 +109,7 @@ def main() -> None:
         if not issues:
             append_summary("No recent untriaged issues found.\n")
             return
-
-        queue_text = ", ".join(f"#{issue['number']}" for issue in issues)
+        queue_text = ", ".join(f"#{_field(issue, 'number')}" for issue in issues)
         append_summary(f"Triage queue: {queue_text}\n")
 
         agent_config = build_agent_config(
@@ -93,7 +118,7 @@ def main() -> None:
         )
 
         for issue in issues:
-            issue_number = int(issue["number"])
+            issue_number = int(_field(issue, "number"))
             try:
                 process_issue(
                     github,
@@ -122,28 +147,28 @@ def resolve_issue_number_override(event_name: str, event: dict[str, Any]) -> str
 
 
 def resolve_issues_to_triage(
-    github: GitHubClient,
+    github: Repository,
     owner: str,
     repo: str,
     *,
     issue_number_override: str,
     lookback_minutes: int,
-) -> list[dict[str, Any]]:
+) -> list[Any]:
     if issue_number_override:
-        issue = github.get_issue(owner, repo, int(issue_number_override))
-        return [] if issue.get("pull_request") else [issue]
+        issue = github.get_issue(int(issue_number_override))
+        return [] if issue.pull_request else [issue]
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)
     return select_recent_untriaged_issues(
-        github.list_repo_issues(owner, repo, state="open"),
+        list(github.get_issues(state="open")),
         cutoff=cutoff,
     )
 
 
 def process_issue(
-    github: GitHubClient,
+    github: Repository,
     owner: str,
     repo: str,
-    issue: dict[str, Any],
+    issue: Any,
     *,
     event_payload: dict[str, Any],
     triage_config: dict[str, Any],
@@ -154,7 +179,7 @@ def process_issue(
     triggering_comment_text: str,
     stakeholders_text: str,
 ) -> None:
-    issue_number = int(issue["number"])
+    issue_number = int(issue.number)
     template_context = discover_issue_templates(workspace())
     progress = WorkflowProgressComment(
         github,
@@ -165,9 +190,9 @@ def process_issue(
         event_payload=event_payload,
     )
     progress.start("Oz has started triaging this issue.")
-    comments = github.list_issue_comments(owner, repo, issue_number)
+    comments = list(issue.get_comments())
     comments_text = format_issue_comments(comments, exclude_comment_id=triggering_comment_id)
-    current_body = str(issue.get("body") or "").strip()
+    current_body = str(issue.body or "").strip()
     original_report = extract_original_issue_report(current_body)
     transport_token = new_transport_token()
     prompt = dedent(
@@ -175,10 +200,10 @@ def process_issue(
         Triage GitHub issue #{issue_number} in repository {owner}/{repo}.
 
         Issue Details:
-        - Title: {issue["title"]}
-        - Labels: {", ".join(label["name"] for label in issue.get("labels", [])) or "None"}
-        - Assignees: {", ".join(assignee["login"] for assignee in issue.get("assignees", [])) or "None"}
-        - Created at: {issue.get("created_at") or "Unknown"}
+        - Title: {issue.title}
+        - Labels: {", ".join(label.name for label in issue.labels) or "None"}
+        - Assignees: {", ".join(assignee.login for assignee in issue.assignees) or "None"}
+        - Created at: {issue.created_at or "Unknown"}
         - Current Issue Body: {current_body or "No description provided."}
 
         Original Issue Report:
@@ -263,7 +288,7 @@ def process_issue(
         kind="issue-triage",
         timeout_seconds=300,
     )
-    github.delete_comment(owner, repo, transport_comment_id)
+    issue.get_comment(transport_comment_id).delete()
 
     result = json.loads(payload["decoded_payload"])
     if not isinstance(result, dict):
@@ -295,23 +320,18 @@ def process_issue(
 
 
 def apply_triage_result(
-    github: GitHubClient,
+    github: Repository,
     owner: str,
     repo: str,
-    issue: dict[str, Any],
+    issue: Any,
     *,
     result: dict[str, Any],
     configured_labels: dict[str, Any],
     repo_labels: dict[str, Any],
 ) -> None:
-    issue_number = int(issue["number"])
+    issue_number = int(_field(issue, "number"))
     requested_labels = dedupe_strings([*extract_requested_labels(result), "triaged"])
-    current_labels = dedupe_strings(
-        [
-            raw_label if isinstance(raw_label, str) else raw_label.get("name")
-            for raw_label in issue.get("labels", [])
-        ]
-    )
+    current_labels = dedupe_strings([_label_name(raw_label) for raw_label in _field(issue, "labels", [])])
     managed_labels: list[str] = []
     for label_name in requested_labels:
         if label_name in configured_labels:
@@ -331,20 +351,29 @@ def apply_triage_result(
         warning(f"Skipping unmanaged label '{label_name}' for issue #{issue_number}")
     for label_name in current_labels:
         if should_replace_triage_label(label_name) and label_name not in managed_labels:
-            github.remove_label(owner, repo, issue_number, label_name)
+            if hasattr(issue, "remove_from_labels"):
+                issue.remove_from_labels(label_name)
+            else:
+                github.remove_label(owner, repo, issue_number, label_name)
     if managed_labels:
-        github.add_labels(owner, repo, issue_number, managed_labels)
+        if hasattr(issue, "add_to_labels"):
+            issue.add_to_labels(*managed_labels)
+        else:
+            github.add_labels(owner, repo, issue_number, managed_labels)
     issue_body = str(result.get("issue_body") or "").strip()
     if issue_body:
-        current_body = str(issue.get("body") or "").strip()
+        current_body = str(_field(issue, "body") or "").strip()
         original_report = extract_original_issue_report(current_body)
         updated_body = compose_triaged_issue_body(issue_body, original_report)
         if updated_body != current_body:
-            github.update_issue(owner, repo, issue_number, body=updated_body)
+            if hasattr(issue, "edit"):
+                issue.edit(body=updated_body)
+            else:
+                github.update_issue(owner, repo, issue_number, body=updated_body)
 
 
 def ensure_label_exists(
-    github: GitHubClient,
+    github: Repository,
     owner: str,
     repo: str,
     *,
@@ -360,8 +389,6 @@ def ensure_label_exists(
     if not color:
         raise RuntimeError(f"Configured label '{label_name}' is missing a color")
     created = github.create_label(
-        owner,
-        repo,
         name=label_name,
         color=color,
         description=str(label_spec.get("description") or "").strip(),
@@ -400,8 +427,8 @@ def follow_up_comment_metadata(issue_number: int) -> str:
     )
 
 
-def build_follow_up_comment(issue: dict[str, Any], questions: list[str]) -> str:
-    reporter_login = ((issue.get("user") or {}).get("login") or "").strip()
+def build_follow_up_comment(issue: Any, questions: list[str]) -> str:
+    reporter_login = _login(_field(issue, "user")).strip()
     lines: list[str] = []
     if reporter_login:
         lines.append(f"@{reporter_login}")
@@ -411,37 +438,47 @@ def build_follow_up_comment(issue: dict[str, Any], questions: list[str]) -> str:
     lines.extend(f"{index}. {question}" for index, question in enumerate(questions, start=1))
     lines.append("")
     lines.append("Reply in-thread with those details and the triage workflow can refine the diagnosis, labels, and next steps.")
-    return build_comment_body("\n".join(lines), follow_up_comment_metadata(int(issue["number"])))
+    return build_comment_body("\n".join(lines), follow_up_comment_metadata(int(_field(issue, "number"))))
 
 
 def sync_follow_up_comment(
-    github: GitHubClient,
+    github: Repository,
     owner: str,
     repo: str,
-    issue: dict[str, Any],
+    issue: Any,
     *,
     questions: list[str],
 ) -> None:
-    issue_number = int(issue["number"])
+    issue_number = int(_field(issue, "number"))
     metadata = follow_up_comment_metadata(issue_number)
+    comments = list(issue.get_comments()) if hasattr(issue, "get_comments") else github.list_issue_comments(owner, repo, issue_number)
     existing = next(
         (
             comment
-            for comment in github.list_issue_comments(owner, repo, issue_number)
-            if metadata in str(comment.get("body") or "")
+            for comment in comments
+            if metadata in str(_field(comment, "body") or "")
         ),
         None,
     )
     if not questions:
         if existing is not None:
-            github.delete_comment(owner, repo, int(existing["id"]))
+            if hasattr(existing, "delete"):
+                existing.delete()
+            else:
+                github.delete_comment(owner, repo, int(_field(existing, "id")))
         return
     comment_body = build_follow_up_comment(issue, questions)
     if existing is None:
-        github.create_comment(owner, repo, issue_number, comment_body)
+        if hasattr(issue, "create_comment"):
+            issue.create_comment(comment_body)
+        else:
+            github.create_comment(owner, repo, issue_number, comment_body)
         return
-    if str(existing.get("body") or "") != comment_body:
-        github.update_comment(owner, repo, int(existing["id"]), comment_body)
+    if str(_field(existing, "body") or "") != comment_body:
+        if hasattr(existing, "edit"):
+            existing.edit(comment_body)
+        else:
+            github.update_comment(owner, repo, int(_field(existing, "id")), comment_body)
 
 
 def _on_poll(progress: WorkflowProgressComment, run: object) -> None:
@@ -450,24 +487,24 @@ def _on_poll(progress: WorkflowProgressComment, run: object) -> None:
 
 
 def format_issue_comments(
-    comments: list[dict[str, Any]],
+    comments: list[Any],
     *,
     exclude_comment_id: int | None = None,
 ) -> str:
     selected = [
         comment
         for comment in comments
-        if int(comment.get("id") or 0) != exclude_comment_id
-        and OZ_AGENT_METADATA_PREFIX not in str(comment.get("body") or "")
+        if int(_field(comment, "id") or 0) != exclude_comment_id
+        and OZ_AGENT_METADATA_PREFIX not in str(_field(comment, "body") or "")
     ]
     if not selected:
         return "- None"
     formatted = []
     for comment in selected:
-        user = (comment.get("user") or {}).get("login") or "unknown"
-        association = comment.get("author_association") or "NONE"
-        body = str(comment.get("body") or "").strip() or "(no body)"
-        formatted.append(f"- @{user} [{association}] ({comment.get('created_at')}): {body}")
+        user = _login(_field(comment, "user")) or "unknown"
+        association = _field(comment, "author_association") or "NONE"
+        body = str(_field(comment, "body") or "").strip() or "(no body)"
+        formatted.append(f"- @{user} [{association}] ({_timestamp_text(_field(comment, 'created_at'))}): {body}")
     return "\n".join(formatted)
 
 

@@ -1,10 +1,12 @@
 from __future__ import annotations
+from contextlib import closing
 
 from datetime import timedelta
 from textwrap import dedent
+from github import Auth, Github
+from github.Repository import Repository
 
 from oz_workflows.env import load_event, optional_env, repo_parts, repo_slug, require_env, workspace
-from oz_workflows.github_api import GitHubClient
 from oz_workflows.helpers import (
     all_review_comments_text,
     branch_updated_since,
@@ -23,18 +25,19 @@ def main() -> None:
     owner, repo = repo_parts()
     event = load_event()
     github_event_name = optional_env("GITHUB_EVENT_NAME")
-
-    with GitHubClient(require_env("GH_TOKEN"), repo_slug()) as github:
+    with closing(Github(auth=Auth.Token(require_env("GH_TOKEN")))) as client:
+        github = client.get_repo(repo_slug())
         if github_event_name == "pull_request_review_comment":
-            _handle_review_comment(github, owner, repo, event)
+            _handle_review_comment(client, github, owner, repo, event)
         elif github_event_name == "issue_comment":
-            _handle_issue_comment(github, owner, repo, event)
+            _handle_issue_comment(client, github, owner, repo, event)
         else:
             raise RuntimeError(f"Unsupported event: {github_event_name}")
 
 
 def _handle_review_comment(
-    github: GitHubClient,
+    client: Github,
+    github: Repository,
     owner: str,
     repo: str,
     event: dict,
@@ -42,21 +45,16 @@ def _handle_review_comment(
     comment = event["comment"]
     trigger_comment_id = int(comment["id"])
     pr_number = int(event["pull_request"]["number"])
-    pr = github.get_pull(owner, repo, pr_number)
-
-    # Acknowledge the comment.
-    github.create_reaction_for_pull_request_review_comment(
-        owner, repo, trigger_comment_id, "eyes",
-    )
-
-    # Gather thread-scoped context.
-    all_review = github.list_pull_review_comments(owner, repo, pr_number)
+    pr = github.get_pull(pr_number)
+    pr.get_review_comment(trigger_comment_id).create_reaction("eyes")
+    all_review = list(pr.get_review_comments())
     thread_context = review_thread_comments_text(all_review, trigger_comment_id)
 
     triggering_body = comment.get("body") or ""
     requester = (comment.get("user") or {}).get("login") or ""
 
     _run_implementation(
+        client,
         github,
         owner,
         repo,
@@ -70,7 +68,8 @@ def _handle_review_comment(
 
 
 def _handle_issue_comment(
-    github: GitHubClient,
+    client: Github,
+    github: Repository,
     owner: str,
     repo: str,
     event: dict,
@@ -78,19 +77,13 @@ def _handle_issue_comment(
     comment = event["comment"]
     trigger_comment_id = int(comment["id"])
     pr_number = int(event["issue"]["number"])
-    pr = github.get_pull(owner, repo, pr_number)
-
-    # Acknowledge the comment.
-    github.create_reaction_for_issue_comment(
-        owner, repo, trigger_comment_id, "eyes",
-    )
-
-    # Gather context from all issue comments and all review comments.
-    issue_comments = github.list_issue_comments(owner, repo, pr_number)
+    pr = github.get_pull(pr_number)
+    pr.get_issue_comment(trigger_comment_id).create_reaction("eyes")
+    issue_comments = list(pr.get_issue_comments())
     issue_comments_context = org_member_comments_text(
         issue_comments, exclude_comment_id=trigger_comment_id,
     )
-    review_comments = github.list_pull_review_comments(owner, repo, pr_number)
+    review_comments = list(pr.get_review_comments())
     review_context = all_review_comments_text(review_comments)
 
     context_parts: list[str] = []
@@ -104,6 +97,7 @@ def _handle_issue_comment(
     requester = (comment.get("user") or {}).get("login") or ""
 
     _run_implementation(
+        client,
         github,
         owner,
         repo,
@@ -117,10 +111,11 @@ def _handle_issue_comment(
 
 
 def _run_implementation(
-    github: GitHubClient,
+    client: Github,
+    github: Repository,
     owner: str,
     repo: str,
-    pr: dict,
+    pr: object,
     *,
     event: dict,
     triggering_body: str,
@@ -128,13 +123,13 @@ def _run_implementation(
     context_label: str,
     requester: str,
 ) -> None:
-    pr_number = int(pr["number"])
-    head_branch = pr["head"]["ref"]
-    base_branch = pr["base"]["ref"]
-    pr_title = pr.get("title") or ""
-    pr_body = pr.get("body") or ""
+    pr_number = int(getattr(pr, "number"))
+    head_branch = getattr(getattr(pr, "head"), "ref")
+    base_branch = getattr(getattr(pr, "base"), "ref")
+    pr_title = getattr(pr, "title", "") or ""
+    pr_body = getattr(pr, "body", "") or ""
 
-    coauthor_line = resolve_coauthor_line(github, event)
+    coauthor_line = resolve_coauthor_line(client, event)
     coauthor_directives = coauthor_prompt_lines(coauthor_line)
 
     progress = WorkflowProgressComment(
