@@ -13,15 +13,38 @@ class BuildOzClientTest(unittest.TestCase):
     @patch.dict(
         os.environ,
         {"WARP_API_KEY": "fake-key", "STAGING_ORIGIN_TOKEN": "fake-token"},
-        clear=False,
+        clear=True,
     )
     @patch("oz_workflows.oz_client.OzAPI")
-    def test_default_headers_include_api_source(self, mock_oz_api: unittest.mock.MagicMock) -> None:
+    def test_default_headers_include_api_source(
+        self, mock_oz_api: unittest.mock.MagicMock
+    ) -> None:
         build_oz_client()
         _args, kwargs = mock_oz_api.call_args
         headers = kwargs["default_headers"]
+        self.assertEqual(kwargs["base_url"], "https://staging.warp.dev/api/v1")
         self.assertEqual(headers["x-oz-api-source"], "GITHUB_ACTION")
         self.assertEqual(headers["X-Warp-Origin-Token"], "fake-token")
+
+    @patch.dict(
+        os.environ,
+        {
+            "WARP_API_KEY": "fake-key",
+            "WARP_API_BASE_URL": "https://app.warp.dev/api/v1",
+            "WARP_ORIGIN_TOKEN_ENV_NAME": "PROD_ORIGIN_TOKEN",
+            "PROD_ORIGIN_TOKEN": "prod-token",
+        },
+        clear=True,
+    )
+    @patch("oz_workflows.oz_client.OzAPI")
+    def test_uses_configured_base_url_and_origin_token_env_name(
+        self, mock_oz_api: unittest.mock.MagicMock
+    ) -> None:
+        build_oz_client()
+        _args, kwargs = mock_oz_api.call_args
+        headers = kwargs["default_headers"]
+        self.assertEqual(kwargs["base_url"], "https://app.warp.dev/api/v1")
+        self.assertEqual(headers["X-Warp-Origin-Token"], "prod-token")
 
 
 class SkillSpecTest(unittest.TestCase):
