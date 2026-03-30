@@ -15,7 +15,7 @@ jobs:
       github.event.comment.user.login != 'github-actions[bot]' &&
       (github.event_name == 'pull_request_review_comment' || (github.event_name == 'issue_comment' && github.event.issue.pull_request))
     name: Respond to PR comment
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     permissions:
       contents: write
       id-token: write
