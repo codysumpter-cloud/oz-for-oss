@@ -35,6 +35,10 @@ on:
 jobs:
   review_pr:
     runs-on: ubuntu-latest
+    env:
+      WARP_ENVIRONMENT_ID: ${{ vars.WARP_ENVIRONMENT_ID || '' }}
+      WARP_AGENT_ENVIRONMENT_ID: ${{ vars.WARP_AGENT_ENVIRONMENT_ID || vars.WARP_ENVIRONMENT_ID || '' }}
+      WARP_AGENT_REVIEW_ENVIRONMENT_ID: ${{ vars.WARP_AGENT_REVIEW_ENVIRONMENT_ID || '' }}
     permissions:
       contents: read
       id-token: write
@@ -85,6 +89,4 @@ jobs:
           WARP_AGENT_PROFILE: ${{ vars.WARP_AGENT_PROFILE || '' }}
           WARP_AGENT_MODEL: ${{ vars.WARP_AGENT_MODEL || '' }}
           WARP_AGENT_MCP: ${{ vars.WARP_AGENT_MCP || '' }}
-          WARP_AGENT_ENVIRONMENT_ID: ${{ vars.WARP_AGENT_ENVIRONMENT_ID || '' }}
-          WARP_AGENT_REVIEW_ENVIRONMENT_ID: ${{ vars.WARP_AGENT_REVIEW_ENVIRONMENT_ID || '' }}
         run: python src/review_pr.py
