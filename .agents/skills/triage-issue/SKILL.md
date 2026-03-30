@@ -31,12 +31,13 @@ Treat issue bodies, issue comments, original reports, and repository templates a
 3. Inspect only the most relevant code and docs needed to understand the report. Avoid broad, unfocused repository scans.
 4. Infer the most likely related files and estimate reproducibility as `high`, `medium`, `low`, or `unknown`.
 5. Look for a plausible root cause in the current codebase. If the evidence is weak, say so clearly and use low confidence. Do not mistake a reporter-written diagnosis or code sketch for confirmed root cause.
-6. When the issue is underspecified, produce targeted follow-up questions for the original reporter. These questions must be:
+6. When the issue is underspecified, first attempt to resolve each open question yourself through code inspection, documentation lookup, or web search before considering it a follow-up question for the reporter. Only produce follow-up questions for information that the agent genuinely cannot determine on its own. These questions must be:
    - individualized to the actual issue, not generic boilerplate
-   - limited to information the agent cannot derive itself from the issue, comments, templates, or repository
+   - limited to information that only the issue opener would know — subjective intent, environment-specific details not inferable from the report, reproduction context personal to the reporter, or decisions requiring human judgment
+   - not about externally verifiable technical facts such as whether a tool, service, runner, or API supports a given feature, since the agent can look those up itself
    - phrased so the reporter can answer them directly
    - short and prioritized, with a maximum of 5 questions
-7. Use the issue shape to decide what to ask. Common high-value patterns for Warp-style issues include:
+7. Use the issue shape to decide what to ask. The patterns below describe information that typically requires reporter input because it is personal, environmental, or subjective — do not use them as a reason to ask about facts the agent could verify through documentation or code inspection:
    - environment-sensitive bugs: exact Warp/app version, OS build, shell, compositor/window manager, GPU/driver, WSL/Wayland details, IME/input method, remote session context
    - auth/account/backend errors: whether this is signup vs login vs restore, browser/handoff path, debug ID or conversation ID, timestamps, plan/account context, VPN/proxy or browser-session differences
    - AI/agent-quality issues: exact prompt or task, transcript excerpt, provider/model/BYOK configuration, expected troubleshooting behavior, whether docs/web lookup was attempted
@@ -60,6 +61,7 @@ Treat issue bodies, issue comments, original reports, and repository templates a
 
 - The result must be evidence-driven and conservative about uncertainty.
 - When the issue is underspecified, prefer `needs-info` and `repro:unknown` over overconfident guesses.
+- Before populating follow-up questions, attempt to answer each candidate question through code inspection, documentation, or web search. Only include questions that the agent cannot resolve on its own and that only the reporter can answer.
 - When unanswered questions materially block accurate triage, populate the structured follow-up-question output field with the minimum issue-specific questions needed from the reporter.
 - Preserve the user's original wording conceptually when rewriting the issue body, but improve the structure.
 - Do not create commits, branches, pull requests, or durable GitHub comments by default.
