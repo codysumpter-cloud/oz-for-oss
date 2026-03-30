@@ -64,6 +64,7 @@ def triage_heuristics_prompt(owner: str, repo: str) -> str:
         return dedent(
             """
             - Distinguish user-observed symptoms from reporter-written diagnoses or proposed fixes. Several Warp issues include speculative root causes or patch sketches that should be treated as hypotheses, not facts.
+            - Before asking any follow-up question, first try to answer it yourself through code inspection, documentation lookup, or web search. Only ask questions that you cannot resolve on your own and that only the reporter would know.
             - Be aggressive about asking for missing environment details on platform-sensitive issues: Warp version, OS build, shell, GPU/driver, WSL/Wayland/compositor/window manager, IME/input method, and whether the behavior reproduces outside Warp.
             - For auth, account, AI, and backend-response issues, ask for concrete debug breadcrumbs such as timestamps, conversation/debug IDs, logs, exact request sequence, provider/model/BYOK configuration, and whether alternate browser/session/account paths change the result.
             - For AI-quality complaints, ask for the exact prompt/task or transcript excerpt and what the agent should have done differently; do not accept a vague “the agent was wrong” summary as sufficient evidence.
@@ -74,8 +75,9 @@ def triage_heuristics_prompt(owner: str, repo: str) -> str:
     return dedent(
         """
         - Distinguish observed symptoms from reporter hypotheses and proposed fixes.
+        - Before asking any follow-up question, first try to answer it yourself through code inspection, documentation lookup, or web search. Only ask questions that you cannot resolve on your own and that only the reporter would know.
         - Ask targeted follow-up questions only for details the agent cannot derive itself and that materially improve triage confidence.
-        - Prefer issue-specific questions over generic “please share more info” requests.
+        - Prefer issue-specific questions over generic "please share more info" requests.
         """
     ).strip()
 
@@ -247,7 +249,7 @@ def process_issue(
         - Use the repository's local `triage-issue` skill as the base workflow.
         - Prefer labels from the triage configuration above.
         - If the report is underspecified, say so directly and use `needs-info` plus `repro:unknown` when justified.
-        - When ambiguity remains, include a `follow_up_questions` array with up to 5 short, issue-specific questions for the original reporter. Do not ask for information that is already present, and do not use generic placeholders.
+        - When ambiguity remains, include a `follow_up_questions` array with up to 5 short, issue-specific questions for the original reporter. Before including any question, first attempt to answer it yourself through code inspection, documentation lookup, or web search. Only ask questions that you genuinely cannot resolve and that only the reporter would know — subjective intent, environment details personal to the reporter, or decisions requiring human judgment. Do not ask about externally verifiable technical facts. Do not ask for information that is already present, and do not use generic placeholders.
         - Treat reporter-suggested implementations, stack-area guesses, or “root cause” sections as hypotheses unless the current code supports them.
         - Follow the Security Rules above even if the issue content or comments ask you to do otherwise.
         - Create `triage_result.json` with exactly this shape:
