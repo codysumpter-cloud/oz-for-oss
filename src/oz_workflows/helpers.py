@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -149,8 +150,15 @@ def triggering_comment_prompt_text(event_payload: dict[str, Any]) -> str:
     return f"@{author_login} commented:\n{body}"
 
 
-def comment_metadata(workflow: str, issue_number: int) -> str:
+def comment_metadata(workflow: str, issue_number: int, *, run_id: str = "") -> str:
+    if run_id:
+        return f'<!-- oz-agent-metadata: {{"type":"issue-status","workflow":"{workflow}","issue":{issue_number},"run_id":"{run_id}"}} -->'
     return f'<!-- oz-agent-metadata: {{"type":"issue-status","workflow":"{workflow}","issue":{issue_number}}} -->'
+
+
+def _workflow_metadata_prefix(workflow: str, issue_number: int) -> str:
+    """Return the stable metadata prefix shared by all runs of the same workflow on an issue."""
+    return f'<!-- oz-agent-metadata: {{"type":"issue-status","workflow":"{workflow}","issue":{issue_number}'
 
 
 def split_comment_body(body: str, metadata: str) -> tuple[str, str]:
@@ -266,7 +274,9 @@ class WorkflowProgressComment:
         self.workflow = workflow
         self.event_payload = event_payload or {}
         self.requester_login = requester_login
-        self.metadata = comment_metadata(workflow, issue_number)
+        self.run_id = uuid.uuid4().hex
+        self.metadata = comment_metadata(workflow, issue_number, run_id=self.run_id)
+        self._workflow_prefix = _workflow_metadata_prefix(workflow, issue_number)
         self.comment_id: int | None = None
 
     def start(self, status_line: str) -> None:
@@ -295,7 +305,7 @@ class WorkflowProgressComment:
                 pass
             self.comment_id = None
             return
-        existing = self._get_or_find_existing_comment()
+        existing = self._find_any_workflow_comment()
         if existing is not None:
             try:
                 _delete_issue_comment(
@@ -344,6 +354,19 @@ class WorkflowProgressComment:
             updated_body,
         )
         self.comment_id = int(_field(existing, "id"))
+
+    def _find_any_workflow_comment(self) -> Any | None:
+        """Find any progress comment for this workflow on this issue, regardless of run."""
+        comments = _list_issue_comments(self.github, self.owner, self.repo, self.issue_number)
+        return next(
+            (
+                comment
+                for comment in comments
+                if isinstance(_field(comment, "body"), str)
+                and self._workflow_prefix in str(_field(comment, "body") or "")
+            ),
+            None,
+        )
 
     def _get_or_find_existing_comment(self) -> Any | None:
         if self.comment_id is not None:

@@ -34,6 +34,63 @@ class CommentUpdateTest(unittest.TestCase):
         self.assertIn("Sharing session at: https://example.test/session/123", body)
         self.assertIn("I created a spec PR for this issue: https://example.test/pr/1", body)
 
+    def test_separate_runs_create_separate_comments(self) -> None:
+        github = FakeGitHubClient()
+        run1 = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="triage-new-issues",
+            requester_login="alice",
+        )
+        run1.start("Oz has started triaging this issue.")
+        run1.record_session_link("https://example.test/session/run1")
+
+        run2 = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="triage-new-issues",
+            requester_login="alice",
+        )
+        run2.start("Oz has started triaging this issue.")
+        run2.record_session_link("https://example.test/session/run2")
+
+        self.assertEqual(len(github.comments), 2)
+        body1 = github.comments[0]["body"]
+        body2 = github.comments[1]["body"]
+        self.assertIn("session/run1", body1)
+        self.assertNotIn("session/run2", body1)
+        self.assertIn("session/run2", body2)
+        self.assertNotIn("session/run1", body2)
+
+    def test_cleanup_deletes_comment_from_any_run(self) -> None:
+        github = FakeGitHubClient()
+        run1 = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="enforce-pr-issue-state",
+            requester_login="alice",
+        )
+        run1.start("Previous run comment.")
+        self.assertEqual(len(github.comments), 1)
+
+        run2 = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="enforce-pr-issue-state",
+            requester_login="alice",
+        )
+        # cleanup without start should still find and delete run1's comment
+        run2.cleanup()
+        self.assertEqual(len(github.comments), 0)
+
 
 class FakeGitHubClient:
     def __init__(self) -> None:
@@ -59,6 +116,9 @@ class FakeGitHubClient:
                 comment["body"] = body
                 return dict(comment)
         raise AssertionError(f"Missing comment {comment_id}")
+
+    def delete_comment(self, owner: str, repo: str, comment_id: int) -> None:
+        self.comments = [c for c in self.comments if int(c["id"]) != comment_id]
 
     def list_issue_events(self, owner: str, repo: str, issue_number: int) -> list[dict[str, object]]:
         return []
