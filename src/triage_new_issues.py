@@ -336,7 +336,7 @@ def apply_triage_result(
         result_labels = [*result_labels, "needs-info"]
     has_needs_info = "needs-info" in result_labels
     requested_labels = dedupe_strings(
-        [*result_labels] if has_needs_info else [*result_labels, "triaged"]
+        result_labels if has_needs_info else [*result_labels, "triaged"]
     )
     current_labels = dedupe_strings([_label_name(raw_label) for raw_label in _field(issue, "labels", [])])
     managed_labels: list[str] = []
