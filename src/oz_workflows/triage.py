@@ -72,28 +72,44 @@ def dedupe_strings(values: list[Any]) -> list[str]:
     return normalized
 
 
-def issue_has_label(issue: dict[str, Any], label_name: str) -> bool:
-    for raw_label in issue.get("labels", []):
-        current = raw_label if isinstance(raw_label, str) else raw_label.get("name")
+def _field(item: Any, name: str, default: Any = None) -> Any:
+    if isinstance(item, dict):
+        return item.get(name, default)
+    return getattr(item, name, default)
+
+
+def issue_has_label(issue: Any, label_name: str) -> bool:
+    for raw_label in _field(issue, "labels", []):
+        current = raw_label if isinstance(raw_label, str) else _field(raw_label, "name")
         if current == label_name:
             return True
     return False
 
 
 def select_recent_untriaged_issues(
-    issues: list[dict[str, Any]],
+    issues: list[Any],
     *,
     cutoff: datetime,
     triaged_label: str = "triaged",
-) -> list[dict[str, Any]]:
+) -> list[Any]:
     selected = [
         issue
         for issue in issues
-        if not issue.get("pull_request")
-        and parse_datetime(issue.get("created_at") or "1970-01-01T00:00:00Z") >= cutoff
+        if not _field(issue, "pull_request")
+        and (
+            _field(issue, "created_at") >= cutoff
+            if isinstance(_field(issue, "created_at"), datetime)
+            else parse_datetime(_field(issue, "created_at") or "1970-01-01T00:00:00Z") >= cutoff
+        )
         and not issue_has_label(issue, triaged_label)
     ]
-    selected.sort(key=lambda issue: parse_datetime(issue.get("created_at") or "1970-01-01T00:00:00Z"))
+    selected.sort(
+        key=lambda issue: (
+            _field(issue, "created_at")
+            if isinstance(_field(issue, "created_at"), datetime)
+            else parse_datetime(_field(issue, "created_at") or "1970-01-01T00:00:00Z")
+        )
+    )
     return selected
 
 

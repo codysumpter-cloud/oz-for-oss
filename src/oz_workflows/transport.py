@@ -7,8 +7,7 @@ import re
 import time
 import uuid
 from typing import Any
-
-from .github_api import GitHubClient
+from github.Repository import Repository
 
 
 TRANSPORT_PATTERN = re.compile(r"<!-- oz-workflow-transport (?P<payload>\{.*\}) -->", re.DOTALL)
@@ -35,7 +34,7 @@ def parse_transport_comment(body: str) -> dict[str, Any] | None:
 
 
 def poll_for_transport_payload(
-    github: GitHubClient,
+    github: Repository | Any,
     owner: str,
     repo: str,
     issue_number: int,
@@ -47,15 +46,23 @@ def poll_for_transport_payload(
 ) -> tuple[dict[str, Any], int]:
     deadline = time.monotonic() + timeout_seconds
     while True:
-        comments = github.list_issue_comments(owner, repo, issue_number)
+        if hasattr(github, "get_issue"):
+            comments = list(github.get_issue(issue_number).get_comments())
+        else:
+            comments = github.list_issue_comments(owner, repo, issue_number)
         for comment in reversed(comments):
-            body = comment.get("body") or ""
+            body = (
+                str(comment.get("body") or "")
+                if isinstance(comment, dict)
+                else str(getattr(comment, "body", "") or "")
+            )
             parsed = parse_transport_comment(body)
             if not parsed:
                 continue
             if parsed.get("token") != token or parsed.get("kind") != kind:
                 continue
-            return parsed, int(comment["id"])
+            comment_id = comment.get("id") if isinstance(comment, dict) else getattr(comment, "id", None)
+            return parsed, int(comment_id)
         if time.monotonic() >= deadline:
             raise RuntimeError(
                 f"Timed out waiting for Oz transport payload {kind} ({token}) on issue/PR #{issue_number}"

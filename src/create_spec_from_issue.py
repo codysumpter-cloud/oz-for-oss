@@ -1,10 +1,11 @@
 from __future__ import annotations
+from contextlib import closing
 
 from datetime import timedelta
 from textwrap import dedent
+from github import Auth, Github
 
 from oz_workflows.env import load_event, repo_parts, repo_slug, workspace, require_env
-from oz_workflows.github_api import GitHubClient
 from oz_workflows.helpers import (
     branch_updated_since,
     build_next_steps_section,
@@ -28,10 +29,11 @@ def main() -> None:
     default_branch = event["repository"]["default_branch"]
     branch_name = f"oz-agent/spec-issue-{issue_number}"
     triggering_comment_id = int((event.get("comment") or {}).get("id") or 0) or None
-
-    with GitHubClient(require_env("GH_TOKEN"), repo_slug()) as github:
-        github.add_assignees(owner, repo, issue_number, ["oz-agent"])
-        comments = github.list_issue_comments(owner, repo, issue_number)
+    with closing(Github(auth=Auth.Token(require_env("GH_TOKEN")))) as client:
+        github = client.get_repo(repo_slug())
+        issue_data = github.get_issue(issue_number)
+        issue_data.add_to_assignees("oz-agent")
+        comments = list(issue_data.get_comments())
         comments_text = org_member_comments_text(comments, exclude_comment_id=triggering_comment_id)
         triggering_comment_text = triggering_comment_prompt_text(event)
         progress = WorkflowProgressComment(
@@ -43,8 +45,7 @@ def main() -> None:
             event_payload=event,
         )
         progress.start("Oz is starting work on product and tech specs for this issue.")
-
-        coauthor_line = resolve_coauthor_line(github, event)
+        coauthor_line = resolve_coauthor_line(client, event)
         coauthor_directives = coauthor_prompt_lines(coauthor_line)
 
         prompt = dedent(
@@ -97,8 +98,7 @@ def main() -> None:
         ):
             progress.complete("I analyzed this issue but did not produce a spec diff.")
             return
-
-        existing_prs = github.list_pulls(owner, repo, state="open", head=f"{owner}:{branch_name}")
+        existing_prs = list(github.get_pulls(state="open", head=f"{owner}:{branch_name}"))
         pr_body = build_pr_body(
             github,
             owner,
@@ -110,17 +110,10 @@ def main() -> None:
             closing_keyword="",
         )
         if existing_prs:
-            pr = github.update_pull(
-                owner,
-                repo,
-                int(existing_prs[0]["number"]),
-                title=f"spec: {issue_title}",
-                body=pr_body,
-            )
+            pr = existing_prs[0]
+            pr.edit(title=f"spec: {issue_title}", body=pr_body)
         else:
             pr = github.create_pull(
-                owner,
-                repo,
                 title=f"spec: {issue_title}",
                 head=branch_name,
                 base=default_branch,
@@ -135,7 +128,7 @@ def main() -> None:
             ]
         )
         progress.complete(
-            f"I created a spec PR for this issue: {pr['html_url']}\n\n"
+            f"I created a spec PR for this issue: {pr.html_url}\n\n"
             f"{spec_preview_section}\n\n"
             f"{next_steps_section}"
         )
