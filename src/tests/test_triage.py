@@ -300,6 +300,70 @@ class ApplyTriageResultTest(unittest.TestCase):
         self.assertEqual(github.updated_issue_body, compose_triaged_issue_body("## Updated", "Original body"))
 
 
+    def test_skips_triaged_label_when_needs_info_present(self) -> None:
+        github = FakeTriageGitHubClient()
+        issue = {
+            "number": 55,
+            "labels": [],
+            "body": "Original body",
+        }
+        apply_triage_result(
+            github,
+            "acme",
+            "widgets",
+            issue,
+            result={
+                "labels": ["needs-info", "repro:unknown"],
+                "issue_body": "## Needs more info",
+            },
+            configured_labels={
+                "triaged": {"color": "0E8A16", "description": "done"},
+                "needs-info": {"color": "D876E3", "description": "info"},
+                "repro:unknown": {"color": "CCCCCC", "description": "repro"},
+            },
+            repo_labels={
+                "triaged": {"name": "triaged"},
+                "needs-info": {"name": "needs-info"},
+                "repro:unknown": {"name": "repro:unknown"},
+            },
+        )
+        self.assertNotIn("triaged", github.added_labels)
+        self.assertIn("needs-info", github.added_labels)
+
+    def test_removes_triaged_on_retriage_with_needs_info(self) -> None:
+        github = FakeTriageGitHubClient()
+        issue = {
+            "number": 56,
+            "labels": [{"name": "triaged"}, {"name": "bug"}],
+            "body": "Original body",
+        }
+        apply_triage_result(
+            github,
+            "acme",
+            "widgets",
+            issue,
+            result={
+                "labels": ["needs-info", "repro:unknown"],
+                "issue_body": "## Needs more info",
+            },
+            configured_labels={
+                "triaged": {"color": "0E8A16", "description": "done"},
+                "needs-info": {"color": "D876E3", "description": "info"},
+                "bug": {"color": "D73A4A", "description": "bug"},
+                "repro:unknown": {"color": "CCCCCC", "description": "repro"},
+            },
+            repo_labels={
+                "triaged": {"name": "triaged"},
+                "needs-info": {"name": "needs-info"},
+                "bug": {"name": "bug"},
+                "repro:unknown": {"name": "repro:unknown"},
+            },
+        )
+        self.assertIn("triaged", github.removed_labels)
+        self.assertIn("bug", github.removed_labels)
+        self.assertNotIn("triaged", github.added_labels)
+
+
 class SyncFollowUpCommentTest(unittest.TestCase):
     def test_creates_and_deletes_managed_follow_up_comment(self) -> None:
         github = FakeTriageGitHubClient()
