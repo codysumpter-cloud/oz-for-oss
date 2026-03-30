@@ -331,6 +331,9 @@ def apply_triage_result(
 ) -> None:
     issue_number = int(_field(issue, "number"))
     result_labels = extract_requested_labels(result)
+    follow_up_questions = extract_follow_up_questions(result)
+    if follow_up_questions and "needs-info" not in result_labels:
+        result_labels = [*result_labels, "needs-info"]
     has_needs_info = "needs-info" in result_labels
     requested_labels = dedupe_strings(
         [*result_labels] if has_needs_info else [*result_labels, "triaged"]

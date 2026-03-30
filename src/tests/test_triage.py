@@ -330,6 +330,39 @@ class ApplyTriageResultTest(unittest.TestCase):
         self.assertNotIn("triaged", github.added_labels)
         self.assertIn("needs-info", github.added_labels)
 
+    def test_adds_needs_info_when_follow_up_questions_present(self) -> None:
+        github = FakeTriageGitHubClient()
+        issue = {
+            "number": 57,
+            "labels": [],
+            "body": "Original body",
+        }
+        apply_triage_result(
+            github,
+            "acme",
+            "widgets",
+            issue,
+            result={
+                "labels": ["bug", "repro:low"],
+                "issue_body": "## Bug with questions",
+                "follow_up_questions": ["What OS are you on?"],
+            },
+            configured_labels={
+                "triaged": {"color": "0E8A16", "description": "done"},
+                "bug": {"color": "D73A4A", "description": "bug"},
+                "needs-info": {"color": "D876E3", "description": "info"},
+                "repro:low": {"color": "CCCCCC", "description": "repro"},
+            },
+            repo_labels={
+                "triaged": {"name": "triaged"},
+                "bug": {"name": "bug"},
+                "needs-info": {"name": "needs-info"},
+                "repro:low": {"name": "repro:low"},
+            },
+        )
+        self.assertIn("needs-info", github.added_labels)
+        self.assertNotIn("triaged", github.added_labels)
+
     def test_removes_triaged_on_retriage_with_needs_info(self) -> None:
         github = FakeTriageGitHubClient()
         issue = {
