@@ -11,14 +11,27 @@ from .env import optional_env, parse_mcp_servers, repo_slug, require_env
 
 
 TERMINAL_STATES = {"SUCCEEDED", "FAILED", "ERROR", "CANCELLED"}
+DEFAULT_OZ_API_BASE_URL = "https://staging.warp.dev/api/v1"
+DEFAULT_OZ_ORIGIN_TOKEN_ENV_NAME = "STAGING_ORIGIN_TOKEN"
+
+
+def oz_api_base_url() -> str:
+    return optional_env("WARP_API_BASE_URL") or DEFAULT_OZ_API_BASE_URL
+
+
+def oz_origin_token() -> str:
+    origin_token_env_name = (
+        optional_env("WARP_ORIGIN_TOKEN_ENV_NAME") or DEFAULT_OZ_ORIGIN_TOKEN_ENV_NAME
+    )
+    return require_env(origin_token_env_name)
 
 
 def build_oz_client() -> OzAPI:
     return OzAPI(
         api_key=require_env("WARP_API_KEY"),
-        base_url="https://staging.warp.dev/api/v1",
+        base_url=oz_api_base_url(),
         default_headers={
-            "X-Warp-Origin-Token": require_env("STAGING_ORIGIN_TOKEN"),
+            "X-Warp-Origin-Token": oz_origin_token(),
             "x-oz-api-source": "GITHUB_ACTION",
         },
     )
