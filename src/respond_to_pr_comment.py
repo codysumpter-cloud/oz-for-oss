@@ -206,10 +206,6 @@ def _run_implementation(
     config = build_agent_config(
         config_name="respond-to-pr-comment",
         workspace=workspace(),
-        environment_env_names=[
-            "WARP_AGENT_IMPLEMENTATION_ENVIRONMENT_ID",
-            "WARP_AGENT_ENVIRONMENT_ID",
-        ],
     )
 
     run = run_agent(

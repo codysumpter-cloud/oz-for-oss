@@ -28,9 +28,12 @@ def build_agent_config(
     *,
     config_name: str,
     workspace: Path,
-    environment_env_names: list[str],
+    environment_env_name: str = "WARP_ENVIRONMENT_ID",
+    environment_env_names: list[str] | None = None,
 ) -> dict[str, Any]:
-    candidate_env_names = list(environment_env_names)
+    candidate_env_names = list(environment_env_names or [])
+    if environment_env_name and environment_env_name not in candidate_env_names:
+        candidate_env_names.append(environment_env_name)
     if "WARP_ENVIRONMENT_ID" not in candidate_env_names:
         candidate_env_names.append("WARP_ENVIRONMENT_ID")
     environment_id = ""

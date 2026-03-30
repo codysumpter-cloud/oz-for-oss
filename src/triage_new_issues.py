@@ -90,10 +90,6 @@ def main() -> None:
         agent_config = build_agent_config(
             config_name=WORKFLOW_NAME,
             workspace=workspace(),
-            environment_env_names=[
-                "WARP_AGENT_TRIAGE_ENVIRONMENT_ID",
-                "WARP_AGENT_ENVIRONMENT_ID",
-            ],
         )
 
         for issue in issues:
