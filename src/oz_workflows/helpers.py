@@ -305,8 +305,10 @@ class WorkflowProgressComment:
                 pass
             self.comment_id = None
             return
-        existing = self._find_any_workflow_comment()
-        if existing is not None:
+        while True:
+            existing = self._find_any_workflow_comment()
+            if existing is None:
+                break
             try:
                 _delete_issue_comment(
                     self.github,
@@ -316,8 +318,8 @@ class WorkflowProgressComment:
                     int(_field(existing, "id")),
                 )
             except Exception:
-                pass
-            self.comment_id = None
+                break
+        self.comment_id = None
 
     def _append_sections(self, sections: list[str]) -> None:
         normalized_sections = [section.strip() for section in sections if section and section.strip()]
@@ -363,7 +365,7 @@ class WorkflowProgressComment:
                 comment
                 for comment in comments
                 if isinstance(_field(comment, "body"), str)
-                and self._workflow_prefix in str(_field(comment, "body") or "")
+                and self._workflow_prefix in (_field(comment, "body") or "")
             ),
             None,
         )
