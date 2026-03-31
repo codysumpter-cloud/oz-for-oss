@@ -6,10 +6,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from triage_new_issues import (
     apply_triage_result,
+    build_duplicate_comment,
     build_follow_up_comment,
+    extract_duplicate_of,
     extract_follow_up_questions,
     format_issue_comments,
     resolve_issue_number_override,
+    sync_duplicate_comment,
     sync_follow_up_comment,
 )
 
@@ -414,6 +417,74 @@ class SyncFollowUpCommentTest(unittest.TestCase):
             build_follow_up_comment(issue, ["What Warp version is affected?"]),
         )
         sync_follow_up_comment(github, "acme", "widgets", issue, questions=[])
+        self.assertEqual(github.deleted_comment_ids, [1])
+
+
+class ExtractDuplicateOfTest(unittest.TestCase):
+    def test_extracts_valid_duplicate_entries(self) -> None:
+        result = {
+            "duplicate_of": [
+                {"issue_number": 10, "title": "Same bug", "similarity_reason": "Same error"},
+                {"issue_number": 20, "title": "Related", "similarity_reason": "Same feature"},
+            ]
+        }
+        duplicates = extract_duplicate_of(result)
+        self.assertEqual(len(duplicates), 2)
+        self.assertEqual(duplicates[0]["issue_number"], 10)
+        self.assertEqual(duplicates[1]["issue_number"], 20)
+
+    def test_returns_empty_for_missing_field(self) -> None:
+        self.assertEqual(extract_duplicate_of({"labels": ["bug"]}), [])
+
+    def test_returns_empty_for_non_list(self) -> None:
+        self.assertEqual(extract_duplicate_of({"duplicate_of": "not a list"}), [])
+
+    def test_skips_entries_without_issue_number(self) -> None:
+        result = {
+            "duplicate_of": [
+                {"title": "No number"},
+                {"issue_number": 5, "title": "Has number"},
+            ]
+        }
+        duplicates = extract_duplicate_of(result)
+        self.assertEqual(len(duplicates), 1)
+        self.assertEqual(duplicates[0]["issue_number"], 5)
+
+
+class BuildDuplicateCommentTest(unittest.TestCase):
+    def test_builds_comment_with_duplicate_links(self) -> None:
+        issue = {"number": 42, "user": {"login": "alice"}}
+        duplicates = [
+            {"issue_number": 10, "title": "Original bug", "similarity_reason": "Same error message"},
+            {"issue_number": 20, "title": "Another report", "similarity_reason": "Same symptoms"},
+        ]
+        body = build_duplicate_comment(issue, duplicates, "acme", "widgets")
+        self.assertIn("@alice", body)
+        self.assertIn("#10", body)
+        self.assertIn("#20", body)
+        self.assertIn("Original bug", body)
+        self.assertIn("closed in 2 business days", body)
+        self.assertIn("oz-agent-metadata", body)
+
+
+class SyncDuplicateCommentTest(unittest.TestCase):
+    def test_creates_and_deletes_managed_duplicate_comment(self) -> None:
+        github = FakeTriageGitHubClient()
+        issue = {"number": 42, "user": {"login": "alice"}}
+        sync_duplicate_comment(
+            github,
+            "acme",
+            "widgets",
+            issue,
+            duplicates=[
+                {"issue_number": 10, "title": "Original", "similarity_reason": "Same"},
+                {"issue_number": 20, "title": "Another", "similarity_reason": "Same"},
+            ],
+        )
+        self.assertEqual(len(github.comments), 1)
+        self.assertIn("#10", str(github.comments[0]["body"]))
+        self.assertIn("#20", str(github.comments[0]["body"]))
+        sync_duplicate_comment(github, "acme", "widgets", issue, duplicates=[])
         self.assertEqual(github.deleted_comment_ids, [1])
 
 
