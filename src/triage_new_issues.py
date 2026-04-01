@@ -1,5 +1,6 @@
 from __future__ import annotations
 from contextlib import closing
+from itertools import islice
 
 import json
 from datetime import datetime, timedelta, timezone
@@ -30,7 +31,7 @@ from oz_workflows.triage import (
 
 
 WORKFLOW_NAME = "triage-new-issues"
-PRIMARY_TRIAGE_LABELS = {"bug", "enhancement", "documentation", "needs-info", "triaged"}
+PRIMARY_TRIAGE_LABELS = {"bug", "duplicate", "enhancement", "documentation", "needs-info", "triaged"}
 REPRO_LABEL_PREFIX = "repro:"
 OZ_AGENT_METADATA_PREFIX = "<!-- oz-agent-metadata:"
 
@@ -517,7 +518,7 @@ def extract_duplicate_of(result: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(entry, dict):
             continue
         issue_number = entry.get("issue_number")
-        if not issue_number:
+        if issue_number is None:
             continue
         duplicates.append({
             "issue_number": int(issue_number),
@@ -534,7 +535,7 @@ def duplicate_comment_metadata(issue_number: int) -> str:
     )
 
 
-def build_duplicate_comment(issue: Any, duplicates: list[dict[str, Any]], owner: str, repo: str) -> str:
+def build_duplicate_comment(issue: Any, duplicates: list[dict[str, Any]]) -> str:
     reporter_login = _login(_field(issue, "user")).strip()
     lines: list[str] = []
     if reporter_login:
@@ -586,7 +587,7 @@ def sync_duplicate_comment(
             else:
                 github.delete_comment(owner, repo, int(_field(existing, "id")))
         return
-    comment_body = build_duplicate_comment(issue, duplicates, owner, repo)
+    comment_body = build_duplicate_comment(issue, duplicates)
     if existing is None:
         if hasattr(issue, "create_comment"):
             issue.create_comment(comment_body)
@@ -603,11 +604,12 @@ def sync_duplicate_comment(
 def format_recent_issues_for_dedupe(github: Repository, current_issue_number: int) -> str:
     """Fetch recent open issues and format them for the dedupe prompt context."""
     try:
-        open_issues = list(github.get_issues(state="open", sort="created", direction="desc"))
+        paginated = github.get_issues(state="open", sort="created", direction="desc")
+        first_batch = list(islice(paginated, 51))
     except Exception:
         return "Unable to fetch recent issues for duplicate detection."
     candidates = [
-        issue for issue in open_issues
+        issue for issue in first_batch
         if not _field(issue, "pull_request")
         and int(_field(issue, "number", 0)) != current_issue_number
     ][:50]

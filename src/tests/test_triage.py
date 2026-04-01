@@ -458,7 +458,7 @@ class BuildDuplicateCommentTest(unittest.TestCase):
             {"issue_number": 10, "title": "Original bug", "similarity_reason": "Same error message"},
             {"issue_number": 20, "title": "Another report", "similarity_reason": "Same symptoms"},
         ]
-        body = build_duplicate_comment(issue, duplicates, "acme", "widgets")
+        body = build_duplicate_comment(issue, duplicates)
         self.assertIn("@alice", body)
         self.assertIn("#10", body)
         self.assertIn("#20", body)
