@@ -39,14 +39,14 @@ jobs:
       - name: Install Python workflow dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r src/requirements.txt
+          python -m pip install -r .github/scripts/requirements.txt
       - name: Resolve review context
         id: resolve
         env:
-          PYTHONPATH: src
+          PYTHONPATH: .github/scripts
           DISPATCH_PR_NUMBER: ${{ inputs.pr_number || '' }}
           DISPATCH_FOCUS: ${{ inputs.focus || '' }}
-        run: python src/resolve_review_context.py
+        run: python .github/scripts/resolve_review_context.py
   enforce_issue_state:
     if: github.event_name == 'pull_request_target' && github.event.pull_request.state == 'open'
     uses: ./.github/workflows/enforce-pr-issue-state.yml
