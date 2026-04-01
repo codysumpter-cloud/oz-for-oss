@@ -1,7 +1,7 @@
 name: PR Hooks
 on:
   pull_request_target:
-    types: [opened, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review, synchronize]
   issue_comment:
     types: [created]
   workflow_dispatch:
@@ -48,7 +48,10 @@ jobs:
           DISPATCH_FOCUS: ${{ inputs.focus || '' }}
         run: python .github/scripts/resolve_review_context.py
   enforce_issue_state:
-    if: github.event_name == 'pull_request_target' && github.event.pull_request.state == 'open'
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.action != 'synchronize' &&
+      github.event.pull_request.state == 'open'
     uses: ./.github/workflows/enforce-pr-issue-state.yml
     with:
       pr_number: ${{ github.event.pull_request.number }}
@@ -58,8 +61,17 @@ jobs:
     needs: [enforce_issue_state]
     if: >-
       github.event_name == 'pull_request_target' &&
+      github.event.action != 'synchronize' &&
       github.event.pull_request.state == 'open' &&
       needs.enforce_issue_state.outputs.allow_review == 'true'
+    uses: ./.github/workflows/run-tests.yml
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+  run_tests_on_push:
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'synchronize' &&
+      github.event.pull_request.state == 'open'
     uses: ./.github/workflows/run-tests.yml
     with:
       pr_number: ${{ github.event.pull_request.number }}
@@ -67,6 +79,7 @@ jobs:
     needs: [enforce_issue_state]
     if: >-
       github.event_name == 'pull_request_target' &&
+      github.event.action != 'synchronize' &&
       github.event.pull_request.draft == false &&
       !startsWith(github.event.pull_request.head.ref, 'cherrypick') &&
       needs.enforce_issue_state.outputs.allow_review == 'true'
