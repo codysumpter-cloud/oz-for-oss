@@ -76,10 +76,10 @@ jobs:
       - name: Install Python workflow dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r src/requirements.txt
+          python -m pip install -r .github/scripts/requirements.txt
       - name: Run issue triage workflow
         env:
-          PYTHONPATH: src
+          PYTHONPATH: .github/scripts
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           LOOKBACK_MINUTES: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.lookback_minutes || '60' }}
           TRIAGE_ISSUE_NUMBER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || '' }}
@@ -87,4 +87,4 @@ jobs:
           WARP_AGENT_MODEL: ${{ vars.WARP_AGENT_MODEL || '' }}
           WARP_AGENT_MCP: ${{ vars.WARP_AGENT_MCP || '' }}
           WARP_ENVIRONMENT_ID: ${{ vars.WARP_ENVIRONMENT_ID || '' }}
-        run: python src/triage_new_issues.py
+        run: python .github/scripts/triage_new_issues.py

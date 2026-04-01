@@ -2,7 +2,7 @@
 # NOTE: This file is advisory only — GitHub does not enforce it.
 
 # --- Workflow and automation ---
-/src/ @captainsafia
+/.github/scripts/ @captainsafia
 /.github/workflows/ @captainsafia
 /.github/issue-triage/ @captainsafia
 

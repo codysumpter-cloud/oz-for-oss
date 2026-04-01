@@ -75,10 +75,10 @@ jobs:
       - name: Install Python workflow dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r src/requirements.txt
+          python -m pip install -r .github/scripts/requirements.txt
       - name: Run PR review workflow
         env:
-          PYTHONPATH: src
+          PYTHONPATH: .github/scripts
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           PR_NUMBER: ${{ inputs.pr_number }}
           TRIGGER_SOURCE: ${{ inputs.trigger_source }}
@@ -88,4 +88,4 @@ jobs:
           WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
           WARP_AGENT_MODEL: ${{ vars.WARP_AGENT_MODEL || '' }}
           WARP_AGENT_MCP: ${{ vars.WARP_AGENT_MCP || '' }}
-        run: python src/review_pr.py
+        run: python .github/scripts/review_pr.py

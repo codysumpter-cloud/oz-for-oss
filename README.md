@@ -5,8 +5,8 @@
 ## Primary artifacts
 
 - `.github/workflows/` contains the GitHub Actions workflows that trigger Oz automation.
-- `src/` contains the Python entrypoints that those workflows execute.
-- `src/oz_workflows/` contains shared helpers for GitHub Actions outputs, environment loading, GitHub API access, transport comments, and Oz client integration.
+- `.github/scripts/` contains the Python entrypoints that those workflows execute.
+- `.github/scripts/oz_workflows/` contains shared helpers for GitHub Actions outputs, environment loading, GitHub API access, transport comments, and Oz client integration.
 - `.github/issue-triage/` contains triage label definitions used during issue triage.
 - `.github/STAKEHOLDERS` maps repository path patterns to subject-matter expert GitHub usernames, using CODEOWNERS-style syntax.
 - `specs/` stores committed product and technical spec artifacts associated with issues, organized as `specs/issue-{number}/product.md` and `specs/issue-{number}/tech.md`.
@@ -30,26 +30,26 @@ This repository currently automates:
 python3 -m venv .venv
 source .venv/bin/activate.fish
 python -m pip install --upgrade pip
-python -m pip install -r src/requirements.txt
+python -m pip install -r .github/scripts/requirements.txt
 ```
 
 ### Run tests
 
 ```sh
-env PYTHONPATH=src python -m unittest discover -s src/tests
+env PYTHONPATH=.github/scripts python -m unittest discover -s .github/scripts/tests
 ```
 
 ### Run workflow entrypoints locally
 
-The scripts under `src/` are designed to run inside GitHub Actions, so they expect the same event payload and environment variables that the workflows provide. For local debugging, point `PYTHONPATH` at `src/`, provide the relevant GitHub Actions environment variables, and execute the entrypoint you want to inspect.
+The scripts under `.github/scripts/` are designed to run inside GitHub Actions, so they expect the same event payload and environment variables that the workflows provide. For local debugging, point `PYTHONPATH` at `.github/scripts/`, provide the relevant GitHub Actions environment variables, and execute the entrypoint you want to inspect.
 
 Common entrypoints include:
 
-- `src/triage_new_issues.py`
-- `src/create_spec_from_issue.py`
-- `src/create_implementation_from_issue.py`
-- `src/enforce_pr_issue_state.py`
-- `src/review_pr.py`
+- `.github/scripts/triage_new_issues.py`
+- `.github/scripts/create_spec_from_issue.py`
+- `.github/scripts/create_implementation_from_issue.py`
+- `.github/scripts/enforce_pr_issue_state.py`
+- `.github/scripts/review_pr.py`
 
 ## Bootstrapping triage configuration
 
@@ -68,5 +68,5 @@ The `config.json` file contains **only** label definitions. Stakeholder ownershi
 ## Repository conventions
 
 - Production logic in this repository lives in the Python automation and workflow definitions, not in a shipping application binary or CLI.
-- Shared workflow and hub-action helpers should live in `src/oz_workflows/` so they can be reused by multiple workflow entrypoints.
-- Workflow dependency installation is driven by `src/requirements.txt`.
+- Shared workflow and hub-action helpers should live in `.github/scripts/oz_workflows/` so they can be reused by multiple workflow entrypoints.
+- Workflow dependency installation is driven by `.github/scripts/requirements.txt`.
