@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   create_spec:
-    if: (github.event_name == 'issues' && github.event.action == 'assigned' && github.event.assignee.login == 'oz-agent' && contains(github.event.issue.labels.*.name, 'ready-to-spec')) || (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'ready-to-spec' && contains(github.event.issue.assignees.*.login, 'oz-agent')) || (github.event_name == 'issue_comment' && !github.event.issue.pull_request && contains(github.event.issue.labels.*.name, 'ready-to-spec') && contains(github.event.comment.body, '@oz-agent') && (github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'OWNER'))
+    if: (github.event_name == 'issues' && github.event.action == 'assigned' && github.event.assignee.login == 'oz-agent' && contains(github.event.issue.labels.*.name, 'ready-to-spec')) || (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'ready-to-spec' && contains(github.event.issue.assignees.*.login, 'oz-agent')) || (github.event_name == 'issue_comment' && !github.event.issue.pull_request && contains(github.event.issue.labels.*.name, 'ready-to-spec') && contains(github.event.comment.body, '@oz-agent') && (github.event.comment.author_association == 'COLLABORATOR' || github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'OWNER'))
     name: Create spec diff
     runs-on: ubuntu-slim
     permissions:

@@ -12,7 +12,7 @@ from github.Repository import Repository
 
 
 # Author associations that indicate organization membership.
-ORG_MEMBER_ASSOCIATIONS: set[str] = {"MEMBER", "OWNER"}
+ORG_MEMBER_ASSOCIATIONS: set[str] = {"COLLABORATOR", "MEMBER", "OWNER"}
 
 ISSUE_PATTERN = re.compile(r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?|implements?|issue)\s*:?\s+#(\d+)", re.IGNORECASE)
 
