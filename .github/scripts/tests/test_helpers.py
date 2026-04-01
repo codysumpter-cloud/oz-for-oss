@@ -105,6 +105,22 @@ class ResolveProgressRequesterLoginTest(unittest.TestCase):
 
 
 class OrgMemberCommentsTextTest(unittest.TestCase):
+    def test_includes_collaborator_comments(self) -> None:
+        self.assertEqual(
+            org_member_comments_text(
+                [
+                    {
+                        "id": 1,
+                        "author_association": "COLLABORATOR",
+                        "created_at": "2026-03-24T00:00:00Z",
+                        "body": "Collaborator context",
+                        "user": {"login": "alice"},
+                    },
+                ]
+            ),
+            "- alice (2026-03-24T00:00:00Z): Collaborator context",
+        )
+
     def test_can_exclude_triggering_comment(self) -> None:
         self.assertEqual(
             org_member_comments_text(

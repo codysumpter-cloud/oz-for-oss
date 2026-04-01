@@ -13,6 +13,9 @@ class IsOrgMemberAssociationsTest(unittest.TestCase):
     def test_owner_association_is_recognized(self) -> None:
         self.assertIn("OWNER", ORG_MEMBER_ASSOCIATIONS)
 
+    def test_collaborator_association_is_recognized(self) -> None:
+        self.assertIn("COLLABORATOR", ORG_MEMBER_ASSOCIATIONS)
+
     def test_contributor_is_not_recognized(self) -> None:
         self.assertNotIn("CONTRIBUTOR", ORG_MEMBER_ASSOCIATIONS)
 
@@ -37,9 +40,9 @@ class IsPrAuthorOrgMemberTest(unittest.TestCase):
         pr = {"author_association": "NONE"}
         self.assertFalse(_is_pr_author_org_member(pr))
 
-    def test_collaborator_returns_false(self) -> None:
+    def test_collaborator_returns_true(self) -> None:
         pr = {"author_association": "COLLABORATOR"}
-        self.assertFalse(_is_pr_author_org_member(pr))
+        self.assertTrue(_is_pr_author_org_member(pr))
 
     def test_missing_field_returns_false(self) -> None:
         pr: dict[str, str] = {}
