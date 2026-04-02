@@ -12,9 +12,9 @@ on:
         default: ""
         type: string
     secrets:
-      GHA_APP_ID:
+      OZ_MGMT_GHA_APP_ID:
         required: true
-      GHA_PRIVATE_KEY:
+      OZ_MGMT_GHA_PRIVATE_KEY:
         required: true
       WARP_API_KEY:
         required: true
@@ -38,8 +38,8 @@ jobs:
         id: app_token
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.GHA_APP_ID }}
-          private-key: ${{ secrets.GHA_PRIVATE_KEY }}
+          app-id: ${{ secrets.OZ_MGMT_GHA_APP_ID }}
+          private-key: ${{ secrets.OZ_MGMT_GHA_PRIVATE_KEY }}
       - name: Checkout repo
         uses: actions/checkout@v4
       - name: Authenticate to Google Cloud for staging secret access
