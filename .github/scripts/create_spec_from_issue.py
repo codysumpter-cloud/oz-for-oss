@@ -19,6 +19,11 @@ from oz_workflows.helpers import (
 )
 from oz_workflows.oz_client import build_agent_config, run_agent
 
+SPEC_DRIVEN_IMPLEMENTATION_SKILL = "spec-driven-implementation"
+SPEC_DRIVEN_IMPLEMENTATION_SKILL_PATH = ".agents/skills/spec-driven-implementation/SKILL.md"
+WRITE_PRODUCT_SPEC_SKILL_PATH = ".agents/skills/write-product-spec/SKILL.md"
+WRITE_TECH_SPEC_SKILL_PATH = ".agents/skills/write-tech-spec/SKILL.md"
+
 
 def main() -> None:
     owner, repo = repo_parts()
@@ -67,8 +72,9 @@ def main() -> None:
             Cloud Workflow Requirements:
             - You are running in a cloud environment, so the caller cannot read your local diff.
             - Start from the repository default branch `{default_branch}`.
-            - First, read the skill at `.agents/skills/create-product-spec/SKILL.md` and follow its instructions to create a product spec at `specs/issue-{issue_number}/product.md`.
-            - Then, read the skill at `.agents/skills/create-tech-spec/SKILL.md` and follow its instructions to create a tech spec at `specs/issue-{issue_number}/tech.md`.
+            - Use the local shared skill `{SPEC_DRIVEN_IMPLEMENTATION_SKILL_PATH}` as the base spec-first workflow for this run.
+            - First, read the local shared skill `{WRITE_PRODUCT_SPEC_SKILL_PATH}`, then read `.agents/skills/create-product-spec/SKILL.md` for the Oz-specific wrapper instructions, and create a product spec at `specs/issue-{issue_number}/product.md`.
+            - Then, read the local shared skill `{WRITE_TECH_SPEC_SKILL_PATH}`, then read `.agents/skills/create-tech-spec/SKILL.md` for the Oz-specific wrapper instructions, and create a tech spec at `specs/issue-{issue_number}/tech.md`.
             - If you produce spec changes, commit only the spec changes to branch `{branch_name}` and push that branch to origin.
             - Do not open or update the pull request yourself.
             - If there is no worthwhile spec diff, do not push the branch.
@@ -83,7 +89,7 @@ def main() -> None:
 
         run = run_agent(
             prompt=prompt,
-            skill_name=None,
+            skill_name=SPEC_DRIVEN_IMPLEMENTATION_SKILL,
             title=f"Create specs for issue #{issue_number}",
             config=config,
             on_poll=lambda current_run: _on_poll(progress, current_run),

@@ -1,31 +1,53 @@
 ---
 name: create-product-spec
-description: Create a product spec from a GitHub issue in this repository. Use when an issue should be turned into a product spec artifact stored under the repo's `specs/` directory and the agent should prepare file changes only, without creating commits or pull requests itself.
+description: Create a product spec from a GitHub issue in this repository by applying the local shared `write-product-spec` workflow with Oz-specific issue context and output paths. Use when an issue should be turned into a product spec artifact stored under `specs/issue-<issue-number>/product.md` and the agent should prepare file changes only, without creating commits or pull requests itself unless a cloud workflow explicitly asks for it.
 ---
 
-# Create a product spec from a GitHub issue
+# create-product-spec
 
-Turn the assigned GitHub issue into a product spec for this repository.
+Create a product spec from a GitHub issue for this repository.
+
+## Overview
+
+This skill is a thin Oz wrapper around the local shared product-spec workflow:
+
+- `.agents/skills/write-product-spec/SKILL.md`
+
+Use that shared local skill as the base behavior and structure unless this wrapper overrides it. Keep the same emphasis on precise user-facing behavior, invariants, edge cases, validation, and open questions.
+
+The Oz-specific differences are:
+
+- the primary input is a GitHub issue, not a Linear issue
+- the output path is `specs/issue-<issue-number>/product.md`
+- `issue_comments.txt` and triggering-comment context are first-class inputs
+- do not create or edit Linear issues as part of this workflow
 
 ## Inputs
 
 Expect issue details in the prompt, including the issue number, title, description, labels, assignees, and optional prior discussion captured in `issue_comments.txt`.
 
+If a triggering comment or other workflow-provided comment context is present, treat it as additional context, not as a silent override of the issue body. Resolved decisions from comments can refine the spec; unresolved disagreements should remain explicit open questions.
+
 ## Workflow
 
-1. Read the issue details carefully. If `issue_comments.txt` exists, review it for clarifications and prior decisions.
-2. Inspect the repository to understand the current implementation and the likely scope of the requested work before writing the spec.
-3. Create or update a product spec file at `specs/issue-<issue-number>/product.md`. Product specs for this repository live under `specs/`.
-4. Keep the product spec focused on intended behavior and user-facing requirements. Include:
-   - the problem or goal from the user's perspective
-   - intended behavior and user-facing requirements
-   - acceptance criteria
-   - scope boundaries — what is in scope and what is explicitly out of scope
-   - open product questions that need resolution before implementation
-5. Do not include implementation details, file-level changes, or technical design — those belong in the tech spec.
-6. Do not implement the feature or modify production code as part of this task. Limit changes to the product spec artifact. Treat temporary context files such as `issue_comments.txt` as scratch input only and do not commit them.
-7. Default behavior: do not stage files, create commits, push branches, open pull requests, or use the GitHub CLI. If the prompt explicitly says you are running in a cloud-environment workflow where the caller cannot read your local diff and instructs you to publish a named branch, you may commit and push exactly the requested spec changes to that branch, but still do not open or update the pull request yourself unless the prompt explicitly asks for it.
-8. In your final response, provide a brief summary of the product spec and call out any assumptions or open questions so the workflow can reuse that summary when creating the PR.
+1. Start from the local shared `write-product-spec` guidance and follow its structure and writing standards unless this wrapper says otherwise.
+2. Read the issue details carefully. If `issue_comments.txt` exists, review it for clarifications, prior decisions, and issue-comment nuance that should influence the spec.
+3. Inspect the repository enough to understand the current user workflow and likely scope before writing the spec.
+4. Create or update `specs/issue-<issue-number>/product.md`.
+5. Keep the product spec focused on intended behavior and user-facing requirements. Use the shared skill's sections as the baseline, adapted to this repository and issue format. At minimum, cover:
+   - summary
+   - problem
+   - goals
+   - non-goals or scope boundaries
+   - concrete user experience and behavior requirements
+   - success criteria
+   - validation
+   - open product questions
+6. If design context such as a Figma link is present in the issue description or comments, include it. If no design context exists, make that absence explicit rather than silently omitting it.
+7. Do not include implementation details, file-level changes, or technical design. Those belong in the tech spec.
+8. Do not implement the feature or modify production code as part of this task. Limit changes to the product spec artifact. Treat temporary context files such as `issue_comments.txt` as scratch input only and do not commit them.
+9. Default behavior: do not stage files, create commits, push branches, open pull requests, or use the GitHub CLI. If the prompt explicitly says you are running in a cloud-environment workflow where the caller cannot read your local diff and instructs you to publish a named branch, you may commit and push exactly the requested spec changes to that branch, but still do not open or update the pull request yourself unless the prompt explicitly asks for it.
+10. In your final response, provide a brief summary of the product spec and call out any assumptions or open questions so the workflow can reuse that summary when creating the PR.
 
 ## Output expectations
 

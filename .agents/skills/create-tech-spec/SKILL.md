@@ -1,11 +1,26 @@
 ---
 name: create-tech-spec
-description: Create a technical spec from a GitHub issue in this repository. Use when an issue should be turned into a tech spec artifact stored under the repo's `specs/` directory and the agent should prepare file changes only, without creating commits or pull requests itself.
+description: Create a technical spec from a GitHub issue in this repository by applying the local shared `write-tech-spec` workflow with Oz-specific issue context and output paths. Use when an issue should be turned into a tech spec artifact stored under `specs/issue-<issue-number>/tech.md` and the agent should prepare file changes only, without creating commits or pull requests itself unless a cloud workflow explicitly asks for it.
 ---
 
-# Create a tech spec from a GitHub issue
+# create-tech-spec
 
-Turn the assigned GitHub issue into a technical spec for this repository.
+Create a tech spec from a GitHub issue for this repository.
+
+## Overview
+
+This skill is a thin Oz wrapper around the local shared tech-spec workflow:
+
+- `.agents/skills/write-tech-spec/SKILL.md`
+
+Use that shared local skill as the base behavior and structure unless this wrapper overrides it. Keep the same emphasis on grounding the plan in current code, documenting relevant files and data flow, explaining tradeoffs, and defining validation.
+
+The Oz-specific differences are:
+
+- the primary input is a GitHub issue, not a Linear issue
+- the output path is `specs/issue-<issue-number>/tech.md`
+- `issue_comments.txt` and triggering-comment context are additional design inputs
+- do not create or edit Linear issues as part of this workflow
 
 ## Inputs
 
@@ -15,17 +30,23 @@ When available, the product spec at `specs/issue-<issue-number>/product.md` shou
 
 ## Workflow
 
-1. Read the issue details carefully. If a product spec exists at `specs/issue-<issue-number>/product.md`, read it first to understand the intended behavior. If `issue_comments.txt` exists, review it for clarifications and prior decisions.
-2. Inspect the repository to understand the current implementation and the likely scope of the requested work before writing the spec.
-3. Create or update a tech spec file at `specs/issue-<issue-number>/tech.md`. Tech specs for this repository live under `specs/`.
-4. Keep the tech spec concise and actionable. Include:
-   - the problem or goal
-   - the most relevant current-state observations from the codebase
-   - the proposed changes with file-level detail
-   - notable risks, dependencies, or open technical questions
-5. Do not implement the feature or modify production code as part of this task. Limit changes to the tech spec artifact and any minimal repository metadata needed to support it. Treat temporary context files such as `issue_comments.txt` as scratch input only and do not commit them.
-6. Default behavior: do not stage files, create commits, push branches, open pull requests, or use the GitHub CLI. If the prompt explicitly says you are running in a cloud-environment workflow where the caller cannot read your local diff and instructs you to publish a named branch, you may commit and push exactly the requested spec changes to that branch, but still do not open or update the pull request yourself unless the prompt explicitly asks for it.
-7. In your final response, provide a brief summary of the tech spec and call out any assumptions or open questions so the workflow can reuse that summary when creating the PR.
+1. Start from the local shared `write-tech-spec` guidance and follow its structure and writing standards unless this wrapper says otherwise.
+2. Read the issue details carefully. If a product spec exists at `specs/issue-<issue-number>/product.md`, read it first to understand the intended behavior. If `issue_comments.txt` exists, review it for clarifications, prior decisions, and design nuance that should influence the tech plan.
+3. Inspect the repository to understand the current implementation and the likely scope of the requested work before writing the spec. Do not guess about current architecture when the code can be inspected directly.
+4. Create or update `specs/issue-<issue-number>/tech.md`.
+5. Use the shared skill's structure as the baseline, adapted to this repository and issue format. At minimum, cover:
+   - problem
+   - relevant code
+   - current state
+   - proposed changes
+   - end-to-end flow when useful
+   - risks and mitigations
+   - testing and validation
+   - follow-ups or open technical questions
+6. Keep the tech spec concise, actionable, and grounded in actual code paths and ownership boundaries in this repository.
+7. Do not implement the feature or modify production code as part of this task. Limit changes to the tech spec artifact and any minimal repository metadata needed to support it. Treat temporary context files such as `issue_comments.txt` as scratch input only and do not commit them.
+8. Default behavior: do not stage files, create commits, push branches, open pull requests, or use the GitHub CLI. If the prompt explicitly says you are running in a cloud-environment workflow where the caller cannot read your local diff and instructs you to publish a named branch, you may commit and push exactly the requested spec changes to that branch, but still do not open or update the pull request yourself unless the prompt explicitly asks for it.
+9. In your final response, provide a brief summary of the tech spec and call out any assumptions or open questions so the workflow can reuse that summary when creating the PR.
 
 ## Output expectations
 

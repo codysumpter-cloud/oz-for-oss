@@ -21,6 +21,10 @@ from oz_workflows.helpers import (
 )
 from oz_workflows.oz_client import build_agent_config, run_agent
 
+IMPLEMENT_SPECS_SKILL = "implement-specs"
+IMPLEMENT_SPECS_SKILL_PATH = ".agents/skills/implement-specs/SKILL.md"
+SPEC_DRIVEN_IMPLEMENTATION_SKILL_PATH = ".agents/skills/spec-driven-implementation/SKILL.md"
+
 
 def main() -> None:
     owner, repo = repo_parts()
@@ -115,7 +119,8 @@ def main() -> None:
             {spec_context_text}
 
             Cloud Workflow Requirements:
-            - Use the repository's local `implement-issue` skill as the base workflow.
+            - Use the local shared skills `{IMPLEMENT_SPECS_SKILL_PATH}` and `{SPEC_DRIVEN_IMPLEMENTATION_SKILL_PATH}` as the base workflow for this run.
+            - Read `.agents/skills/implement-issue/SKILL.md` and apply its Oz-specific wrapper instructions for `spec_context.md`, `issue_comments.txt`, and `implementation_summary.md`.
             - You are running in a cloud environment, so the caller cannot read your local diff.
             - Work on branch `{target_branch}`.
             - If that branch already exists, fetch it and continue from it. Otherwise create it from `{default_branch}`.
@@ -135,7 +140,7 @@ def main() -> None:
 
         run = run_agent(
             prompt=prompt,
-            skill_name="implement-issue",
+            skill_name=IMPLEMENT_SPECS_SKILL,
             title=f"Implement issue #{issue_number}",
             config=config,
             on_poll=lambda current_run: _on_poll(progress, current_run),
