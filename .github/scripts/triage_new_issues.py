@@ -193,7 +193,7 @@ def process_issue(
         workflow=WORKFLOW_NAME,
         event_payload=event_payload,
     )
-    progress.start(f"Oz has started triaging this issue.\n\n{TRIAGE_DISCLAIMER}")
+    progress.start("Oz has started triaging this issue.")
     comments = list(issue.get_comments())
     comments_text = format_issue_comments(comments, exclude_comment_id=triggering_comment_id)
     current_body = str(issue.body or "").strip()
