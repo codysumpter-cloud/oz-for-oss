@@ -16,8 +16,8 @@ jobs:
         id: app_token
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.GHA_APP_ID }}
-          private-key: ${{ secrets.GHA_PRIVATE_KEY }}
+          app-id: ${{ secrets.OZ_MGMT_GHA_APP_ID }}
+          private-key: ${{ secrets.OZ_MGMT_GHA_PRIVATE_KEY }}
       - name: Checkout repo
         uses: actions/checkout@v4
       - name: Set up Python
