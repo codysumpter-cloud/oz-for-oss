@@ -426,6 +426,8 @@ def conventional_commit_prefix(labels: list[Any], *, default: str = "feat") -> s
 # Accounts created on or after this date use the ``ID+login`` noreply format.
 # See https://docs.github.com/en/account-and-profile/reference/email-addresses-reference#your-noreply-email-address
 _NOREPLY_ID_CUTOFF = datetime(2017, 7, 18, tzinfo=timezone.utc)
+_OZ_COMMIT_AUTHOR_NAME = "Oz"
+_OZ_COMMIT_AUTHOR_EMAIL = "oz-agent@warp.dev"
 
 
 def _noreply_email(login: str, user_id: int | None, created_at: datetime | str | None) -> str:
@@ -471,13 +473,22 @@ def resolve_coauthor_line(
 
 
 def coauthor_prompt_lines(coauthor_line: str) -> str:
-    """Return prompt directive lines for co-authorship."""
+    """Return prompt directive lines for commit attribution."""
+    lines = [
+        f"- Before creating any commit, configure the local git author and committer as `{_OZ_COMMIT_AUTHOR_NAME} <{_OZ_COMMIT_AUTHOR_EMAIL}>`.",
+        f"- Run `git config user.name \"{_OZ_COMMIT_AUTHOR_NAME}\"` and `git config user.email \"{_OZ_COMMIT_AUTHOR_EMAIL}\"` before committing.",
+        "- Do not derive the git author or committer from the triggering issue, PR, comment, sender, or authenticated GitHub user.",
+    ]
     if coauthor_line:
-        return (
-            f"- Include the following co-author attribution at the end of every commit message: {coauthor_line}\n"
-            f"            - Do not attempt to resolve the co-author identity yourself (e.g. via GET /user). Use exactly the line provided above."
+        lines.extend(
+            [
+                f"- Include the following co-author attribution at the end of every commit message: {coauthor_line}",
+                "- Do not attempt to resolve the co-author identity yourself (e.g. via GET /user). Use exactly the line provided above.",
+            ]
         )
-    return "- Do not include any Co-Authored-By lines in commit messages."
+        return "\n".join(lines)
+    lines.append("- Do not include any Co-Authored-By lines in commit messages.")
+    return "\n".join(lines)
 
 
 def build_spec_preview_section(owner: str, repo: str, branch_name: str, issue_number: int) -> str:

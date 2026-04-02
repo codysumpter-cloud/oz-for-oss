@@ -424,11 +424,16 @@ class ResolveCoauthorLineTest(unittest.TestCase):
 class CoauthorPromptLinesTest(unittest.TestCase):
     def test_returns_include_directive_when_line_provided(self) -> None:
         result = coauthor_prompt_lines("Co-Authored-By: Alice <alice@users.noreply.github.com>")
+        self.assertIn("configure the local git author and committer as `Oz <oz-agent@warp.dev>`", result)
+        self.assertIn('git config user.name "Oz"', result)
+        self.assertIn("Do not derive the git author or committer", result)
         self.assertIn("Co-Authored-By: Alice <alice@users.noreply.github.com>", result)
         self.assertIn("Do not attempt to resolve the co-author identity yourself", result)
 
     def test_returns_omit_directive_when_empty(self) -> None:
         result = coauthor_prompt_lines("")
+        self.assertIn("configure the local git author and committer as `Oz <oz-agent@warp.dev>`", result)
+        self.assertIn('git config user.email "oz-agent@warp.dev"', result)
         self.assertIn("Do not include any Co-Authored-By lines", result)
 
 
