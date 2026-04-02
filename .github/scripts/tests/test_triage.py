@@ -401,7 +401,7 @@ class ApplyTriageResultTest(unittest.TestCase):
 
 
 class SyncFollowUpCommentTest(unittest.TestCase):
-    def test_creates_and_deletes_managed_follow_up_comment(self) -> None:
+    def test_creates_managed_follow_up_comment(self) -> None:
         github = FakeTriageGitHubClient()
         issue = {"number": 42, "user": {"login": "alice"}}
         sync_follow_up_comment(
@@ -416,8 +416,21 @@ class SyncFollowUpCommentTest(unittest.TestCase):
             github.comments[0]["body"],
             build_follow_up_comment(issue, ["What Warp version is affected?"]),
         )
+
+    def test_preserves_existing_comment_when_questions_empty(self) -> None:
+        github = FakeTriageGitHubClient()
+        issue = {"number": 42, "user": {"login": "alice"}}
+        sync_follow_up_comment(
+            github,
+            "acme",
+            "widgets",
+            issue,
+            questions=["What Warp version is affected?"],
+        )
+        self.assertEqual(len(github.comments), 1)
         sync_follow_up_comment(github, "acme", "widgets", issue, questions=[])
-        self.assertEqual(github.deleted_comment_ids, [1])
+        self.assertEqual(github.deleted_comment_ids, [])
+        self.assertEqual(len(github.comments), 1)
 
 
 class ExtractDuplicateOfTest(unittest.TestCase):
@@ -468,7 +481,7 @@ class BuildDuplicateCommentTest(unittest.TestCase):
 
 
 class SyncDuplicateCommentTest(unittest.TestCase):
-    def test_creates_and_deletes_managed_duplicate_comment(self) -> None:
+    def test_creates_managed_duplicate_comment(self) -> None:
         github = FakeTriageGitHubClient()
         issue = {"number": 42, "user": {"login": "alice"}}
         sync_duplicate_comment(
@@ -484,8 +497,23 @@ class SyncDuplicateCommentTest(unittest.TestCase):
         self.assertEqual(len(github.comments), 1)
         self.assertIn("#10", str(github.comments[0]["body"]))
         self.assertIn("#20", str(github.comments[0]["body"]))
+
+    def test_preserves_existing_comment_when_duplicates_empty(self) -> None:
+        github = FakeTriageGitHubClient()
+        issue = {"number": 42, "user": {"login": "alice"}}
+        sync_duplicate_comment(
+            github,
+            "acme",
+            "widgets",
+            issue,
+            duplicates=[
+                {"issue_number": 10, "title": "Original", "similarity_reason": "Same"},
+            ],
+        )
+        self.assertEqual(len(github.comments), 1)
         sync_duplicate_comment(github, "acme", "widgets", issue, duplicates=[])
-        self.assertEqual(github.deleted_comment_ids, [1])
+        self.assertEqual(github.deleted_comment_ids, [])
+        self.assertEqual(len(github.comments), 1)
 
 
 class FakeTriageGitHubClient:
