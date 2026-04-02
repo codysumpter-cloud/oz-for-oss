@@ -487,11 +487,6 @@ def sync_follow_up_comment(
         None,
     )
     if not questions:
-        if existing is not None:
-            if hasattr(existing, "delete"):
-                existing.delete()
-            else:
-                github.delete_comment(owner, repo, int(_field(existing, "id")))
         return
     comment_body = build_follow_up_comment(issue, questions)
     if existing is None:
@@ -586,11 +581,6 @@ def sync_duplicate_comment(
         None,
     )
     if not duplicates:
-        if existing is not None:
-            if hasattr(existing, "delete"):
-                existing.delete()
-            else:
-                github.delete_comment(owner, repo, int(_field(existing, "id")))
         return
     comment_body = build_duplicate_comment(issue, duplicates)
     if existing is None:
