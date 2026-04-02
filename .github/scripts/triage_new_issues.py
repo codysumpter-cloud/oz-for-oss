@@ -34,6 +34,7 @@ WORKFLOW_NAME = "triage-new-issues"
 PRIMARY_TRIAGE_LABELS = {"bug", "duplicate", "enhancement", "documentation", "needs-info", "triaged"}
 REPRO_LABEL_PREFIX = "repro:"
 OZ_AGENT_METADATA_PREFIX = "<!-- oz-agent-metadata:"
+TRIAGE_DISCLAIMER = "*This is an automated analysis by Oz and may be incorrect. A maintainer will verify the details.*"
 
 
 def _field(item: Any, name: str, default: Any = None) -> Any:
@@ -192,7 +193,7 @@ def process_issue(
         workflow=WORKFLOW_NAME,
         event_payload=event_payload,
     )
-    progress.start("Oz has started triaging this issue.")
+    progress.start(f"Oz has started triaging this issue.\n\n{TRIAGE_DISCLAIMER}")
     comments = list(issue.get_comments())
     comments_text = format_issue_comments(comments, exclude_comment_id=triggering_comment_id)
     current_body = str(issue.body or "").strip()
@@ -330,7 +331,7 @@ def process_issue(
     summary = str(result.get("summary") or "triage completed").strip()
     progress.complete(
         f"I completed triage for this issue and updated the issue with the triage result. "
-        f"Summary: {summary}"
+        f"Summary: {summary}\n\n{TRIAGE_DISCLAIMER}"
     )
     append_summary(f"- Issue #{issue_number}: {summary} Labels: {labels_text}.\n")
 
@@ -460,7 +461,9 @@ def build_follow_up_comment(issue: Any, questions: list[str]) -> str:
     lines.append("")
     lines.extend(f"{index}. {question}" for index, question in enumerate(questions, start=1))
     lines.append("")
-    lines.append("Reply in-thread with those details and the triage workflow can refine the diagnosis, labels, and next steps.")
+    lines.append("Reply in-thread with those details and mention @oz-agent so the triage workflow can refine the diagnosis, labels, and next steps.")
+    lines.append("")
+    lines.append(TRIAGE_DISCLAIMER)
     return build_comment_body("\n".join(lines), follow_up_comment_metadata(int(_field(issue, "number"))))
 
 
@@ -558,6 +561,8 @@ def build_duplicate_comment(issue: Any, duplicates: list[dict[str, Any]]) -> str
         "If this is not a duplicate, please comment with additional context explaining "
         "how this issue differs. Otherwise, this issue will be closed in 2 business days."
     )
+    lines.append("")
+    lines.append(TRIAGE_DISCLAIMER)
     return build_comment_body("\n".join(lines), duplicate_comment_metadata(int(_field(issue, "number"))))
 
 
