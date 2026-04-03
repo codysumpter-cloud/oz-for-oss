@@ -115,6 +115,8 @@ def main() -> None:
             return
         queue_text = ", ".join(f"#{_field(issue, 'number')}" for issue in issues)
         append_summary(f"Triage queue: {queue_text}\n")
+        template_context = discover_issue_templates(workspace())
+        recent_open_issues = load_recent_issues_for_dedupe(github)
 
         agent_config = build_agent_config(
             config_name=WORKFLOW_NAME,
@@ -137,6 +139,8 @@ def main() -> None:
                     triggering_comment_id=triggering_comment_id,
                     triggering_comment_text=triggering_comment_text,
                     stakeholders_text=stakeholders_text,
+                    template_context=template_context,
+                    recent_open_issues=recent_open_issues,
                 )
             except Exception as exc:
                 warning(f"Issue triage failed for #{issue_number}: {exc}")
@@ -182,9 +186,10 @@ def process_issue(
     triggering_comment_id: int | None,
     triggering_comment_text: str,
     stakeholders_text: str,
+    template_context: dict[str, Any],
+    recent_open_issues: list[Any] | None,
 ) -> None:
     issue_number = int(issue.number)
-    template_context = discover_issue_templates(workspace())
     progress = WorkflowProgressComment(
         github,
         owner,
@@ -198,7 +203,7 @@ def process_issue(
     comments_text = format_issue_comments(comments, exclude_comment_id=triggering_comment_id)
     current_body = str(issue.body or "").strip()
     original_report = extract_original_issue_report(current_body)
-    recent_issues_text = format_recent_issues_for_dedupe(github, issue_number)
+    recent_issues_text = format_recent_issues_for_dedupe(recent_open_issues, issue_number)
     transport_token = new_transport_token()
     prompt = dedent(
         f"""
@@ -606,15 +611,21 @@ def sync_duplicate_comment(
             github.update_comment(owner, repo, int(_field(existing, "id")), comment_body)
 
 
-def format_recent_issues_for_dedupe(github: Repository, current_issue_number: int) -> str:
-    """Fetch recent open issues and format them for the dedupe prompt context."""
+def load_recent_issues_for_dedupe(github: Repository) -> list[Any] | None:
+    """Fetch recent open issues once so batch triage can reuse duplicate-detection context."""
     try:
         paginated = github.get_issues(state="open", sort="created", direction="desc")
-        first_batch = list(islice(paginated, 51))
+        return list(islice(paginated, 51))
     except Exception:
+        return None
+
+
+def format_recent_issues_for_dedupe(recent_open_issues: list[Any] | None, current_issue_number: int) -> str:
+    """Format recent open issues for the dedupe prompt context."""
+    if recent_open_issues is None:
         return "Unable to fetch recent issues for duplicate detection."
     candidates = [
-        issue for issue in first_batch
+        issue for issue in recent_open_issues
         if not _field(issue, "pull_request")
         and int(_field(issue, "number", 0)) != current_issue_number
     ][:50]
