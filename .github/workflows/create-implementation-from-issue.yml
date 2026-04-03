@@ -1,16 +1,30 @@
 name: Create Implementation from Issue
 on:
+  workflow_call:
+    inputs:
+      _skip_event_filter:
+        description: Bypass event-based job conditions (set automatically for workflow_call)
+        required: false
+        default: 'true'
+        type: string
+    secrets:
+      OZ_MGMT_GHA_APP_ID:
+        required: true
+      OZ_MGMT_GHA_PRIVATE_KEY:
+        required: true
+      WARP_API_KEY:
+        required: true
   issues:
     types: [assigned, labeled]
   issue_comment:
     types: [created]
 concurrency:
-  group: create-implementation-issue-${{ github.event.issue.number }}
+  group: create-implementation-issue-${{ github.event.issue.number || github.run_id }}
   cancel-in-progress: false
 jobs:
   create_implementation:
     if: >-
-      (
+      inputs._skip_event_filter == 'true' || (
         github.event_name == 'issues' &&
         github.event.action == 'assigned' &&
         github.event.assignee.login == 'oz-agent' &&
@@ -34,6 +48,10 @@ jobs:
       id-token: write
       issues: write
       pull-requests: write
+    env:
+      WORKFLOW_CODE_REPOSITORY: warpdotdev/oz-for-oss
+      WORKFLOW_CODE_REF: ${{ github.repository == 'warpdotdev/oz-for-oss' && github.sha || 'main' }}
+      WORKFLOW_CODE_PATH: __oz_shared
     steps:
       - name: Create GitHub App token
         id: app_token
@@ -45,6 +63,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Checkout workflow code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.WORKFLOW_CODE_REPOSITORY }}
+          ref: ${{ env.WORKFLOW_CODE_REF }}
+          path: ${{ env.WORKFLOW_CODE_PATH }}
+          token: ${{ steps.app_token.outputs.token }}
       - name: Authenticate to Google Cloud for staging secret access
         uses: google-github-actions/auth@v2
         with:
@@ -68,14 +93,14 @@ jobs:
       - name: Install Python workflow dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r .github/scripts/requirements.txt
+          python -m pip install -r "${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/requirements.txt"
       - name: Run create-implementation workflow
         env:
-          PYTHONPATH: .github/scripts
+          PYTHONPATH: ${{ env.WORKFLOW_CODE_PATH }}/.github/scripts
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
           WARP_AGENT_MODEL: ${{ vars.WARP_AGENT_MODEL || '' }}
           WARP_AGENT_MCP: ${{ vars.WARP_AGENT_MCP || '' }}
           WARP_ENVIRONMENT_ID: ${{ vars.WARP_ENVIRONMENT_ID || '' }}
           STAGING_ORIGIN_TOKEN: ${{ steps.staging_origin_token.outputs.token }}
-        run: python .github/scripts/create_implementation_from_issue.py
+        run: python "${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/create_implementation_from_issue.py"
