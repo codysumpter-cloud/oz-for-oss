@@ -26,6 +26,10 @@ jobs:
   enforce_issue_state:
     name: Enforce PR issue state
     runs-on: ubuntu-slim
+    env:
+      WORKFLOW_CODE_REPOSITORY: warpdotdev/oz-for-oss
+      WORKFLOW_CODE_REF: ${{ github.repository == 'warpdotdev/oz-for-oss' && github.sha || 'main' }}
+      WORKFLOW_CODE_PATH: __oz_shared
     permissions:
       contents: read
       id-token: write
@@ -42,6 +46,13 @@ jobs:
           private-key: ${{ secrets.OZ_MGMT_GHA_PRIVATE_KEY }}
       - name: Checkout repo
         uses: actions/checkout@v4
+      - name: Checkout workflow code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.WORKFLOW_CODE_REPOSITORY }}
+          ref: ${{ env.WORKFLOW_CODE_REF }}
+          path: ${{ env.WORKFLOW_CODE_PATH }}
+          token: ${{ steps.app_token.outputs.token }}
       - name: Authenticate to Google Cloud for staging secret access
         uses: google-github-actions/auth@v2
         with:
@@ -65,11 +76,11 @@ jobs:
       - name: Install Python workflow dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r .github/scripts/requirements.txt
+          python -m pip install -r "${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/requirements.txt"
       - name: Run PR issue-state enforcement
         id: run_enforcement
         env:
-          PYTHONPATH: .github/scripts
+          PYTHONPATH: ${{ env.WORKFLOW_CODE_PATH }}/.github/scripts
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           PR_NUMBER: ${{ inputs.pr_number }}
           REQUESTER: ${{ inputs.requester }}
@@ -78,4 +89,4 @@ jobs:
           WARP_AGENT_MCP: ${{ vars.WARP_AGENT_MCP || '' }}
           WARP_ENVIRONMENT_ID: ${{ vars.WARP_ENVIRONMENT_ID || '' }}
           STAGING_ORIGIN_TOKEN: ${{ steps.staging_origin_token.outputs.token }}
-        run: python .github/scripts/enforce_pr_issue_state.py
+        run: python "${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/enforce_pr_issue_state.py"

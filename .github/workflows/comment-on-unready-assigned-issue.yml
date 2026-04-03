@@ -1,5 +1,6 @@
 name: Comment on Unready Assigned Issue
 on:
+  workflow_call:
   issues:
     types: [assigned]
 concurrency:
@@ -7,10 +8,14 @@ concurrency:
   cancel-in-progress: false
 jobs:
   comment_when_unready:
-    if: github.event.assignee.login == 'oz-agent' && !contains(github.event.issue.labels.*.name, 'ready-to-spec') && !contains(github.event.issue.labels.*.name, 'ready-to-implement')
+    if: github.event_name == 'workflow_call' || (github.event.assignee.login == 'oz-agent' && !contains(github.event.issue.labels.*.name, 'ready-to-spec') && !contains(github.event.issue.labels.*.name, 'ready-to-implement'))
     runs-on: ubuntu-slim
     permissions:
       issues: write
+    env:
+      WORKFLOW_CODE_REPOSITORY: warpdotdev/oz-for-oss
+      WORKFLOW_CODE_REF: ${{ github.repository == 'warpdotdev/oz-for-oss' && github.sha || 'main' }}
+      WORKFLOW_CODE_PATH: __oz_shared
     steps:
       - name: Create GitHub App token
         id: app_token
@@ -20,6 +25,13 @@ jobs:
           private-key: ${{ secrets.OZ_MGMT_GHA_PRIVATE_KEY }}
       - name: Checkout repo
         uses: actions/checkout@v4
+      - name: Checkout workflow code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.WORKFLOW_CODE_REPOSITORY }}
+          ref: ${{ env.WORKFLOW_CODE_REF }}
+          path: ${{ env.WORKFLOW_CODE_PATH }}
+          token: ${{ steps.app_token.outputs.token }}
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -27,9 +39,9 @@ jobs:
       - name: Install Python workflow dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r .github/scripts/requirements.txt
+          python -m pip install -r "${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/requirements.txt"
       - name: Run unready-assignment workflow
         env:
-          PYTHONPATH: .github/scripts
+          PYTHONPATH: ${{ env.WORKFLOW_CODE_PATH }}/.github/scripts
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
-        run: python .github/scripts/comment_on_unready_assigned_issue.py
+        run: python "${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/comment_on_unready_assigned_issue.py"
