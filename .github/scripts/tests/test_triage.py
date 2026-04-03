@@ -529,7 +529,8 @@ class BuildDuplicateCommentTest(unittest.TestCase):
         self.assertIn("#10", body)
         self.assertIn("#20", body)
         self.assertIn("Original bug", body)
-        self.assertIn("closed in 2 business days", body)
+        self.assertIn("Why it looks similar: Same error message", body)
+        self.assertIn("close it as a duplicate after review", body)
         self.assertIn("oz-agent-metadata", body)
 
 

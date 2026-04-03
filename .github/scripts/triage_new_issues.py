@@ -569,7 +569,7 @@ def build_duplicate_comment(issue: Any, duplicates: list[dict[str, Any]]) -> str
     if reporter_login:
         lines.append(f"@{reporter_login}")
         lines.append("")
-    lines.append("This issue appears to be a duplicate of the following existing issues:")
+    lines.append("This issue appears likely to overlap with the following existing issues:")
     lines.append("")
     for dup in duplicates:
         num = dup["issue_number"]
@@ -578,13 +578,14 @@ def build_duplicate_comment(issue: Any, duplicates: list[dict[str, Any]]) -> str
         line = f"- #{num}"
         if title:
             line += f" — {title}"
-        if reason:
-            line += f" ({reason})"
         lines.append(line)
+        if reason:
+            lines.append(f"  Why it looks similar: {reason}")
     lines.append("")
     lines.append(
-        "If this is not a duplicate, please comment with additional context explaining "
-        "how this issue differs. Otherwise, this issue will be closed in 2 business days."
+        "If this report is meaningfully different, please comment with the additional context "
+        "or distinguishing behavior so a maintainer can review it. Otherwise, a maintainer may "
+        "close it as a duplicate after review."
     )
     lines.append("")
     lines.append(TRIAGE_DISCLAIMER)
