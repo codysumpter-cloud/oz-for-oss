@@ -13,6 +13,7 @@ from oz_workflows.helpers import (
     build_pr_body,
     coauthor_prompt_lines,
     org_member_comments_text,
+    record_run_session_link,
     resolve_coauthor_line,
     triggering_comment_prompt_text,
     WorkflowProgressComment,
@@ -92,7 +93,7 @@ def main() -> None:
             skill_name=SPEC_DRIVEN_IMPLEMENTATION_SKILL,
             title=f"Create specs for issue #{issue_number}",
             config=config,
-            on_poll=lambda current_run: _on_poll(progress, current_run),
+            on_poll=lambda current_run: record_run_session_link(progress, current_run),
         )
 
         if not branch_updated_since(
@@ -138,12 +139,6 @@ def main() -> None:
             f"{spec_preview_section}\n\n"
             f"{next_steps_section}"
         )
-
-
-def _on_poll(progress: WorkflowProgressComment, run: object) -> None:
-    session_link = getattr(run, "session_link", None) or ""
-    progress.record_session_link(session_link)
-
 
 if __name__ == "__main__":
     main()

@@ -6,7 +6,12 @@ from textwrap import dedent
 from github import Auth, Github
 
 from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, workspace
-from oz_workflows.helpers import is_spec_only_pr, resolve_spec_context_for_pr, WorkflowProgressComment
+from oz_workflows.helpers import (
+    is_spec_only_pr,
+    record_run_session_link,
+    resolve_spec_context_for_pr,
+    WorkflowProgressComment,
+)
 from oz_workflows.oz_client import build_agent_config, run_agent
 from oz_workflows.transport import new_transport_token, poll_for_transport_payload
 
@@ -110,7 +115,7 @@ def main() -> None:
             skill_name=skill_name,
             title=f"PR review #{pr_number}",
             config=config,
-            on_poll=lambda current_run: _on_poll(progress, current_run),
+            on_poll=lambda current_run: record_run_session_link(progress, current_run),
         )
         payload, transport_comment_id = poll_for_transport_payload(
             github,
@@ -149,12 +154,6 @@ def main() -> None:
         else:
             pr.create_review(body=summary or "Automated review by Oz", event="COMMENT")
         progress.complete("I completed the review and posted feedback on this pull request.")
-
-
-def _on_poll(progress: WorkflowProgressComment, run: object) -> None:
-    session_link = getattr(run, "session_link", None) or ""
-    progress.record_session_link(session_link)
-
 
 if __name__ == "__main__":
     main()

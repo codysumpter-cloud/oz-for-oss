@@ -32,14 +32,15 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
       - name: Resolve staging origin token
+        id: staging_origin_token
         run: |
-          STAGING_ORIGIN_TOKEN="$(gcloud --project=warp-server-staging secrets versions access latest --secret=staging-origin-token)"
-          echo "::add-mask::$STAGING_ORIGIN_TOKEN"
+          token="$(gcloud --project=warp-server-staging secrets versions access latest --secret=staging-origin-token)"
+          printf '::add-mask::%s\n' "$token"
           {
-            echo 'STAGING_ORIGIN_TOKEN<<EOF'
-            printf '%s\n' "$STAGING_ORIGIN_TOKEN"
+            echo 'token<<EOF'
+            printf '%s\n' "$token"
             echo EOF
-          } >> "$GITHUB_ENV"
+          } >> "$GITHUB_OUTPUT"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -56,6 +57,6 @@ jobs:
           WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
           WARP_AGENT_MODEL: ${{ vars.WARP_AGENT_MODEL || '' }}
           WARP_AGENT_MCP: ${{ vars.WARP_AGENT_MCP || '' }}
-          WARP_AGENT_ENVIRONMENT_ID: ${{ vars.WARP_AGENT_ENVIRONMENT_ID || '' }}
-          WARP_AGENT_REVIEW_ENVIRONMENT_ID: ${{ vars.WARP_AGENT_REVIEW_ENVIRONMENT_ID || '' }}
+          WARP_ENVIRONMENT_ID: ${{ vars.WARP_ENVIRONMENT_ID || '' }}
+          STAGING_ORIGIN_TOKEN: ${{ steps.staging_origin_token.outputs.token }}
         run: python .github/scripts/update_pr_review.py

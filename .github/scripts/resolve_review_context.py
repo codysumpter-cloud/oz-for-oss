@@ -14,7 +14,6 @@ SLASH_COMMAND_PATTERN = re.compile(
 
 def main() -> None:
     event = load_event()
-    event_name = event.get("event_name") or event.get("action")
     github_event_name = optional_env("GITHUB_EVENT_NAME")
 
     should_review = False

@@ -14,6 +14,7 @@ from oz_workflows.helpers import (
     coauthor_prompt_lines,
     conventional_commit_prefix,
     org_member_comments_text,
+    record_run_session_link,
     resolve_coauthor_line,
     resolve_spec_context_for_issue,
     triggering_comment_prompt_text,
@@ -143,7 +144,7 @@ def main() -> None:
             skill_name=IMPLEMENT_SPECS_SKILL,
             title=f"Implement issue #{issue_number}",
             config=config,
-            on_poll=lambda current_run: _on_poll(progress, current_run),
+            on_poll=lambda current_run: record_run_session_link(progress, current_run),
         )
 
         if not branch_updated_since(
@@ -192,12 +193,6 @@ def main() -> None:
             f"I created or updated a draft implementation PR for this issue: {pr.html_url}\n\n"
             f"{next_steps_section}"
         )
-
-
-def _on_poll(progress: WorkflowProgressComment, run: object) -> None:
-    session_link = getattr(run, "session_link", None) or ""
-    progress.record_session_link(session_link)
-
 
 if __name__ == "__main__":
     main()

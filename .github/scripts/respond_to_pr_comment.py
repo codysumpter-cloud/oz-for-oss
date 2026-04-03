@@ -13,6 +13,7 @@ from oz_workflows.helpers import (
     build_next_steps_section,
     coauthor_prompt_lines,
     org_member_comments_text,
+    record_run_session_link,
     resolve_coauthor_line,
     resolve_spec_context_for_pr,
     review_thread_comments_text,
@@ -81,7 +82,8 @@ def _handle_issue_comment(
     pr.get_issue_comment(trigger_comment_id).create_reaction("eyes")
     issue_comments = list(pr.get_issue_comments())
     issue_comments_context = org_member_comments_text(
-        issue_comments, exclude_comment_id=trigger_comment_id,
+        issue_comments,
+        exclude_comment_id=trigger_comment_id,
     )
     review_comments = list(pr.get_review_comments())
     review_context = all_review_comments_text(review_comments)
@@ -208,7 +210,7 @@ def _run_implementation(
         skill_name="implement-issue",
         title=f"Respond to PR comment #{pr_number}",
         config=config,
-        on_poll=lambda current_run: _on_poll(progress, current_run),
+        on_poll=lambda current_run: record_run_session_link(progress, current_run),
     )
 
     next_steps_section = build_next_steps_section(
@@ -231,12 +233,6 @@ def _run_implementation(
     progress.complete(
         f"I pushed changes to this PR based on the comment.\n\n{next_steps_section}"
     )
-
-
-def _on_poll(progress: WorkflowProgressComment, run: object) -> None:
-    session_link = getattr(run, "session_link", None) or ""
-    progress.record_session_link(session_link)
-
 
 if __name__ == "__main__":
     main()
