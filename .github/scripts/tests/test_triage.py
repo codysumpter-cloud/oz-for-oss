@@ -457,7 +457,7 @@ class SyncFollowUpCommentTest(unittest.TestCase):
             build_follow_up_comment(issue, ["What Warp version is affected?"]),
         )
 
-    def test_preserves_existing_comment_when_questions_empty(self) -> None:
+    def test_deletes_existing_comment_when_questions_empty(self) -> None:
         github = FakeTriageGitHubClient()
         issue = {"number": 42, "user": {"login": "alice"}}
         sync_follow_up_comment(
@@ -468,9 +468,17 @@ class SyncFollowUpCommentTest(unittest.TestCase):
             questions=["What Warp version is affected?"],
         )
         self.assertEqual(len(github.comments), 1)
+        comment_id = int(github.comments[0]["id"])
         sync_follow_up_comment(github, "acme", "widgets", issue, questions=[])
+        self.assertIn(comment_id, github.deleted_comment_ids)
+        self.assertEqual(len(github.comments), 0)
+
+    def test_noop_when_no_existing_comment_and_questions_empty(self) -> None:
+        github = FakeTriageGitHubClient()
+        issue = {"number": 42, "user": {"login": "alice"}}
+        sync_follow_up_comment(github, "acme", "widgets", issue, questions=[])
+        self.assertEqual(len(github.comments), 0)
         self.assertEqual(github.deleted_comment_ids, [])
-        self.assertEqual(len(github.comments), 1)
 
 
 class ExtractDuplicateOfTest(unittest.TestCase):

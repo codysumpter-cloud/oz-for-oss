@@ -473,7 +473,7 @@ def build_follow_up_comment(issue: Any, questions: list[str]) -> str:
     lines.append("")
     lines.extend(f"{index}. {question}" for index, question in enumerate(questions, start=1))
     lines.append("")
-    lines.append("Reply in-thread with those details and mention @oz-agent so the triage workflow can refine the diagnosis, labels, and next steps.")
+    lines.append("Reply in-thread with those details and the triage workflow will automatically re-evaluate the issue and update the diagnosis, labels, and next steps.")
     lines.append("")
     lines.append(TRIAGE_DISCLAIMER)
     return build_comment_body("\n".join(lines), follow_up_comment_metadata(int(_field(issue, "number"))))
@@ -499,6 +499,11 @@ def sync_follow_up_comment(
         None,
     )
     if not questions:
+        if existing is not None:
+            if hasattr(existing, "delete"):
+                existing.delete()
+            else:
+                github.delete_comment(owner, repo, int(_field(existing, "id")))
         return
     comment_body = build_follow_up_comment(issue, questions)
     if existing is None:
