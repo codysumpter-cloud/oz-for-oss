@@ -46,12 +46,15 @@ def parse_mcp_servers(raw_value: str, cwd: Path) -> dict[str, Any] | None:
     raw = raw_value.strip()
     if not raw:
         return None
-
-    candidate_path = Path(raw)
-    if not candidate_path.is_absolute():
-        candidate_path = cwd / candidate_path
-
-    if candidate_path.exists():
+    if not raw.startswith(("{", "[")):
+        candidate_path = Path(raw)
+        if not candidate_path.is_absolute():
+            candidate_path = cwd / candidate_path
+        try:
+            if candidate_path.is_file():
+                raw = candidate_path.read_text(encoding="utf-8")
+        except OSError:
+            pass
         raw = candidate_path.read_text(encoding="utf-8")
 
     parsed = json.loads(raw)

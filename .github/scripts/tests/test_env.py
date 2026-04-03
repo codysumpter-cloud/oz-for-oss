@@ -12,6 +12,11 @@ class ParseMcpServersTest(unittest.TestCase):
     def test_parses_inline_json(self) -> None:
         parsed = parse_mcp_servers('{"github":{"warp_id":"123"}}', Path.cwd())
         self.assertEqual(parsed, {"github": {"warp_id": "123"}})
+    def test_parses_large_inline_json_without_treating_it_as_path(self) -> None:
+        long_key = "github" * 80
+        raw = f'{{"{long_key}":{{"warp_id":"123"}}}}'
+        parsed = parse_mcp_servers(raw, Path.cwd())
+        self.assertEqual(parsed, {long_key: {"warp_id": "123"}})
 
     def test_parses_json_file_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
