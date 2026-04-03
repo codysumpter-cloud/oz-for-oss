@@ -68,36 +68,21 @@ class SkillSpecTest(unittest.TestCase):
 
 
 class BuildAgentConfigTest(unittest.TestCase):
-    @patch.dict(os.environ, {"WARP_ENVIRONMENT_ID": "legacy-env"}, clear=False)
-    def test_falls_back_to_legacy_environment_variable(self) -> None:
+    @patch.dict(os.environ, {"WARP_ENVIRONMENT_ID": "default-env"}, clear=False)
+    def test_uses_warp_environment_id(self) -> None:
         config = build_agent_config(
             config_name="review-pull-request",
             workspace=Path("/tmp"),
-            environment_env_names=[
-                "WARP_AGENT_REVIEW_ENVIRONMENT_ID",
-                "WARP_AGENT_ENVIRONMENT_ID",
-            ],
         )
-        self.assertEqual(config["environment_id"], "legacy-env")
+        self.assertEqual(config["environment_id"], "default-env")
 
-    @patch.dict(
-        os.environ,
-        {
-            "WARP_ENVIRONMENT_ID": "legacy-env",
-            "WARP_AGENT_ENVIRONMENT_ID": "agent-env",
-        },
-        clear=False,
-    )
-    def test_prefers_explicit_agent_environment_variable(self) -> None:
-        config = build_agent_config(
-            config_name="review-pull-request",
-            workspace=Path("/tmp"),
-            environment_env_names=[
-                "WARP_AGENT_REVIEW_ENVIRONMENT_ID",
-                "WARP_AGENT_ENVIRONMENT_ID",
-            ],
-        )
-        self.assertEqual(config["environment_id"], "agent-env")
+    @patch.dict(os.environ, {}, clear=True)
+    def test_requires_warp_environment_id(self) -> None:
+        with self.assertRaises(RuntimeError):
+            build_agent_config(
+                config_name="review-pull-request",
+                workspace=Path("/tmp"),
+            )
 
 
 if __name__ == "__main__":

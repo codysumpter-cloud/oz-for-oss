@@ -9,7 +9,24 @@ concurrency:
   cancel-in-progress: false
 jobs:
   create_implementation:
-    if: (github.event_name == 'issues' && github.event.action == 'assigned' && github.event.assignee.login == 'oz-agent' && contains(github.event.issue.labels.*.name, 'ready-to-implement')) || (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'ready-to-implement' && contains(github.event.issue.assignees.*.login, 'oz-agent')) || (github.event_name == 'issue_comment' && !github.event.issue.pull_request && contains(github.event.issue.labels.*.name, 'ready-to-implement') && contains(github.event.comment.body, '@oz-agent') && (github.event.comment.author_association == 'COLLABORATOR' || github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'OWNER'))
+    if: >-
+      (
+        github.event_name == 'issues' &&
+        github.event.action == 'assigned' &&
+        github.event.assignee.login == 'oz-agent' &&
+        contains(github.event.issue.labels.*.name, 'ready-to-implement')
+      ) || (
+        github.event_name == 'issues' &&
+        github.event.action == 'labeled' &&
+        github.event.label.name == 'ready-to-implement' &&
+        contains(github.event.issue.assignees.*.login, 'oz-agent')
+      ) || (
+        github.event_name == 'issue_comment' &&
+        !github.event.issue.pull_request &&
+        contains(github.event.issue.labels.*.name, 'ready-to-implement') &&
+        contains(github.event.comment.body, '@oz-agent') &&
+        contains(fromJSON('["COLLABORATOR","MEMBER","OWNER"]'), github.event.comment.author_association)
+      )
     name: Create implementation diff
     runs-on: ubuntu-slim
     permissions:
@@ -35,14 +52,15 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
       - name: Resolve staging origin token
+        id: staging_origin_token
         run: |
-          STAGING_ORIGIN_TOKEN="$(gcloud --project=warp-server-staging secrets versions access latest --secret=staging-origin-token)"
-          echo "::add-mask::$STAGING_ORIGIN_TOKEN"
+          token="$(gcloud --project=warp-server-staging secrets versions access latest --secret=staging-origin-token)"
+          printf '::add-mask::%s\n' "$token"
           {
-            echo 'STAGING_ORIGIN_TOKEN<<EOF'
-            printf '%s\n' "$STAGING_ORIGIN_TOKEN"
+            echo 'token<<EOF'
+            printf '%s\n' "$token"
             echo EOF
-          } >> "$GITHUB_ENV"
+          } >> "$GITHUB_OUTPUT"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -59,4 +77,5 @@ jobs:
           WARP_AGENT_MODEL: ${{ vars.WARP_AGENT_MODEL || '' }}
           WARP_AGENT_MCP: ${{ vars.WARP_AGENT_MCP || '' }}
           WARP_ENVIRONMENT_ID: ${{ vars.WARP_ENVIRONMENT_ID || '' }}
+          STAGING_ORIGIN_TOKEN: ${{ steps.staging_origin_token.outputs.token }}
         run: python .github/scripts/create_implementation_from_issue.py

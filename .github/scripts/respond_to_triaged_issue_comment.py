@@ -9,9 +9,8 @@ from github import Auth, Github
 from oz_workflows.env import load_event, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.helpers import (
     WorkflowProgressComment,
-    _field,
-    _login,
-    _timestamp_text,
+    format_issue_comments_for_prompt,
+    record_run_session_link,
     triggering_comment_prompt_text,
 )
 from oz_workflows.oz_client import build_agent_config, run_agent
@@ -28,24 +27,16 @@ def format_visible_issue_comments(
     *,
     exclude_comment_id: int | None = None,
 ) -> str:
-    selected = [
-        comment
-        for comment in comments
-        if int(_field(comment, "id") or 0) != exclude_comment_id
-        and OZ_AGENT_METADATA_PREFIX not in str(_field(comment, "body") or "")
-    ]
-    if not selected:
-        return "- None"
-    formatted = []
-    for comment in selected:
-        user = _login(_field(comment, "user")) or "unknown"
-        association = _field(comment, "author_association") or "NONE"
-        body = str(_field(comment, "body") or "").strip() or "(no body)"
-        formatted.append(f"- @{user} [{association}] ({_timestamp_text(_field(comment, 'created_at'))}): {body}")
-    return "\n".join(formatted)
+    """Format visible issue comments while filtering Oz-managed metadata comments."""
+    return format_issue_comments_for_prompt(
+        comments,
+        metadata_prefix=OZ_AGENT_METADATA_PREFIX,
+        exclude_comment_id=exclude_comment_id,
+    )
 
 
 def extract_analysis_comment(result: dict[str, Any]) -> str:
+    """Return the normalized inline analysis comment from a transport payload."""
     return str(result.get("analysis_comment") or "").strip()
 
 
@@ -143,7 +134,7 @@ def main() -> None:
             skill_name="triage-issue",
             title=f"Respond to triaged issue comment #{issue_number}",
             config=config,
-            on_poll=lambda current_run: _on_poll(progress, current_run),
+            on_poll=lambda current_run: record_run_session_link(progress, current_run),
         )
         payload, transport_comment_id = poll_for_transport_payload(
             github,
@@ -165,12 +156,6 @@ def main() -> None:
                 "but I don’t have additional analysis to add yet."
             )
         progress.complete(analysis_comment)
-
-
-def _on_poll(progress: WorkflowProgressComment, run: object) -> None:
-    session_link = getattr(run, "session_link", None) or ""
-    progress.record_session_link(session_link)
-
 
 if __name__ == "__main__":
     main()

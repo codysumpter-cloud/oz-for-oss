@@ -16,10 +16,12 @@ DEFAULT_OZ_ORIGIN_TOKEN_ENV_NAME = "STAGING_ORIGIN_TOKEN"
 
 
 def oz_api_base_url() -> str:
+    """Return the configured Oz API base URL."""
     return optional_env("WARP_API_BASE_URL") or DEFAULT_OZ_API_BASE_URL
 
 
 def oz_origin_token() -> str:
+    """Return the origin token required for Oz API requests."""
     origin_token_env_name = (
         optional_env("WARP_ORIGIN_TOKEN_ENV_NAME") or DEFAULT_OZ_ORIGIN_TOKEN_ENV_NAME
     )
@@ -27,6 +29,7 @@ def oz_origin_token() -> str:
 
 
 def build_oz_client() -> OzAPI:
+    """Build an authenticated Oz SDK client for GitHub Actions workflows."""
     return OzAPI(
         api_key=require_env("WARP_API_KEY"),
         base_url=oz_api_base_url(),
@@ -41,24 +44,11 @@ def build_agent_config(
     *,
     config_name: str,
     workspace: Path,
-    environment_env_name: str = "WARP_ENVIRONMENT_ID",
-    environment_env_names: list[str] | None = None,
 ) -> dict[str, Any]:
-    candidate_env_names = list(environment_env_names or [])
-    if environment_env_name and environment_env_name not in candidate_env_names:
-        candidate_env_names.append(environment_env_name)
-    if "WARP_ENVIRONMENT_ID" not in candidate_env_names:
-        candidate_env_names.append("WARP_ENVIRONMENT_ID")
-    environment_id = ""
-    for env_name in candidate_env_names:
-        value = optional_env(env_name)
-        if value:
-            environment_id = value
-            break
+    """Build the agent configuration payload sent to the Oz API."""
+    environment_id = optional_env("WARP_ENVIRONMENT_ID")
     if not environment_id:
-        raise RuntimeError(
-            f"Missing Oz environment configuration. Set one of: {', '.join(candidate_env_names)}"
-        )
+        raise RuntimeError("Missing Oz environment configuration. Set WARP_ENVIRONMENT_ID")
 
     config: dict[str, Any] = {
         "environment_id": environment_id,
@@ -81,6 +71,7 @@ def build_agent_config(
 
 
 def skill_spec(skill_name: str) -> str:
+    """Resolve a repository-local skill name into a fully qualified skill spec."""
     if ":" in skill_name:
         return skill_name
     skill_path = skill_name
@@ -99,6 +90,7 @@ def run_agent(
     poll_interval_seconds: int = 10,
     timeout_seconds: int = 60 * 60,
 ) -> Any:
+    """Run an Oz agent and poll until it reaches a terminal state."""
     client = build_oz_client()
     request: dict[str, Any] = {
         "prompt": prompt,

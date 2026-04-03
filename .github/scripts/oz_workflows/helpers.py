@@ -45,6 +45,32 @@ def _label_name(label: Any) -> str:
     return str(_field(label, "name", "") or "")
 
 
+def format_issue_comments_for_prompt(
+    comments: list[Any],
+    *,
+    metadata_prefix: str,
+    exclude_comment_id: int | None = None,
+) -> str:
+    """Format human-visible issue comments for prompt context."""
+    selected = [
+        comment
+        for comment in comments
+        if int(_field(comment, "id") or 0) != exclude_comment_id
+        and metadata_prefix not in str(_field(comment, "body") or "")
+    ]
+    if not selected:
+        return "- None"
+    formatted = []
+    for comment in selected:
+        user = _login(_field(comment, "user")) or "unknown"
+        association = _field(comment, "author_association") or "NONE"
+        body = str(_field(comment, "body") or "").strip() or "(no body)"
+        formatted.append(
+            f"- @{user} [{association}] ({_timestamp_text(_field(comment, 'created_at'))}): {body}"
+        )
+    return "\n".join(formatted)
+
+
 def _list_issue_comments(
     github: Repository | Any,
     owner: str,
@@ -394,6 +420,12 @@ class WorkflowProgressComment:
         if existing:
             self.comment_id = int(_field(existing, "id"))
         return existing
+
+
+def record_run_session_link(progress: WorkflowProgressComment, run: object) -> None:
+    """Record the current Oz session link on a progress comment when available."""
+    session_link = getattr(run, "session_link", None) or ""
+    progress.record_session_link(session_link)
 
 
 # Maps issue label names to conventional commit type prefixes.
