@@ -10,7 +10,9 @@ from triage_new_issues import (
     build_follow_up_comment,
     extract_duplicate_of,
     extract_follow_up_questions,
+    format_recent_issues_for_dedupe,
     format_issue_comments,
+    load_recent_issues_for_dedupe,
     resolve_issue_number_override,
     sync_duplicate_comment,
     sync_follow_up_comment,
@@ -240,6 +242,44 @@ class FormatIssueCommentsTest(unittest.TestCase):
         self.assertEqual(rendered, "- @alice [NONE] (2026-03-24T00:00:00Z): Visible reporter comment")
 
 
+class LoadRecentIssuesForDedupeTest(unittest.TestCase):
+    def test_returns_prefetched_issue_batch(self) -> None:
+        github = FakeRecentIssuesGitHubClient(
+            [
+                {"number": 1, "title": "One"},
+                {"number": 2, "title": "Two"},
+            ]
+        )
+        issues = load_recent_issues_for_dedupe(github)
+        self.assertEqual([issue["number"] for issue in issues or []], [1, 2])
+        self.assertEqual(github.calls, 1)
+
+    def test_returns_none_when_fetch_fails(self) -> None:
+        github = FakeRecentIssuesGitHubClient([], should_fail=True)
+        self.assertIsNone(load_recent_issues_for_dedupe(github))
+
+
+class FormatRecentIssuesForDedupeTest(unittest.TestCase):
+    def test_formats_prefetched_issues_and_excludes_current_issue(self) -> None:
+        rendered = format_recent_issues_for_dedupe(
+            [
+                {"number": 10, "title": "Current", "body": "skip me"},
+                {"number": 11, "title": "Neighbor", "body": "has details"},
+                {"number": 12, "title": "Pull request", "body": "skip", "pull_request": {"url": "https://example.test/pr/12"}},
+            ],
+            current_issue_number=10,
+        )
+        self.assertIn("#11: Neighbor", rendered)
+        self.assertNotIn("#10: Current", rendered)
+        self.assertNotIn("#12: Pull request", rendered)
+
+    def test_reports_fetch_failure(self) -> None:
+        self.assertEqual(
+            format_recent_issues_for_dedupe(None, current_issue_number=10),
+            "Unable to fetch recent issues for duplicate detection.",
+        )
+
+
 class ExtractFollowUpQuestionsTest(unittest.TestCase):
     def test_normalizes_strings_and_objects(self) -> None:
         questions = extract_follow_up_questions(
@@ -463,6 +503,32 @@ class ExtractDuplicateOfTest(unittest.TestCase):
         self.assertEqual(len(duplicates), 1)
         self.assertEqual(duplicates[0]["issue_number"], 5)
 
+    def test_skips_invalid_duplicate_issue_numbers(self) -> None:
+        result = {
+            "duplicate_of": [
+                {"issue_number": "abc", "title": "Bad"},
+                {"issue_number": 0, "title": "Also bad"},
+                {"issue_number": 7, "title": "Valid"},
+            ]
+        }
+        self.assertEqual(
+            extract_duplicate_of(result),
+            [{"issue_number": 7, "title": "Valid", "similarity_reason": ""}],
+        )
+
+    def test_skips_self_references_and_duplicate_entries(self) -> None:
+        result = {
+            "duplicate_of": [
+                {"issue_number": 42, "title": "Self"},
+                {"issue_number": 10, "title": "First"},
+                {"issue_number": "10", "title": "Duplicate"},
+            ]
+        }
+        self.assertEqual(
+            extract_duplicate_of(result, current_issue_number=42),
+            [{"issue_number": 10, "title": "First", "similarity_reason": ""}],
+        )
+
 
 class BuildDuplicateCommentTest(unittest.TestCase):
     def test_builds_comment_with_duplicate_links(self) -> None:
@@ -476,7 +542,8 @@ class BuildDuplicateCommentTest(unittest.TestCase):
         self.assertIn("#10", body)
         self.assertIn("#20", body)
         self.assertIn("Original bug", body)
-        self.assertIn("closed in 2 business days", body)
+        self.assertIn("Why it looks similar: Same error message", body)
+        self.assertIn("close it as a duplicate after review", body)
         self.assertIn("oz-agent-metadata", body)
 
 
@@ -553,6 +620,19 @@ class FakeTriageGitHubClient:
     def delete_comment(self, owner: str, repo: str, comment_id: int) -> None:
         self.deleted_comment_ids.append(comment_id)
         self.comments = [comment for comment in self.comments if int(comment["id"]) != comment_id]
+
+
+class FakeRecentIssuesGitHubClient:
+    def __init__(self, issues: list[dict[str, object]], *, should_fail: bool = False) -> None:
+        self.issues = issues
+        self.should_fail = should_fail
+        self.calls = 0
+
+    def get_issues(self, **_: object) -> list[dict[str, object]]:
+        self.calls += 1
+        if self.should_fail:
+            raise RuntimeError("boom")
+        return list(self.issues)
 
 
 if __name__ == "__main__":

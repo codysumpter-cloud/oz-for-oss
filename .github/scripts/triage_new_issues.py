@@ -115,6 +115,8 @@ def main() -> None:
             return
         queue_text = ", ".join(f"#{_field(issue, 'number')}" for issue in issues)
         append_summary(f"Triage queue: {queue_text}\n")
+        template_context = discover_issue_templates(workspace())
+        recent_open_issues = load_recent_issues_for_dedupe(github)
 
         agent_config = build_agent_config(
             config_name=WORKFLOW_NAME,
@@ -137,6 +139,8 @@ def main() -> None:
                     triggering_comment_id=triggering_comment_id,
                     triggering_comment_text=triggering_comment_text,
                     stakeholders_text=stakeholders_text,
+                    template_context=template_context,
+                    recent_open_issues=recent_open_issues,
                 )
             except Exception as exc:
                 warning(f"Issue triage failed for #{issue_number}: {exc}")
@@ -182,9 +186,10 @@ def process_issue(
     triggering_comment_id: int | None,
     triggering_comment_text: str,
     stakeholders_text: str,
+    template_context: dict[str, Any],
+    recent_open_issues: list[Any] | None,
 ) -> None:
     issue_number = int(issue.number)
-    template_context = discover_issue_templates(workspace())
     progress = WorkflowProgressComment(
         github,
         owner,
@@ -198,7 +203,7 @@ def process_issue(
     comments_text = format_issue_comments(comments, exclude_comment_id=triggering_comment_id)
     current_body = str(issue.body or "").strip()
     original_report = extract_original_issue_report(current_body)
-    recent_issues_text = format_recent_issues_for_dedupe(github, issue_number)
+    recent_issues_text = format_recent_issues_for_dedupe(recent_open_issues, issue_number)
     transport_token = new_transport_token()
     prompt = dedent(
         f"""
@@ -324,7 +329,7 @@ def process_issue(
         owner,
         repo,
         issue,
-        duplicates=extract_duplicate_of(result),
+        duplicates=extract_duplicate_of(result, current_issue_number=issue_number),
     )
 
     labels_text = ", ".join(extract_requested_labels(result)) or "no labels"
@@ -369,6 +374,13 @@ def apply_triage_result(
             )
             managed_labels.append(label_name)
             continue
+        if issue_number <= 0:
+            continue
+        if current_issue_number is not None and issue_number == current_issue_number:
+            continue
+        if issue_number in seen_issue_numbers:
+            continue
+        seen_issue_numbers.add(issue_number)
         if label_name in repo_labels:
             managed_labels.append(label_name)
             continue
@@ -507,19 +519,32 @@ def _on_poll(progress: WorkflowProgressComment, run: object) -> None:
     progress.record_session_link(session_link)
 
 
-def extract_duplicate_of(result: dict[str, Any]) -> list[dict[str, Any]]:
+def extract_duplicate_of(
+    result: dict[str, Any],
+    *,
+    current_issue_number: int | None = None,
+) -> list[dict[str, Any]]:
     raw = result.get("duplicate_of")
     if not isinstance(raw, list):
         return []
     duplicates: list[dict[str, Any]] = []
+    seen_issue_numbers: set[int] = set()
     for entry in raw:
         if not isinstance(entry, dict):
             continue
-        issue_number = entry.get("issue_number")
-        if issue_number is None:
+        try:
+            issue_number = int(entry.get("issue_number"))
+        except (TypeError, ValueError):
             continue
+        if issue_number <= 0:
+            continue
+        if current_issue_number is not None and issue_number == current_issue_number:
+            continue
+        if issue_number in seen_issue_numbers:
+            continue
+        seen_issue_numbers.add(issue_number)
         duplicates.append({
-            "issue_number": int(issue_number),
+            "issue_number": issue_number,
             "title": str(entry.get("title") or "").strip(),
             "similarity_reason": str(entry.get("similarity_reason") or "").strip(),
         })
@@ -539,7 +564,7 @@ def build_duplicate_comment(issue: Any, duplicates: list[dict[str, Any]]) -> str
     if reporter_login:
         lines.append(f"@{reporter_login}")
         lines.append("")
-    lines.append("This issue appears to be a duplicate of the following existing issues:")
+    lines.append("This issue appears likely to overlap with the following existing issues:")
     lines.append("")
     for dup in duplicates:
         num = dup["issue_number"]
@@ -548,13 +573,14 @@ def build_duplicate_comment(issue: Any, duplicates: list[dict[str, Any]]) -> str
         line = f"- #{num}"
         if title:
             line += f" — {title}"
-        if reason:
-            line += f" ({reason})"
         lines.append(line)
+        if reason:
+            lines.append(f"  Why it looks similar: {reason}")
     lines.append("")
     lines.append(
-        "If this is not a duplicate, please comment with additional context explaining "
-        "how this issue differs. Otherwise, this issue will be closed in 2 business days."
+        "If this report is meaningfully different, please comment with the additional context "
+        "or distinguishing behavior so a maintainer can review it. Otherwise, a maintainer may "
+        "close it as a duplicate after review."
     )
     lines.append("")
     lines.append(TRIAGE_DISCLAIMER)
@@ -596,15 +622,21 @@ def sync_duplicate_comment(
             github.update_comment(owner, repo, int(_field(existing, "id")), comment_body)
 
 
-def format_recent_issues_for_dedupe(github: Repository, current_issue_number: int) -> str:
-    """Fetch recent open issues and format them for the dedupe prompt context."""
+def load_recent_issues_for_dedupe(github: Repository) -> list[Any] | None:
+    """Fetch recent open issues once so batch triage can reuse duplicate-detection context."""
     try:
         paginated = github.get_issues(state="open", sort="created", direction="desc")
-        first_batch = list(islice(paginated, 51))
+        return list(islice(paginated, 51))
     except Exception:
+        return None
+
+
+def format_recent_issues_for_dedupe(recent_open_issues: list[Any] | None, current_issue_number: int) -> str:
+    """Format recent open issues for the dedupe prompt context."""
+    if recent_open_issues is None:
         return "Unable to fetch recent issues for duplicate detection."
     candidates = [
-        issue for issue in first_batch
+        issue for issue in recent_open_issues
         if not _field(issue, "pull_request")
         and int(_field(issue, "number", 0)) != current_issue_number
     ][:50]
