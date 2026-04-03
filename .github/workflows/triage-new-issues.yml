@@ -2,6 +2,11 @@ name: Triage New Issues
 on:
   workflow_call:
     inputs:
+      _skip_event_filter:
+        description: Bypass event-based job conditions (set automatically for workflow_call)
+        required: false
+        default: 'true'
+        type: string
       issue_number:
         description: Optional issue number to triage immediately
         required: false
@@ -12,6 +17,13 @@ on:
         required: false
         default: '60'
         type: string
+    secrets:
+      OZ_MGMT_GHA_APP_ID:
+        required: true
+      OZ_MGMT_GHA_PRIVATE_KEY:
+        required: true
+      WARP_API_KEY:
+        required: true
   issues:
     types: [opened]
   schedule:
@@ -36,7 +48,7 @@ concurrency:
 jobs:
   triage_issues:
     if: |
-      github.event_name == 'workflow_call' || (
+      inputs._skip_event_filter == 'true' || (
         github.event_name != 'issue_comment' &&
         !contains(github.event.issue.labels.*.name, 'triaged')
       ) || (

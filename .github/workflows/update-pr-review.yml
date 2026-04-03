@@ -7,6 +7,13 @@ on:
         required: false
         default: '7'
         type: string
+    secrets:
+      OZ_MGMT_GHA_APP_ID:
+        required: true
+      OZ_MGMT_GHA_PRIVATE_KEY:
+        required: true
+      WARP_API_KEY:
+        required: true
   schedule:
     - cron: '0 9 * * 1'  # Every Monday at 09:00 UTC
   workflow_dispatch:

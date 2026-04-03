@@ -1,17 +1,30 @@
 name: Create Spec from Issue
 on:
   workflow_call:
+    inputs:
+      _skip_event_filter:
+        description: Bypass event-based job conditions (set automatically for workflow_call)
+        required: false
+        default: 'true'
+        type: string
+    secrets:
+      OZ_MGMT_GHA_APP_ID:
+        required: true
+      OZ_MGMT_GHA_PRIVATE_KEY:
+        required: true
+      WARP_API_KEY:
+        required: true
   issues:
     types: [assigned, labeled]
   issue_comment:
     types: [created]
 concurrency:
-  group: create-spec-issue-${{ github.event.issue.number }}
+  group: create-spec-issue-${{ github.event.issue.number || github.run_id }}
   cancel-in-progress: false
 jobs:
   create_spec:
     if: >-
-      github.event_name == 'workflow_call' || (
+      inputs._skip_event_filter == 'true' || (
         github.event_name == 'issues' &&
         github.event.action == 'assigned' &&
         github.event.assignee.login == 'oz-agent' &&
