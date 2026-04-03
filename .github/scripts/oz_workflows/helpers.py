@@ -486,8 +486,8 @@ def coauthor_prompt_lines(coauthor_line: str) -> str:
                 "- Do not attempt to resolve the co-author identity yourself (e.g. via GET /user). Use exactly the line provided above.",
             ]
         )
-        return "\n".join(lines)
-    lines.append("- Do not include any Co-Authored-By lines in commit messages.")
+    else:
+        lines.append("- Do not include any Co-Authored-By lines in commit messages.")
     return "\n".join(lines)
 
 
