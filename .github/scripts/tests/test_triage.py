@@ -490,6 +490,32 @@ class ExtractDuplicateOfTest(unittest.TestCase):
         self.assertEqual(len(duplicates), 1)
         self.assertEqual(duplicates[0]["issue_number"], 5)
 
+    def test_skips_invalid_duplicate_issue_numbers(self) -> None:
+        result = {
+            "duplicate_of": [
+                {"issue_number": "abc", "title": "Bad"},
+                {"issue_number": 0, "title": "Also bad"},
+                {"issue_number": 7, "title": "Valid"},
+            ]
+        }
+        self.assertEqual(
+            extract_duplicate_of(result),
+            [{"issue_number": 7, "title": "Valid", "similarity_reason": ""}],
+        )
+
+    def test_skips_self_references_and_duplicate_entries(self) -> None:
+        result = {
+            "duplicate_of": [
+                {"issue_number": 42, "title": "Self"},
+                {"issue_number": 10, "title": "First"},
+                {"issue_number": "10", "title": "Duplicate"},
+            ]
+        }
+        self.assertEqual(
+            extract_duplicate_of(result, current_issue_number=42),
+            [{"issue_number": 10, "title": "First", "similarity_reason": ""}],
+        )
+
 
 class BuildDuplicateCommentTest(unittest.TestCase):
     def test_builds_comment_with_duplicate_links(self) -> None:

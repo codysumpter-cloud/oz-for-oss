@@ -329,7 +329,7 @@ def process_issue(
         owner,
         repo,
         issue,
-        duplicates=extract_duplicate_of(result),
+        duplicates=extract_duplicate_of(result, current_issue_number=issue_number),
     )
 
     labels_text = ", ".join(extract_requested_labels(result)) or "no labels"
@@ -374,6 +374,13 @@ def apply_triage_result(
             )
             managed_labels.append(label_name)
             continue
+        if issue_number <= 0:
+            continue
+        if current_issue_number is not None and issue_number == current_issue_number:
+            continue
+        if issue_number in seen_issue_numbers:
+            continue
+        seen_issue_numbers.add(issue_number)
         if label_name in repo_labels:
             managed_labels.append(label_name)
             continue
@@ -517,19 +524,32 @@ def _on_poll(progress: WorkflowProgressComment, run: object) -> None:
     progress.record_session_link(session_link)
 
 
-def extract_duplicate_of(result: dict[str, Any]) -> list[dict[str, Any]]:
+def extract_duplicate_of(
+    result: dict[str, Any],
+    *,
+    current_issue_number: int | None = None,
+) -> list[dict[str, Any]]:
     raw = result.get("duplicate_of")
     if not isinstance(raw, list):
         return []
     duplicates: list[dict[str, Any]] = []
+    seen_issue_numbers: set[int] = set()
     for entry in raw:
         if not isinstance(entry, dict):
             continue
-        issue_number = entry.get("issue_number")
-        if issue_number is None:
+        try:
+            issue_number = int(entry.get("issue_number"))
+        except (TypeError, ValueError):
             continue
+        if issue_number <= 0:
+            continue
+        if current_issue_number is not None and issue_number == current_issue_number:
+            continue
+        if issue_number in seen_issue_numbers:
+            continue
+        seen_issue_numbers.add(issue_number)
         duplicates.append({
-            "issue_number": int(issue_number),
+            "issue_number": issue_number,
             "title": str(entry.get("title") or "").strip(),
             "similarity_reason": str(entry.get("similarity_reason") or "").strip(),
         })
