@@ -18,12 +18,13 @@ from oz_workflows.helpers import (
     triggering_comment_prompt_text,
     WorkflowProgressComment,
 )
-from oz_workflows.oz_client import build_agent_config, run_agent
+from oz_workflows.oz_client import build_agent_config, run_agent, skill_file_path
 
 SPEC_DRIVEN_IMPLEMENTATION_SKILL = "spec-driven-implementation"
-SPEC_DRIVEN_IMPLEMENTATION_SKILL_PATH = ".agents/skills/spec-driven-implementation/SKILL.md"
-WRITE_PRODUCT_SPEC_SKILL_PATH = ".agents/skills/write-product-spec/SKILL.md"
-WRITE_TECH_SPEC_SKILL_PATH = ".agents/skills/write-tech-spec/SKILL.md"
+WRITE_PRODUCT_SPEC_SKILL = "write-product-spec"
+WRITE_TECH_SPEC_SKILL = "write-tech-spec"
+CREATE_PRODUCT_SPEC_SKILL = "create-product-spec"
+CREATE_TECH_SPEC_SKILL = "create-tech-spec"
 
 
 def main() -> None:
@@ -53,6 +54,13 @@ def main() -> None:
         progress.start("Oz is starting work on product and tech specs for this issue.")
         coauthor_line = resolve_coauthor_line(client, event)
         coauthor_directives = coauthor_prompt_lines(coauthor_line)
+        spec_driven_implementation_skill_path = skill_file_path(
+            SPEC_DRIVEN_IMPLEMENTATION_SKILL
+        )
+        write_product_spec_skill_path = skill_file_path(WRITE_PRODUCT_SPEC_SKILL)
+        write_tech_spec_skill_path = skill_file_path(WRITE_TECH_SPEC_SKILL)
+        create_product_spec_skill_path = skill_file_path(CREATE_PRODUCT_SPEC_SKILL)
+        create_tech_spec_skill_path = skill_file_path(CREATE_TECH_SPEC_SKILL)
 
         prompt = dedent(
             f"""
@@ -73,9 +81,9 @@ def main() -> None:
             Cloud Workflow Requirements:
             - You are running in a cloud environment, so the caller cannot read your local diff.
             - Start from the repository default branch `{default_branch}`.
-            - Use the local shared skill `{SPEC_DRIVEN_IMPLEMENTATION_SKILL_PATH}` as the base spec-first workflow for this run.
-            - First, read the local shared skill `{WRITE_PRODUCT_SPEC_SKILL_PATH}`, then read `.agents/skills/create-product-spec/SKILL.md` for the Oz-specific wrapper instructions, and create a product spec at `specs/issue-{issue_number}/product.md`.
-            - Then, read the local shared skill `{WRITE_TECH_SPEC_SKILL_PATH}`, then read `.agents/skills/create-tech-spec/SKILL.md` for the Oz-specific wrapper instructions, and create a tech spec at `specs/issue-{issue_number}/tech.md`.
+            - Use the shared spec-first skill `{spec_driven_implementation_skill_path}` as the base workflow for this run. Prefer the consuming repository's version when present; otherwise use the checked-in oz-for-oss copy.
+            - First, read the shared product-spec skill `{write_product_spec_skill_path}`, then read the Oz wrapper skill `{create_product_spec_skill_path}`, and create a product spec at `specs/issue-{issue_number}/product.md`.
+            - Then, read the shared tech-spec skill `{write_tech_spec_skill_path}`, then read the Oz wrapper skill `{create_tech_spec_skill_path}`, and create a tech spec at `specs/issue-{issue_number}/tech.md`.
             - If you produce spec changes, commit only the spec changes to branch `{branch_name}` and push that branch to origin.
             - Do not open or update the pull request yourself.
             - If there is no worthwhile spec diff, do not push the branch.

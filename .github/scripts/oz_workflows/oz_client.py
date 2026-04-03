@@ -7,7 +7,7 @@ from typing import Any, Callable
 from oz_agent_sdk import OzAPI
 
 from .actions import notice, warning
-from .env import optional_env, parse_mcp_servers, repo_slug, require_env
+from .env import optional_env, parse_mcp_servers, repo_slug, require_env, workspace
 
 
 TERMINAL_STATES = {"SUCCEEDED", "FAILED", "ERROR", "CANCELLED"}
@@ -70,14 +70,70 @@ def build_agent_config(
     return config
 
 
+def _normalize_skill_path(skill_name: str) -> str:
+    """Normalize a short skill name into a repository-relative skill path."""
+    if skill_name.endswith("SKILL.md"):
+        return skill_name
+    return f".agents/skills/{skill_name}/SKILL.md"
+
+
+def _workflow_code_root() -> Path:
+    """Return the checked-out workflow code root when available."""
+    configured_path = optional_env("WORKFLOW_CODE_PATH")
+    if configured_path:
+        root = Path(configured_path)
+        if not root.is_absolute():
+            root = workspace() / root
+        return root
+    return Path(__file__).resolve().parents[3]
+
+
+def _resolve_skill_location(skill_name: str) -> tuple[str, str, Path]:
+    """Resolve a skill to the repo slug, relative path, and on-disk file location."""
+    if ":" in skill_name:
+        repo, skill_path = skill_name.split(":", 1)
+        return repo, skill_path, Path(skill_path)
+
+    skill_path = _normalize_skill_path(skill_name)
+    consumer_repo_slug = repo_slug()
+    consumer_repo_root = workspace()
+    workflow_repo_root = _workflow_code_root()
+    workflow_repo_slug = optional_env("WORKFLOW_CODE_REPOSITORY") or consumer_repo_slug
+
+    candidates = [(consumer_repo_slug, consumer_repo_root)]
+    if (workflow_repo_slug, workflow_repo_root) != (consumer_repo_slug, consumer_repo_root):
+        candidates.append((workflow_repo_slug, workflow_repo_root))
+
+    for candidate_repo_slug, candidate_root in candidates:
+        candidate_path = candidate_root / skill_path
+        if candidate_path.is_file():
+            return candidate_repo_slug, skill_path, candidate_path
+
+    checked_locations = ", ".join(
+        str(candidate_root / skill_path) for _candidate_repo_slug, candidate_root in candidates
+    )
+    raise RuntimeError(
+        f"Unable to resolve skill {skill_name!r}. Checked: {checked_locations}"
+    )
+
+
+def skill_file_path(skill_name: str) -> str:
+    """Resolve a skill to the workspace-relative file path that the agent should read."""
+    _repo_slug, skill_path, resolved_path = _resolve_skill_location(skill_name)
+    if ":" in skill_name:
+        return skill_path
+    try:
+        return resolved_path.relative_to(workspace()).as_posix()
+    except ValueError:
+        return resolved_path.as_posix()
+
+
 def skill_spec(skill_name: str) -> str:
-    """Resolve a repository-local skill name into a fully qualified skill spec."""
+    """Resolve a skill name into a fully qualified spec, preferring consumer repo overrides."""
+    resolved_repo_slug, skill_path, _resolved_path = _resolve_skill_location(skill_name)
     if ":" in skill_name:
         return skill_name
-    skill_path = skill_name
-    if not skill_path.endswith("SKILL.md"):
-        skill_path = f".agents/skills/{skill_name}/SKILL.md"
-    return f"{repo_slug()}:{skill_path}"
+    return f"{resolved_repo_slug}:{skill_path}"
 
 
 def run_agent(

@@ -20,11 +20,11 @@ from oz_workflows.helpers import (
     triggering_comment_prompt_text,
     WorkflowProgressComment,
 )
-from oz_workflows.oz_client import build_agent_config, run_agent
+from oz_workflows.oz_client import build_agent_config, run_agent, skill_file_path
 
 IMPLEMENT_SPECS_SKILL = "implement-specs"
-IMPLEMENT_SPECS_SKILL_PATH = ".agents/skills/implement-specs/SKILL.md"
-SPEC_DRIVEN_IMPLEMENTATION_SKILL_PATH = ".agents/skills/spec-driven-implementation/SKILL.md"
+SPEC_DRIVEN_IMPLEMENTATION_SKILL = "spec-driven-implementation"
+IMPLEMENT_ISSUE_SKILL = "implement-issue"
 
 
 def main() -> None:
@@ -99,6 +99,11 @@ def main() -> None:
 
         coauthor_line = resolve_coauthor_line(client, event)
         coauthor_directives = coauthor_prompt_lines(coauthor_line)
+        implement_specs_skill_path = skill_file_path(IMPLEMENT_SPECS_SKILL)
+        spec_driven_implementation_skill_path = skill_file_path(
+            SPEC_DRIVEN_IMPLEMENTATION_SKILL
+        )
+        implement_issue_skill_path = skill_file_path(IMPLEMENT_ISSUE_SKILL)
 
         prompt = dedent(
             f"""
@@ -120,8 +125,8 @@ def main() -> None:
             {spec_context_text}
 
             Cloud Workflow Requirements:
-            - Use the local shared skills `{IMPLEMENT_SPECS_SKILL_PATH}` and `{SPEC_DRIVEN_IMPLEMENTATION_SKILL_PATH}` as the base workflow for this run.
-            - Read `.agents/skills/implement-issue/SKILL.md` and apply its Oz-specific wrapper instructions for `spec_context.md`, `issue_comments.txt`, and `implementation_summary.md`.
+            - Use the shared implementation skills `{implement_specs_skill_path}` and `{spec_driven_implementation_skill_path}` as the base workflow for this run. Prefer the consuming repository's versions when present; otherwise use the checked-in oz-for-oss copies.
+            - Read the Oz wrapper skill `{implement_issue_skill_path}` and apply its instructions for `spec_context.md`, `issue_comments.txt`, and `implementation_summary.md`.
             - You are running in a cloud environment, so the caller cannot read your local diff.
             - Work on branch `{target_branch}`.
             - If that branch already exists, fetch it and continue from it. Otherwise create it from `{default_branch}`.

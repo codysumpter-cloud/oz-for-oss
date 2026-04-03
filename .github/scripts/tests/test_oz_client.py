@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
 from pathlib import Path
 
-from oz_workflows.oz_client import build_agent_config, build_oz_client, skill_spec
+from oz_workflows.oz_client import (
+    build_agent_config,
+    build_oz_client,
+    skill_file_path,
+    skill_spec,
+)
 
 
 class BuildOzClientTest(unittest.TestCase):
@@ -48,19 +54,78 @@ class BuildOzClientTest(unittest.TestCase):
 
 
 class SkillSpecTest(unittest.TestCase):
-    @patch.dict(os.environ, {"GITHUB_REPOSITORY": "warpdotdev/oz-oss-testbed"}, clear=False)
-    def test_resolves_short_skill_name_to_full_skill_path(self) -> None:
-        self.assertEqual(
-            skill_spec("implement-issue"),
-            "warpdotdev/oz-oss-testbed:.agents/skills/implement-issue/SKILL.md",
-        )
+    def test_prefers_consuming_repo_skill_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo_root = Path(tempdir)
+            skill_path = repo_root / ".agents/skills/implement-issue/SKILL.md"
+            skill_path.parent.mkdir(parents=True)
+            skill_path.write_text("# implement issue\n", encoding="utf-8")
+            with patch.dict(
+                os.environ,
+                {
+                    "GITHUB_REPOSITORY": "warpdotdev/consumer-repo",
+                    "GITHUB_WORKSPACE": str(repo_root),
+                    "WORKFLOW_CODE_REPOSITORY": "warpdotdev/oz-for-oss",
+                    "WORKFLOW_CODE_PATH": "__oz_shared",
+                },
+                clear=False,
+            ):
+                self.assertEqual(
+                    skill_spec("implement-issue"),
+                    "warpdotdev/consumer-repo:.agents/skills/implement-issue/SKILL.md",
+                )
+                self.assertEqual(
+                    skill_file_path("implement-issue"),
+                    ".agents/skills/implement-issue/SKILL.md",
+                )
 
-    @patch.dict(os.environ, {"GITHUB_REPOSITORY": "warpdotdev/oz-oss-testbed"}, clear=False)
+    def test_falls_back_to_workflow_repo_skill_when_consumer_repo_lacks_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo_root = Path(tempdir)
+            skill_path = repo_root / "__oz_shared/.agents/skills/implement-issue/SKILL.md"
+            skill_path.parent.mkdir(parents=True)
+            skill_path.write_text("# implement issue\n", encoding="utf-8")
+            with patch.dict(
+                os.environ,
+                {
+                    "GITHUB_REPOSITORY": "warpdotdev/consumer-repo",
+                    "GITHUB_WORKSPACE": str(repo_root),
+                    "WORKFLOW_CODE_REPOSITORY": "warpdotdev/oz-for-oss",
+                    "WORKFLOW_CODE_PATH": "__oz_shared",
+                },
+                clear=False,
+            ):
+                self.assertEqual(
+                    skill_spec("implement-issue"),
+                    "warpdotdev/oz-for-oss:.agents/skills/implement-issue/SKILL.md",
+                )
+                self.assertEqual(
+                    skill_file_path("implement-issue"),
+                    "__oz_shared/.agents/skills/implement-issue/SKILL.md",
+                )
+
     def test_preserves_relative_skill_file_path(self) -> None:
-        self.assertEqual(
-            skill_spec(".agents/skills/review-pr/SKILL.md"),
-            "warpdotdev/oz-oss-testbed:.agents/skills/review-pr/SKILL.md",
-        )
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo_root = Path(tempdir)
+            skill_path = repo_root / ".agents/skills/review-pr/SKILL.md"
+            skill_path.parent.mkdir(parents=True)
+            skill_path.write_text("# review pr\n", encoding="utf-8")
+            with patch.dict(
+                os.environ,
+                {
+                    "GITHUB_REPOSITORY": "warpdotdev/oz-oss-testbed",
+                    "GITHUB_WORKSPACE": str(repo_root),
+                },
+                clear=False,
+            ):
+                self.assertEqual(
+                    skill_spec(".agents/skills/review-pr/SKILL.md"),
+                    "warpdotdev/oz-oss-testbed:.agents/skills/review-pr/SKILL.md",
+                )
+                self.assertEqual(
+                    skill_file_path(".agents/skills/review-pr/SKILL.md"),
+                    ".agents/skills/review-pr/SKILL.md",
+                )
 
     def test_preserves_already_qualified_skill_spec(self) -> None:
         qualified = "warpdotdev/oz-oss-testbed:.agents/skills/create-tech-spec/SKILL.md"
