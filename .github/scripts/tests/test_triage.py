@@ -196,6 +196,23 @@ class ResolveIssueNumberOverrideTest(unittest.TestCase):
             "84",
         )
 
+class TriageWorkflowGuardsTest(unittest.TestCase):
+    def _normalized_workflow_text(self, filename: str) -> str:
+        workflow_path = Path(__file__).resolve().parents[2] / "workflows" / filename
+        return " ".join(workflow_path.read_text(encoding="utf-8").split())
+
+    def test_reusable_workflow_ignores_bot_issue_comment_events(self) -> None:
+        self.assertIn(
+            "if: >- github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot'",
+            self._normalized_workflow_text("triage-new-issues.yml"),
+        )
+
+    def test_local_workflow_ignores_bot_issue_comment_events(self) -> None:
+        self.assertIn(
+            "github.event_name == 'issue_comment' && !github.event.issue.pull_request && github.event.comment.user.type != 'Bot' && (",
+            self._normalized_workflow_text("triage-new-issues-local.yml"),
+        )
+
 
 class FormatIssueCommentsTest(unittest.TestCase):
     def test_can_exclude_triggering_comment(self) -> None:
