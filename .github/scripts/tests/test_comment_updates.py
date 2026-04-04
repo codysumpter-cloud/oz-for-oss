@@ -13,6 +13,13 @@ class CommentUpdateTest(unittest.TestCase):
         self.assertIn("Sharing session at: https://example.test/session/123", updated)
         self.assertIn("I created a spec PR for this issue: https://example.test/pr/1", updated)
         self.assertTrue(updated.endswith(metadata))
+    def test_replaces_existing_session_link_when_url_changes(self) -> None:
+        metadata = "<!-- meta -->"
+        existing = build_comment_body("@alice\n\nOz is working on this issue.\n\nSharing session at: https://example.test/session/123", metadata)
+        updated = append_comment_sections(existing, metadata, ["View the Oz converation: https://example.test/conversation/456"])
+        self.assertNotIn("https://example.test/session/123", updated)
+        self.assertIn("View the Oz converation: https://example.test/conversation/456", updated)
+        self.assertTrue(updated.endswith(metadata))
     def test_progress_comment_keeps_history_in_single_comment(self) -> None:
         github = FakeGitHubClient()
         progress = WorkflowProgressComment(
@@ -33,6 +40,24 @@ class CommentUpdateTest(unittest.TestCase):
         self.assertIn("Oz is starting work on product and tech specs for this issue.", body)
         self.assertIn("Sharing session at: https://example.test/session/123", body)
         self.assertIn("I created a spec PR for this issue: https://example.test/pr/1", body)
+    def test_progress_comment_replaces_session_link_when_run_moves_to_conversation(self) -> None:
+        github = FakeGitHubClient()
+        progress = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="create-spec-from-issue",
+            requester_login="alice",
+        )
+        progress.start("Oz is starting work on product and tech specs for this issue.")
+        progress.record_session_link("https://example.test/session/123")
+        progress.record_session_link("https://example.test/conversation/456")
+
+        self.assertEqual(len(github.comments), 1)
+        body = github.comments[0]["body"]
+        self.assertNotIn("https://example.test/session/123", body)
+        self.assertIn("View the Oz converation: https://example.test/conversation/456", body)
 
     def test_separate_runs_create_separate_comments(self) -> None:
         github = FakeGitHubClient()

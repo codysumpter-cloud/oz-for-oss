@@ -202,18 +202,37 @@ def build_comment_body(content: str, metadata: str) -> str:
         return metadata
     return content
 
+_PROGRESS_LINK_PREFIXES = (
+    "Sharing session at: ",
+    "View the Oz converation: ",
+)
+
+
+def _format_progress_link_section(session_link: str) -> str:
+    normalized_link = session_link.strip()
+    if "/conversation/" in normalized_link:
+        return f"View the Oz converation: {normalized_link}"
+    return f"Sharing session at: {normalized_link}"
+
 
 def append_comment_sections(existing_body: str, metadata: str, sections: list[str]) -> str:
     content, metadata = split_comment_body(existing_body, metadata)
     normalized_sections = [section.strip() for section in sections if section and section.strip()]
     if not content:
         return build_comment_body("\n\n".join(normalized_sections), metadata)
-
-    updated = content
+    updated_sections = [section.strip() for section in content.split("\n\n") if section.strip()]
     for section in normalized_sections:
-        if section not in updated:
-            updated = f"{updated}\n\n{section}"
-    return build_comment_body(updated, metadata)
+        if section.startswith(_PROGRESS_LINK_PREFIXES):
+            updated_sections = [
+                existing_section
+                for existing_section in updated_sections
+                if not existing_section.startswith(_PROGRESS_LINK_PREFIXES)
+            ]
+            updated_sections.append(section)
+            continue
+        if section not in updated_sections:
+            updated_sections.append(section)
+    return build_comment_body("\n\n".join(updated_sections), metadata)
 
 
 def resolve_oz_assigner_login(
@@ -311,7 +330,7 @@ class WorkflowProgressComment:
     def record_session_link(self, session_link: str) -> None:
         if not session_link.strip():
             return
-        self._append_sections([f"Sharing session at: {session_link.strip()}"])
+        self._append_sections([_format_progress_link_section(session_link)])
 
     def complete(self, status_line: str) -> None:
         self._append_sections([status_line])
