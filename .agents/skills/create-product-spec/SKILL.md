@@ -46,7 +46,8 @@ If a triggering comment or other workflow-provided comment context is present, t
 6. If design context such as a Figma link is present in the issue description or comments, include it. If no design context exists, make that absence explicit rather than silently omitting it.
 7. Do not include implementation details, file-level changes, or technical design. Those belong in the tech spec.
 8. Do not implement the feature or modify production code as part of this task. Limit changes to the product spec artifact. Treat temporary context files such as `issue_comments.txt` as scratch input only and do not commit them.
-9. Default behavior: do not stage files, create commits, push branches, open pull requests, or use the GitHub CLI. If the prompt explicitly says you are running in a cloud-environment workflow where the caller cannot read your local diff and instructs you to publish a named branch, you may commit and push exactly the requested spec changes to that branch, but still do not open or update the pull request yourself unless the prompt explicitly asks for it.
+9. Do not include issue number references (e.g. `(#N)`, `Refs #N`) in commit messages. The issue is already linked in the PR.
+10. Default behavior: do not stage files, create commits, push branches, open pull requests, or use the GitHub CLI. If the prompt explicitly says you are running in a cloud-environment workflow where the caller cannot read your local diff and instructs you to publish a named branch, you may commit and push exactly the requested spec changes to that branch, but still do not open or update the pull request yourself unless the prompt explicitly asks for it.
 10. In your final response, provide a brief summary of the product spec and call out any assumptions or open questions so the workflow can reuse that summary when creating the PR.
 
 ## Output expectations
