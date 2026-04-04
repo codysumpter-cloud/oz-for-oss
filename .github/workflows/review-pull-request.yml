@@ -51,6 +51,7 @@ jobs:
         uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.OZ_MGMT_GHA_APP_ID }}
+          owner: ${{ github.repository_owner }}
           private-key: ${{ secrets.OZ_MGMT_GHA_PRIVATE_KEY }}
       - name: Checkout repo
         uses: actions/checkout@v4
