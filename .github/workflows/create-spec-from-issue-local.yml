@@ -1,0 +1,37 @@
+name: Create Spec from Issue (Local)
+on:
+  issues:
+    types: [assigned, labeled]
+  issue_comment:
+    types: [created]
+concurrency:
+  group: create-spec-issue-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+jobs:
+  create_spec:
+    if: >-
+      (
+        github.event_name == 'issues' &&
+        github.event.action == 'assigned' &&
+        github.event.assignee.login == 'oz-agent' &&
+        contains(github.event.issue.labels.*.name, 'ready-to-spec')
+      ) || (
+        github.event_name == 'issues' &&
+        github.event.action == 'labeled' &&
+        github.event.label.name == 'ready-to-spec' &&
+        contains(github.event.issue.assignees.*.login, 'oz-agent')
+      ) || (
+        github.event_name == 'issue_comment' &&
+        !github.event.issue.pull_request &&
+        contains(github.event.issue.labels.*.name, 'ready-to-spec') &&
+        contains(github.event.comment.body, '@oz-agent') &&
+        contains(fromJSON('["COLLABORATOR","MEMBER","OWNER"]'), github.event.comment.author_association)
+      )
+    name: Create spec diff
+    permissions:
+      contents: write
+      id-token: write
+      issues: write
+      pull-requests: write
+    uses: ./.github/workflows/create-spec-from-issue.yml
+    secrets: inherit

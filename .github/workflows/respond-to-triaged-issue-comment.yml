@@ -1,12 +1,6 @@
 name: Respond to Triaged Issue Comment
 on:
   workflow_call:
-    inputs:
-      _skip_event_filter:
-        description: Bypass event-based job conditions (set automatically for workflow_call)
-        required: false
-        default: 'true'
-        type: string
     secrets:
       OZ_MGMT_GHA_APP_ID:
         required: true
@@ -14,22 +8,8 @@ on:
         required: true
       WARP_API_KEY:
         required: true
-  issue_comment:
-    types: [created]
-concurrency:
-  group: respond-to-triaged-issue-comment-${{ github.event.comment.id || github.run_id }}
-  cancel-in-progress: false
 jobs:
   respond_inline:
-    if: >-
-      inputs._skip_event_filter == 'true' || (
-        github.event_name == 'issue_comment' &&
-        !github.event.issue.pull_request &&
-        contains(github.event.comment.body, '@oz-agent') &&
-        contains(github.event.issue.labels.*.name, 'triaged') &&
-        !contains(github.event.issue.labels.*.name, 'ready-to-spec') &&
-        !contains(github.event.issue.labels.*.name, 'ready-to-implement')
-      )
     runs-on: ubuntu-slim
     permissions:
       contents: read
