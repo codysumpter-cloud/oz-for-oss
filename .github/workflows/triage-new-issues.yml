@@ -21,6 +21,8 @@ on:
         required: true
 jobs:
   triage_issues:
+    if: >-
+      github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot'
     runs-on: ubuntu-slim
     permissions:
       contents: read
