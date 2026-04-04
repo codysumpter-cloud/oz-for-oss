@@ -41,10 +41,11 @@ If `spec_context.md` exists, it contains the approved spec context (product spec
 4. Implement the requested behavior in the checked-out branch, keeping the changes scoped to the issue and aligned with any approved spec context.
 5. Keep specs aligned with implementation. If the checked-out branch contains corresponding spec files under `specs/issue-<issue-number>/` and the implementation reveals material changes to behavior, edge cases, validation expectations, or technical design, update the relevant spec files in the same diff instead of leaving them stale.
 6. Do not let unresolved issue comments silently override approved spec context. If a comment suggests a different direction than the approved plan, make the smallest reasonable implementation choice and capture the discrepancy in `implementation_summary.md`.
-7. Run the most relevant validation available in the repository for the files you changed. Prefer existing build, test, lint, or typecheck commands documented in the repository.
-8. Write a concise markdown summary for the workflow to reuse in `implementation_summary.md` at the repository root. Include what changed, how it was validated, and any remaining assumptions, spec updates, or follow-up notes.
-9. Treat `issue_comments.txt`, `spec_context.md`, and `implementation_summary.md` as temporary workflow files only. Do not include them in the final diff.
-10. Default behavior: do not stage files, create commits, push branches, open pull requests, or use the GitHub CLI. If the prompt explicitly says you are running in a cloud-environment workflow where the caller cannot read your local diff and instructs you to publish a named branch, you may commit and push exactly the requested implementation changes to that branch, but still do not open or update the pull request yourself unless the prompt explicitly asks for it.
+7. Do not include issue number references (e.g. `(#N)`, `Refs #N`) in commit messages. The issue is already linked in the PR body, the branch name, and the linked issue itself.
+8. Run the most relevant validation available in the repository for the files you changed. Prefer existing build, test, lint, or typecheck commands documented in the repository.
+9. Write a concise markdown summary for the workflow to reuse in `implementation_summary.md` at the repository root. Include what changed, how it was validated, and any remaining assumptions, spec updates, or follow-up notes.
+10. Treat `issue_comments.txt`, `spec_context.md`, and `implementation_summary.md` as temporary workflow files only. Do not include them in the final diff.
+11. Default behavior: do not stage files, create commits, push branches, open pull requests, or use the GitHub CLI. If the prompt explicitly says you are running in a cloud-environment workflow where the caller cannot read your local diff and instructs you to publish a named branch, you may commit and push exactly the requested implementation changes to that branch, but still do not open or update the pull request yourself unless the prompt explicitly asks for it.
 
 ## Output expectations
 

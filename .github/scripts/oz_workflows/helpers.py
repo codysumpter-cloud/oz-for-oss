@@ -529,6 +529,7 @@ def coauthor_prompt_lines(coauthor_line: str) -> str:
         f"- Before creating any commit, configure the local git author and committer as `{_OZ_COMMIT_AUTHOR_NAME} <{_OZ_COMMIT_AUTHOR_EMAIL}>`.",
         f"- Run `git config user.name \"{_OZ_COMMIT_AUTHOR_NAME}\"` and `git config user.email \"{_OZ_COMMIT_AUTHOR_EMAIL}\"` before committing.",
         "- Do not derive the git author or committer from the triggering issue, PR, comment, sender, or authenticated GitHub user.",
+        "- Do not include issue number references (e.g. `(#N)`, `Refs #N`) in commit messages. The issue is already linked in the PR.",
     ]
     if coauthor_line:
         lines.extend(
