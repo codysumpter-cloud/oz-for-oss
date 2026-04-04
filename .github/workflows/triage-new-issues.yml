@@ -47,6 +47,9 @@ concurrency:
   cancel-in-progress: false
 jobs:
   triage_issues:
+    # A needs-info reply by the original reporter triggers re-triage
+    # even if it mentions @oz-agent, because the respond-to-triaged
+    # workflow handles explicit mentions on triaged issues separately.
     if: |
       inputs._skip_event_filter == 'true' || (
         github.event_name != 'issue_comment' &&
@@ -60,9 +63,6 @@ jobs:
             !contains(github.event.issue.labels.*.name, 'triaged')
           ) ||
           (
-            # A needs-info reply by the original reporter triggers re-triage
-            # even if it mentions @oz-agent, because the respond-to-triaged
-            # workflow will handle explicit mentions on triaged issues.
             contains(github.event.issue.labels.*.name, 'needs-info') &&
             github.event.comment.user.login == github.event.issue.user.login &&
             !contains(github.event.comment.body, '@oz-agent')
