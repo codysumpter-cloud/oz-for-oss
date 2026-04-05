@@ -19,6 +19,7 @@ GZIP_BASE64_ENCODING = "gzip+base64"
 def new_transport_token() -> str:
     return uuid.uuid4().hex
 
+
 def encode_transport_payload(decoded_payload: str, *, encoding: str = GZIP_BASE64_ENCODING) -> str:
     payload_bytes = decoded_payload.encode("utf-8")
     if encoding == BASE64_ENCODING:
