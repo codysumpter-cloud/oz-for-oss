@@ -30,11 +30,11 @@ jobs:
           owner: ${{ github.repository_owner }}
           private-key: ${{ secrets.OZ_MGMT_GHA_PRIVATE_KEY }}
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Checkout workflow code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ${{ env.WORKFLOW_CODE_REPOSITORY }}
           ref: ${{ env.WORKFLOW_CODE_REF }}
@@ -57,7 +57,7 @@ jobs:
             echo EOF
           } >> "$GITHUB_OUTPUT"
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
       - name: Install Python workflow dependencies

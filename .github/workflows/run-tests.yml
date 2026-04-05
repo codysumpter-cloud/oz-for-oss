@@ -31,12 +31,12 @@ jobs:
           echo "has_code_changes=$has_code" >> "$GITHUB_OUTPUT"
       - name: Checkout PR
         if: steps.filter.outputs.has_code_changes == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: refs/pull/${{ inputs.pr_number }}/merge
       - name: Set up Python
         if: steps.filter.outputs.has_code_changes == 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: 'pip'
