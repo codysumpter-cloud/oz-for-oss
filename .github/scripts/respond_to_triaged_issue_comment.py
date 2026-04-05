@@ -120,8 +120,9 @@ def main() -> None:
             - `analysis_comment` must be a direct reply suitable for posting as Oz's inline response.
             - Do not include HTML metadata or transport markup inside `analysis_comment`.
             - Validate `issue_response.json` with `jq`.
+            - After validating the JSON, gzip the UTF-8 contents of `issue_response.json` and then base64 encode the compressed bytes.
             - After validating the JSON, post exactly one temporary issue comment on issue #{issue_number} whose body is a single HTML comment in this exact format:
-              <!-- oz-workflow-transport {{"token":"{transport_token}","kind":"issue-comment-response","encoding":"base64","payload":"<BASE64_OF_RESPONSE_JSON>"}} -->
+              <!-- oz-workflow-transport {{"token":"{transport_token}","kind":"issue-comment-response","encoding":"gzip+base64","payload":"<BASE64_OF_GZIPPED_RESPONSE_JSON>"}} -->
             """
         ).strip()
 

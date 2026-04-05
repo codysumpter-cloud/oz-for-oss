@@ -117,8 +117,9 @@ def main() -> None:
               {{"matched": boolean, "issue_number": number | null, "rationale": string, "close_comment": string}}
             - If there is no clear match, set `close_comment` to a concise PR comment explaining that this {change_kind} PR could not be matched to an issue marked `{required_label}` and include this contribution docs link: {contribution_docs_url}
             - Do not close the PR yourself.
+            - Gzip the UTF-8 JSON payload before base64 encoding it for the transport comment.
             - Post exactly one temporary issue comment on PR #{pr_number} whose body is a single HTML comment in this exact format:
-              <!-- oz-workflow-transport {{"token":"{transport_token}","kind":"issue-association","encoding":"base64","payload":"<BASE64_OF_JSON>"}} -->
+              <!-- oz-workflow-transport {{"token":"{transport_token}","kind":"issue-association","encoding":"gzip+base64","payload":"<BASE64_OF_GZIPPED_JSON>"}} -->
             """
         ).strip()
 
