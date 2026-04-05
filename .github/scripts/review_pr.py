@@ -101,8 +101,9 @@ def main() -> None:
             - The annotated diff must use the same prefixes as the old workflow: `[OLD:n]`, `[NEW:n]`, and `[OLD:n,NEW:m]`.
             - If spec context is present above, write it to `spec_context.md` before reviewing so the repository's `check-impl-against-spec` skill can be used.
             - Do not post the final review directly.
+            - After you create and validate `review.json`, gzip the UTF-8 contents of that file and then base64 encode the compressed bytes.
             - After you create and validate `review.json`, post exactly one temporary issue comment on PR #{pr_number} whose body is a single HTML comment in this exact format:
-              <!-- oz-workflow-transport {{"token":"{transport_token}","kind":"review-json","encoding":"base64","payload":"<BASE64_OF_REVIEW_JSON>"}} -->
+              <!-- oz-workflow-transport {{"token":"{transport_token}","kind":"review-json","encoding":"gzip+base64","payload":"<BASE64_OF_GZIPPED_REVIEW_JSON>"}} -->
             """
         ).strip()
 

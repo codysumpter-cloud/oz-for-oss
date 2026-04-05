@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import gzip
 import json
 import re
 import time
@@ -11,10 +12,33 @@ from github.Repository import Repository
 
 
 TRANSPORT_PATTERN = re.compile(r"<!-- oz-workflow-transport (?P<payload>\{.*\}) -->", re.DOTALL)
+BASE64_ENCODING = "base64"
+GZIP_BASE64_ENCODING = "gzip+base64"
 
 
 def new_transport_token() -> str:
     return uuid.uuid4().hex
+
+def encode_transport_payload(decoded_payload: str, *, encoding: str = GZIP_BASE64_ENCODING) -> str:
+    payload_bytes = decoded_payload.encode("utf-8")
+    if encoding == BASE64_ENCODING:
+        encoded_bytes = payload_bytes
+    elif encoding == GZIP_BASE64_ENCODING:
+        encoded_bytes = gzip.compress(payload_bytes, compresslevel=9, mtime=0)
+    else:
+        raise ValueError(f"Unsupported transport encoding: {encoding}")
+    return base64.b64encode(encoded_bytes).decode("utf-8")
+
+
+def decode_transport_payload(encoded_payload: str, *, encoding: str) -> str:
+    decoded_bytes = base64.b64decode(encoded_payload, validate=True)
+    if encoding == BASE64_ENCODING:
+        payload_bytes = decoded_bytes
+    elif encoding == GZIP_BASE64_ENCODING:
+        payload_bytes = gzip.decompress(decoded_bytes)
+    else:
+        raise ValueError(f"Unsupported transport encoding: {encoding}")
+    return payload_bytes.decode("utf-8")
 
 
 def parse_transport_comment(body: str) -> dict[str, Any] | None:
@@ -25,9 +49,10 @@ def parse_transport_comment(body: str) -> dict[str, Any] | None:
         payload = json.loads(match.group("payload"))
         if not isinstance(payload, dict):
             return None
-        encoded = payload.get("payload", "")
-        decoded = base64.b64decode(encoded, validate=True).decode("utf-8")
-    except (TypeError, ValueError, json.JSONDecodeError, binascii.Error, UnicodeDecodeError):
+        encoded = str(payload.get("payload", "") or "")
+        encoding = str(payload.get("encoding") or BASE64_ENCODING).strip().lower()
+        decoded = decode_transport_payload(encoded, encoding=encoding)
+    except (TypeError, ValueError, json.JSONDecodeError, binascii.Error, UnicodeDecodeError, OSError):
         return None
     payload["decoded_payload"] = decoded
     return payload

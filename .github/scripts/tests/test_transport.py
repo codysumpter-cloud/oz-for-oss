@@ -1,17 +1,23 @@
 from __future__ import annotations
 
-import base64
 import json
 import unittest
-from oz_workflows.transport import parse_transport_comment, poll_for_transport_payload
+
+from oz_workflows.transport import (
+    BASE64_ENCODING,
+    GZIP_BASE64_ENCODING,
+    encode_transport_payload,
+    parse_transport_comment,
+    poll_for_transport_payload,
+)
 
 
 def transport_comment(payload: str) -> str:
     return f"<!-- oz-workflow-transport {payload} -->"
 
 
-def encoded_payload(payload: dict[str, str]) -> str:
-    return base64.b64encode(json.dumps(payload).encode("utf-8")).decode("utf-8")
+def encoded_payload(payload: dict[str, object], *, encoding: str = GZIP_BASE64_ENCODING) -> str:
+    return encode_transport_payload(json.dumps(payload), encoding=encoding)
 
 
 class ParseTransportCommentTest(unittest.TestCase):
@@ -21,14 +27,44 @@ class ParseTransportCommentTest(unittest.TestCase):
                 {
                     "token": "abc",
                     "kind": "review-json",
-                    "encoding": "base64",
-                    "payload": encoded_payload({"hello": "world"}),
+                    "encoding": BASE64_ENCODING,
+                    "payload": encoded_payload({"hello": "world"}, encoding=BASE64_ENCODING),
                 }
             )
         )
         parsed = parse_transport_comment(body)
         self.assertIsNotNone(parsed)
         self.assertEqual(parsed["decoded_payload"], '{"hello": "world"}')
+
+    def test_defaults_missing_encoding_to_base64(self) -> None:
+        body = transport_comment(
+            json.dumps(
+                {
+                    "token": "abc",
+                    "kind": "review-json",
+                    "payload": encoded_payload({"hello": "world"}, encoding=BASE64_ENCODING),
+                }
+            )
+        )
+        parsed = parse_transport_comment(body)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["decoded_payload"], '{"hello": "world"}')
+
+    def test_decodes_gzip_base64_payload(self) -> None:
+        body = transport_comment(
+            json.dumps(
+                {
+                    "token": "abc",
+                    "kind": "review-json",
+                    "encoding": GZIP_BASE64_ENCODING,
+                    "payload": encoded_payload({"hello": "world"}, encoding=GZIP_BASE64_ENCODING),
+                }
+            )
+        )
+        parsed = parse_transport_comment(body)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["decoded_payload"], '{"hello": "world"}')
+
     def test_returns_none_for_malformed_json(self) -> None:
         body = transport_comment('{"token": "abc", "kind": }')
         self.assertIsNone(parse_transport_comment(body))
@@ -39,12 +75,45 @@ class ParseTransportCommentTest(unittest.TestCase):
                 {
                     "token": "abc",
                     "kind": "review-json",
-                    "encoding": "base64",
+                    "encoding": BASE64_ENCODING,
                     "payload": "%%%not-base64%%%",
                 }
             )
         )
         self.assertIsNone(parse_transport_comment(body))
+
+    def test_returns_none_for_invalid_gzip_payload(self) -> None:
+        body = transport_comment(
+            json.dumps(
+                {
+                    "token": "abc",
+                    "kind": "review-json",
+                    "encoding": GZIP_BASE64_ENCODING,
+                    "payload": encoded_payload({"hello": "world"}, encoding=BASE64_ENCODING),
+                }
+            )
+        )
+        self.assertIsNone(parse_transport_comment(body))
+
+    def test_gzip_encoding_reduces_large_review_like_payload(self) -> None:
+        review_payload = {
+            "summary": "Request changes",
+            "comments": [
+                {
+                    "path": "foo.py",
+                    "line": index + 1,
+                    "side": "RIGHT",
+                    "body": (
+                        "⚠️ [IMPORTANT] "
+                        + "This review comment repeats similar context and suggestion text. " * 6
+                    ),
+                }
+                for index in range(40)
+            ],
+        }
+        plain = encoded_payload(review_payload, encoding=BASE64_ENCODING)
+        compressed = encoded_payload(review_payload, encoding=GZIP_BASE64_ENCODING)
+        self.assertLess(len(compressed), len(plain))
 
 
 class PollForTransportPayloadTest(unittest.TestCase):
@@ -54,8 +123,8 @@ class PollForTransportPayloadTest(unittest.TestCase):
                 {
                     "token": "abc",
                     "kind": "review-json",
-                    "encoding": "base64",
-                    "payload": encoded_payload({"hello": "world"}),
+                    "encoding": BASE64_ENCODING,
+                    "payload": encoded_payload({"hello": "world"}, encoding=BASE64_ENCODING),
                 }
             )
         )
@@ -64,7 +133,7 @@ class PollForTransportPayloadTest(unittest.TestCase):
                 {
                     "token": "abc",
                     "kind": "review-json",
-                    "encoding": "base64",
+                    "encoding": BASE64_ENCODING,
                     "payload": "%%%not-base64%%%",
                 }
             )

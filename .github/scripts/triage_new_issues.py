@@ -267,8 +267,9 @@ def process_issue(
         - Do not include the preserved original-report appendix in `issue_body`; the workflow will append it automatically.
         - Validate `triage_result.json` with `jq`.
         - Do not update GitHub directly beyond the transport comment below.
+        - After validating the JSON, gzip the UTF-8 contents of `triage_result.json` and then base64 encode the compressed bytes.
         - After validating the JSON, post exactly one temporary issue comment on issue #{issue_number} whose body is a single HTML comment in this exact format:
-          <!-- oz-workflow-transport {{"token":"{transport_token}","kind":"issue-triage","encoding":"base64","payload":"<BASE64_OF_TRIAGE_JSON>"}} -->
+          <!-- oz-workflow-transport {{"token":"{transport_token}","kind":"issue-triage","encoding":"gzip+base64","payload":"<BASE64_OF_GZIPPED_TRIAGE_JSON>"}} -->
         """
     ).strip()
 
