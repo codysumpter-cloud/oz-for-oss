@@ -1,7 +1,7 @@
 name: PR Hooks
 on:
   pull_request_target:
-    types: [opened, reopened, ready_for_review, synchronize]
+    types: [opened, reopened, ready_for_review, synchronize, review_requested, labeled]
   issue_comment:
     types: [created]
   workflow_dispatch:
@@ -50,7 +50,11 @@ jobs:
   enforce_issue_state:
     if: >-
       github.event_name == 'pull_request_target' &&
-      github.event.action != 'synchronize' &&
+      (
+        github.event.action == 'opened' ||
+        github.event.action == 'reopened' ||
+        github.event.action == 'ready_for_review'
+      ) &&
       github.event.pull_request.state == 'open'
     uses: ./.github/workflows/enforce-pr-issue-state.yml
     with:
@@ -61,7 +65,11 @@ jobs:
     needs: [enforce_issue_state]
     if: >-
       github.event_name == 'pull_request_target' &&
-      github.event.action != 'synchronize' &&
+      (
+        github.event.action == 'opened' ||
+        github.event.action == 'reopened' ||
+        github.event.action == 'ready_for_review'
+      ) &&
       github.event.pull_request.state == 'open' &&
       needs.enforce_issue_state.outputs.allow_review == 'true'
     uses: ./.github/workflows/run-tests.yml
@@ -79,10 +87,41 @@ jobs:
     needs: [enforce_issue_state]
     if: >-
       github.event_name == 'pull_request_target' &&
-      github.event.action != 'synchronize' &&
+      (
+        github.event.action == 'opened' ||
+        github.event.action == 'reopened' ||
+        github.event.action == 'ready_for_review'
+      ) &&
       github.event.pull_request.draft == false &&
       !startsWith(github.event.pull_request.head.ref, 'cherrypick') &&
       needs.enforce_issue_state.outputs.allow_review == 'true'
+    uses: ./.github/workflows/review-pull-request.yml
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+      trigger_source: pull_request_target
+      requester: ${{ github.actor }}
+    secrets: inherit
+  review_pr_on_explicit_request:
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.pull_request.state == 'open' &&
+      !startsWith(github.event.pull_request.head.ref, 'cherrypick') &&
+      (
+        (
+          github.event.action == 'review_requested' &&
+          (
+            github.event.requested_reviewer.login == 'warp-agent' ||
+            github.event.requested_reviewer.login == 'oz-agent'
+          )
+        ) ||
+        (
+          github.event.action == 'labeled' &&
+          (
+            github.event.label.name == 'warp-review' ||
+            github.event.label.name == 'oz-review'
+          )
+        )
+      )
     uses: ./.github/workflows/review-pull-request.yml
     with:
       pr_number: ${{ github.event.pull_request.number }}
