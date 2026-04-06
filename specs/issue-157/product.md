@@ -41,23 +41,27 @@ Figma: none provided. This is a backend/workflow change with no UI beyond GitHub
 The single triage comment progresses through three stages. Each stage replaces the previous content of the comment (not appended):
 
 **Stage 1 — Started:**
-> @{requester}
+> @{reporter}
 >
 > Oz is starting to work on triaging this issue.
 
 **Stage 2 — In progress (session link available):**
-> @{requester}
+> @{reporter}
 >
-> Oz is triaging this issue. You can follow the triage session on [Warp]({session_url}).
+> Oz is triaging this issue. You can follow [the triage session on Warp]({session_url}).
 
 **Stage 3 — Completed:**
-> @{requester}
+> @{reporter}
 >
-> Oz has completed the triage of this issue. You can view the triage session on [Warp]({session_url}). The triage concluded: {summary}.
+> Oz has completed the triage of this issue. You can view [the triage session on Warp]({session_url}).
+>
+> The triage concluded that {summary}.
 >
 > ### Follow-up questions
 >
 > {numbered list of questions, with @reporter mention and context text}
+>
+> **— or —**
 >
 > ### Potential duplicates
 >
@@ -67,18 +71,19 @@ The single triage comment progresses through three stages. Each stage replaces t
 
 #### Conditional sections in Stage 3
 
-- The **Follow-up questions** section only appears if the triage result includes follow-up questions. When present, it includes the `@reporter` mention and the existing contextual text ("Thanks for the report. I'm missing a few issue-specific details...").
+- The **Follow-up questions** and **Potential duplicates** sections are **mutually exclusive** — a triage result must never contain both. The triage agent skill must enforce this: if duplicate issues are identified, follow-up questions are suppressed, and vice versa.
+- The **Follow-up questions** section only appears if the triage result includes follow-up questions and no duplicates were identified. When present, it includes the `@reporter` mention and the existing contextual text ("Thanks for the report. I'm missing a few issue-specific details...").
 - The **Potential duplicates** section only appears if the triage result identifies duplicate issues. When present, it includes the existing contextual text ("This issue appears likely to overlap...").
 - The **disclaimer** always appears at the end of the completed comment.
 - If neither follow-up questions nor duplicates are present, the comment ends after the summary sentence and the disclaimer.
 
 #### Session link formatting
 
-All session links use markdown syntax: `[Warp]({url})` for conversation links and `[Warp]({url})` for sharing links. The link text is "Warp" in both cases.
+All session links use markdown syntax with expanded link text: `[the triage session on Warp]({url})`. The link text is always "the triage session on Warp" regardless of whether the URL is a conversation link or a sharing link.
 
 #### Re-triage behavior
 
-When the triage workflow runs again on the same issue (e.g., triggered by a new comment), the existing consolidated comment is found by its metadata marker and updated in place. The comment returns to Stage 1 and progresses through the stages again. Follow-up question and duplicate sections from a previous run are replaced by the new triage result.
+When the triage workflow runs again on the same issue (e.g., triggered by a new comment), a **new** consolidated comment is created rather than editing the existing comment in place. The new comment starts at Stage 1 and progresses through the stages as usual. The previous triage comment remains in the issue timeline for history.
 
 #### Cleanup of legacy comments
 
@@ -90,11 +95,11 @@ On re-triage, any orphaned standalone follow-up or duplicate comments from previ
 2. A triage run that produces neither follow-up questions nor duplicates results in exactly one bot comment.
 3. The single comment progresses through the three defined stages during the triage run.
 4. Session links in the comment use markdown `[Warp](url)` syntax, not raw URLs.
-5. The `@requester` mention appears at the top of the comment in all stages.
+5. The `@reporter` mention appears at the top of the comment in all stages.
 6. The triage disclaimer appears exactly once, at the bottom of the completed Stage 3 comment.
 7. Follow-up questions include the `@reporter` mention and the contextual preamble text.
 8. Duplicate detection results include issue links, titles, and similarity reasons.
-9. Re-triage updates the same comment in place; no new comments are created.
+9. Re-triage creates a new consolidated comment rather than editing the previous one in place.
 10. Existing standalone follow-up and duplicate comments from prior runs are cleaned up on re-triage.
 11. All existing tests continue to pass (with updates to reflect the new consolidated structure).
 
@@ -108,5 +113,5 @@ On re-triage, any orphaned standalone follow-up or duplicate comments from previ
 
 ### Open questions
 
-1. Should Stage 2 message text change if the session link is a "sharing" link vs. a "conversation" link, or should both just say "Warp"? The current code has different prefixes for these two cases.
-2. When re-triage runs and the previous comment had follow-up questions, should the reply-in-thread guidance text still reference the previous questions, or is a clean replacement sufficient?
+1. ~~Should Stage 2 message text change if the session link is a "sharing" link vs. a "conversation" link, or should both just say "Warp"?~~ **Resolved**: The link text is always "the triage session on Warp" regardless of URL type.
+2. ~~When re-triage runs and the previous comment had follow-up questions, should the reply-in-thread guidance text still reference the previous questions, or is a clean replacement sufficient?~~ **Resolved**: Re-triage creates a new comment; the previous comment remains for history.

@@ -38,12 +38,12 @@ The `WorkflowProgressComment` class uses `append_comment_sections()` to update i
 
 #### 1. Update `_format_progress_link_section()` in `helpers.py`
 
-Change the session link formatting to use markdown link syntax:
+Change the session link formatting to use markdown link syntax with expanded link text. The link text is always "the triage session on Warp" regardless of whether the URL is a conversation link or a sharing link:
 
 ```python
 def _format_progress_link_section(session_link: str) -> str:
     normalized_link = session_link.strip()
-    return f"[Warp]({normalized_link})"
+    return f"[the triage session on Warp]({normalized_link})"
 ```
 
 This returns only the markdown link fragment, not a full sentence. The sentence context will be provided by the callers in the progress comment stages.
@@ -96,7 +96,7 @@ def record_run_session_link(progress: WorkflowProgressComment, run: object) -> N
         return
     link = _format_progress_link_section(session_link)
     progress.replace_body(
-        f"Oz is triaging this issue. You can follow the triage session on {link}."
+        f"Oz is triaging this issue. You can follow {link}."
     )
 ```
 
@@ -120,22 +120,24 @@ parts = []
 if session_link_text:
     parts.append(
         f"Oz has completed the triage of this issue. "
-        f"You can view the triage session on {session_link_text}. "
-        f"The triage concluded: {summary}."
+        f"You can view {session_link_text}.\n\n"
+        f"The triage concluded that {summary}."
     )
 else:
     parts.append(
         f"Oz has completed the triage of this issue. "
-        f"The triage concluded: {summary}."
+        f"The triage concluded that {summary}."
     )
 
 follow_up_questions = extract_follow_up_questions(result)
-if follow_up_questions:
-    parts.append(build_follow_up_section(issue, follow_up_questions))
-
 duplicates = extract_duplicate_of(result, current_issue_number=issue_number)
+
+# Follow-up questions and duplicates are mutually exclusive.
+# If duplicates are found, suppress follow-up questions.
 if duplicates:
     parts.append(build_duplicate_section(issue, duplicates))
+elif follow_up_questions:
+    parts.append(build_follow_up_section(issue, follow_up_questions))
 
 parts.append(TRIAGE_DISCLAIMER)
 progress.replace_body("\n\n".join(parts))
@@ -193,7 +195,11 @@ def build_duplicate_section(issue: Any, duplicates: list[dict[str, Any]]) -> str
     return "\n".join(lines)
 ```
 
-#### 5. Clean up legacy standalone comments on re-triage
+#### 5. Create a new comment on re-triage
+
+When an explicit re-triage is invoked, the `WorkflowProgressComment` should always create a **new** comment rather than finding and editing the existing one. To achieve this, generate a fresh `run_id` for each `WorkflowProgressComment` instance (already the case) and ensure that `_get_or_find_existing_comment()` only matches comments with the exact same `run_id` metadata, not any comment from the same workflow. Since the metadata already includes `run_id`, a new run will naturally create a new comment. The previous run's comment remains in the issue timeline for history.
+
+#### 6. Clean up legacy standalone comments on re-triage
 
 Add a cleanup step at the beginning of `process_issue()` (after creating the `WorkflowProgressComment`) that finds and deletes any orphaned standalone follow-up or duplicate comments from prior runs:
 
@@ -203,13 +209,13 @@ _cleanup_legacy_triage_comments(github, owner, repo, issue)
 
 This function searches for comments containing `issue-triage-follow-up` or `issue-triage-duplicate` metadata markers and deletes them. This handles the migration from old multi-comment behavior to the new consolidated comment.
 
-#### 6. Deprecate `sync_follow_up_comment()` and `sync_duplicate_comment()`
+#### 7. Deprecate `sync_follow_up_comment()` and `sync_duplicate_comment()`
 
 These functions remain in the codebase for now (they are tested and may be useful for other workflows), but are no longer called from `process_issue()`. Add a comment marking them as deprecated. If no other callers exist, they can be removed in a follow-up.
 
 Similarly, `build_follow_up_comment()` and `build_duplicate_comment()` (which produce standalone comment bodies with metadata) are no longer needed by the triage workflow but can be retained for backward compatibility or removed in a follow-up.
 
-#### 7. Track the session link for Stage 3
+#### 8. Track the session link for Stage 3
 
 The session link must be available when building the Stage 3 body. Currently `record_run_session_link()` is called during polling and the link is consumed immediately. To make the link available at Stage 3:
 
@@ -232,7 +238,7 @@ def _record_triage_session_link(progress: WorkflowProgressComment, run: object) 
     progress.session_link = session_link.strip()
     link = _format_progress_link_section(progress.session_link)
     progress.replace_body(
-        f"Oz is triaging this issue. You can follow the triage session on {link}."
+        f"Oz is triaging this issue. You can follow {link}."
     )
 ```
 
@@ -240,13 +246,13 @@ Then at Stage 3, `progress.session_link` is available.
 
 ### End-to-end flow
 
-1. `process_issue()` creates `WorkflowProgressComment` and calls `progress.start("Oz is starting to work on triaging this issue.")`. Comment is created (Stage 1).
-2. `_cleanup_legacy_triage_comments()` removes any orphaned follow-up/duplicate comments from prior runs.
+1. `process_issue()` creates `WorkflowProgressComment` (with a fresh `run_id`) and calls `progress.start("Oz is starting to work on triaging this issue.")`. A **new** comment is created (Stage 1), even if a previous triage comment exists on the issue.
+2. `_cleanup_legacy_triage_comments()` removes any orphaned standalone follow-up/duplicate comments from prior runs.
 3. `run_agent()` starts with `on_poll=lambda run: _record_triage_session_link(progress, run)`. When session link becomes available, the comment is replaced with Stage 2 content.
 4. Agent completes. `poll_for_transport_payload()` retrieves the triage result.
 5. Transport comment is deleted.
 6. `apply_triage_result()` applies labels and updates the issue body (unchanged).
-7. `process_issue()` builds the Stage 3 body by combining the completion message, session link, follow-up questions section (if any), duplicate section (if any), and disclaimer.
+7. `process_issue()` builds the Stage 3 body by combining the completion message, session link, and either the follow-up questions section or the duplicate section (mutually exclusive), plus the disclaimer.
 8. `progress.replace_body()` updates the comment to Stage 3.
 9. `append_summary()` logs the triage result.
 
@@ -256,6 +262,8 @@ Then at Stage 3, `progress.session_link` is available.
 - **Race condition on comment update**: If the poll callback fires while Stage 3 is being written, the comment could be overwritten. This is already the case today and is mitigated by the sequential nature of `poll_for_transport_payload()` completing before Stage 3 runs.
 - **Legacy comment cleanup**: The cleanup function should be defensive — catch exceptions on delete and continue. If a legacy comment can't be deleted, it's not critical.
 - **Session link not available**: If the session link is never populated (e.g., agent errors early), Stage 3 omits the session link gracefully.
+- **Mutual exclusivity enforcement**: The workflow code enforces mutual exclusivity of follow-up questions and duplicates at the comment-building layer. If the triage agent returns both (violating the skill constraint), duplicates take precedence and follow-up questions are suppressed.
+- **Re-triage comment accumulation**: Each re-triage creates a new comment rather than editing in place. Over many re-triages, this could accumulate comments. This is acceptable for auditability and is the same pattern used by other CI/bot workflows. If it becomes noisy, a future change can add optional cleanup of previous triage comments.
 
 ### Testing and validation
 
@@ -275,7 +283,9 @@ Then at Stage 3, `progress.session_link` is available.
 
 7. **`_cleanup_legacy_triage_comments` (new)**: Test that orphaned follow-up and duplicate comments are found and deleted.
 
-8. **Integration test for `process_issue()` comment count**: Mock the full triage flow and assert exactly one comment exists after completion, containing progress, follow-up, and duplicate sections.
+8. **Mutual exclusivity enforcement test** (new): Verify that when both follow-up questions and duplicates are present in the triage result, only the duplicate section appears in the final comment.
+
+9. **Integration test for `process_issue()` comment count**: Mock the full triage flow and assert exactly one new comment is created per triage run, containing progress and either follow-up or duplicate sections (never both).
 
 #### Manual validation
 
@@ -288,3 +298,4 @@ Then at Stage 3, `progress.session_link` is available.
 - Remove `sync_follow_up_comment()`, `sync_duplicate_comment()`, `build_follow_up_comment()`, and `build_duplicate_comment()` once confirmed no other callers depend on them.
 - Consider whether `_PROGRESS_LINK_PREFIXES` and the `append_comment_sections()` link-dedup logic should be simplified now that session links are embedded in stage messages rather than appended as separate sections.
 - Consider applying the markdown link format to non-triage workflows' session links for consistency (separate issue).
+- Consider adding optional cleanup of previous triage progress comments on re-triage if comment accumulation becomes noisy.
