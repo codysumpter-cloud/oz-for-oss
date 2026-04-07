@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import os
 import unittest
 
-from oz_workflows.helpers import append_comment_sections, build_comment_body, WorkflowProgressComment
+from oz_workflows.helpers import (
+    _workflow_run_url,
+    append_comment_sections,
+    build_comment_body,
+    WorkflowProgressComment,
+)
 
 
 class CommentUpdateTest(unittest.TestCase):
@@ -115,6 +121,177 @@ class CommentUpdateTest(unittest.TestCase):
         # cleanup without start should still find and delete run1's comment
         run2.cleanup()
         self.assertEqual(len(github.comments), 0)
+
+
+class WorkflowRunUrlTest(unittest.TestCase):
+    def test_returns_url_when_all_env_vars_set(self) -> None:
+        env = {
+            "GITHUB_SERVER_URL": "https://github.com",
+            "GITHUB_REPOSITORY": "acme/widgets",
+            "GITHUB_RUN_ID": "12345",
+        }
+        for key, value in env.items():
+            os.environ[key] = value
+        try:
+            self.assertEqual(
+                _workflow_run_url(),
+                "https://github.com/acme/widgets/actions/runs/12345",
+            )
+        finally:
+            for key in env:
+                os.environ.pop(key, None)
+
+    def test_returns_empty_when_repository_missing(self) -> None:
+        os.environ.pop("GITHUB_REPOSITORY", None)
+        os.environ["GITHUB_RUN_ID"] = "12345"
+        try:
+            self.assertEqual(_workflow_run_url(), "")
+        finally:
+            os.environ.pop("GITHUB_RUN_ID", None)
+
+    def test_returns_empty_when_run_id_missing(self) -> None:
+        os.environ["GITHUB_REPOSITORY"] = "acme/widgets"
+        os.environ.pop("GITHUB_RUN_ID", None)
+        try:
+            self.assertEqual(_workflow_run_url(), "")
+        finally:
+            os.environ.pop("GITHUB_REPOSITORY", None)
+
+    def test_defaults_server_url_to_github(self) -> None:
+        os.environ.pop("GITHUB_SERVER_URL", None)
+        os.environ["GITHUB_REPOSITORY"] = "acme/widgets"
+        os.environ["GITHUB_RUN_ID"] = "99"
+        try:
+            self.assertEqual(
+                _workflow_run_url(),
+                "https://github.com/acme/widgets/actions/runs/99",
+            )
+        finally:
+            os.environ.pop("GITHUB_REPOSITORY", None)
+            os.environ.pop("GITHUB_RUN_ID", None)
+
+
+class ReportErrorTest(unittest.TestCase):
+    def test_report_error_updates_comment_with_error_message(self) -> None:
+        env = {
+            "GITHUB_SERVER_URL": "https://github.com",
+            "GITHUB_REPOSITORY": "acme/widgets",
+            "GITHUB_RUN_ID": "42",
+        }
+        for key, value in env.items():
+            os.environ[key] = value
+        try:
+            github = FakeGitHubClient()
+            progress = WorkflowProgressComment(
+                github, "acme", "widgets", 7,
+                workflow="test-workflow",
+                requester_login="alice",
+            )
+            progress.start("Oz is starting to work on this.")
+            progress.report_error()
+
+            self.assertEqual(len(github.comments), 1)
+            body = github.comments[0]["body"]
+            self.assertIn("@alice", body)
+            self.assertIn("unexpected error", body)
+            self.assertIn("https://github.com/acme/widgets/actions/runs/42", body)
+        finally:
+            for key in env:
+                os.environ.pop(key, None)
+
+    def test_report_error_preserves_session_link(self) -> None:
+        env = {
+            "GITHUB_SERVER_URL": "https://github.com",
+            "GITHUB_REPOSITORY": "acme/widgets",
+            "GITHUB_RUN_ID": "42",
+        }
+        for key, value in env.items():
+            os.environ[key] = value
+        try:
+            github = FakeGitHubClient()
+            progress = WorkflowProgressComment(
+                github, "acme", "widgets", 7,
+                workflow="test-workflow",
+                requester_login="alice",
+            )
+            progress.start("Oz is starting.")
+            progress.record_session_link("https://example.test/conversation/abc")
+            progress.report_error()
+
+            self.assertEqual(len(github.comments), 1)
+            body = github.comments[0]["body"]
+            self.assertIn("unexpected error", body)
+            self.assertIn("View the Oz converation: https://example.test/conversation/abc", body)
+        finally:
+            for key in env:
+                os.environ.pop(key, None)
+
+    def test_report_error_without_workflow_run_url(self) -> None:
+        os.environ.pop("GITHUB_REPOSITORY", None)
+        os.environ.pop("GITHUB_RUN_ID", None)
+        os.environ.pop("GITHUB_SERVER_URL", None)
+        github = FakeGitHubClient()
+        progress = WorkflowProgressComment(
+            github, "acme", "widgets", 7,
+            workflow="test-workflow",
+            requester_login="alice",
+        )
+        progress.start("Oz is starting.")
+        progress.report_error()
+
+        self.assertEqual(len(github.comments), 1)
+        body = github.comments[0]["body"]
+        self.assertIn("unexpected error", body)
+        self.assertNotIn("workflow run", body)
+
+    def test_report_error_creates_comment_when_none_exists(self) -> None:
+        env = {
+            "GITHUB_SERVER_URL": "https://github.com",
+            "GITHUB_REPOSITORY": "acme/widgets",
+            "GITHUB_RUN_ID": "42",
+        }
+        for key, value in env.items():
+            os.environ[key] = value
+        try:
+            github = FakeGitHubClient()
+            progress = WorkflowProgressComment(
+                github, "acme", "widgets", 7,
+                workflow="test-workflow",
+                requester_login="alice",
+            )
+            # No start() call — report_error should still create a comment
+            progress.report_error()
+
+            self.assertEqual(len(github.comments), 1)
+            body = github.comments[0]["body"]
+            self.assertIn("unexpected error", body)
+        finally:
+            for key in env:
+                os.environ.pop(key, None)
+
+    def test_report_error_preserves_metadata_marker(self) -> None:
+        env = {
+            "GITHUB_SERVER_URL": "https://github.com",
+            "GITHUB_REPOSITORY": "acme/widgets",
+            "GITHUB_RUN_ID": "42",
+        }
+        for key, value in env.items():
+            os.environ[key] = value
+        try:
+            github = FakeGitHubClient()
+            progress = WorkflowProgressComment(
+                github, "acme", "widgets", 7,
+                workflow="test-workflow",
+                requester_login="alice",
+            )
+            progress.start("Oz is starting.")
+            progress.report_error()
+
+            body = github.comments[0]["body"]
+            self.assertIn("<!-- oz-agent-metadata:", body)
+        finally:
+            for key in env:
+                os.environ.pop(key, None)
 
 
 class FakeGitHubClient:

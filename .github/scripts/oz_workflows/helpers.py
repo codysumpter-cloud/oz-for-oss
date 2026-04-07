@@ -10,6 +10,8 @@ from github import Github
 from github.GithubException import UnknownObjectException
 from github.Repository import Repository
 
+from .env import optional_env
+
 
 # Author associations that indicate organization membership.
 ORG_MEMBER_ASSOCIATIONS: set[str] = {"COLLABORATOR", "MEMBER", "OWNER"}
@@ -208,6 +210,16 @@ _PROGRESS_LINK_PREFIXES = (
 )
 
 
+def _workflow_run_url() -> str:
+    """Build the GitHub Actions workflow run URL from environment variables."""
+    server_url = optional_env("GITHUB_SERVER_URL") or "https://github.com"
+    repository = optional_env("GITHUB_REPOSITORY")
+    run_id = optional_env("GITHUB_RUN_ID")
+    if not repository or not run_id:
+        return ""
+    return f"{server_url}/{repository}/actions/runs/{run_id}"
+
+
 def _format_progress_link_section(session_link: str) -> str:
     normalized_link = session_link.strip()
     if "/conversation/" in normalized_link:
@@ -337,10 +349,29 @@ class WorkflowProgressComment:
     def record_session_link(self, session_link: str) -> None:
         if not session_link.strip():
             return
+        self.session_link = session_link.strip()
         self._append_sections([_format_progress_link_section(session_link)])
 
     def complete(self, status_line: str) -> None:
         self._append_sections([status_line])
+
+    def report_error(self) -> None:
+        """Update the progress comment to indicate a workflow failure."""
+        try:
+            run_url = _workflow_run_url()
+            if run_url:
+                message = (
+                    "Oz ran into an unexpected error while working on this. "
+                    f"You can view the [workflow run]({run_url}) for more details."
+                )
+            else:
+                message = "Oz ran into an unexpected error while working on this."
+            sections = [message]
+            if self.session_link:
+                sections.append(_format_progress_link_section(self.session_link))
+            self.replace_body("\n\n".join(sections))
+        except Exception:
+            pass
 
     def replace_body(self, content: str) -> None:
         """Replace the full comment body, preserving the metadata marker."""

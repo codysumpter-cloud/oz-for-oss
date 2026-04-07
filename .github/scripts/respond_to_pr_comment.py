@@ -205,34 +205,38 @@ def _run_implementation(
         workspace=workspace(),
     )
 
-    run = run_agent(
-        prompt=prompt,
-        skill_name="implement-issue",
-        title=f"Respond to PR comment #{pr_number}",
-        config=config,
-        on_poll=lambda current_run: record_run_session_link(progress, current_run),
-    )
+    try:
+        run = run_agent(
+            prompt=prompt,
+            skill_name="implement-issue",
+            title=f"Respond to PR comment #{pr_number}",
+            config=config,
+            on_poll=lambda current_run: record_run_session_link(progress, current_run),
+        )
 
-    next_steps_section = build_next_steps_section(
-        [
-            "Review the changes pushed to this PR.",
-            "Follow up with another comment if further adjustments are needed.",
-        ]
-    )
+        next_steps_section = build_next_steps_section(
+            [
+                "Review the changes pushed to this PR.",
+                "Follow up with another comment if further adjustments are needed.",
+            ]
+        )
 
-    if not branch_updated_since(
-        github,
-        owner,
-        repo,
-        head_branch,
-        created_after=run.created_at - timedelta(minutes=1),
-    ):
-        progress.complete("I analyzed the request but did not produce any changes.")
-        return
+        if not branch_updated_since(
+            github,
+            owner,
+            repo,
+            head_branch,
+            created_after=run.created_at - timedelta(minutes=1),
+        ):
+            progress.complete("I analyzed the request but did not produce any changes.")
+            return
 
-    progress.complete(
-        f"I pushed changes to this PR based on the comment.\n\n{next_steps_section}"
-    )
+        progress.complete(
+            f"I pushed changes to this PR based on the comment.\n\n{next_steps_section}"
+        )
+    except Exception:
+        progress.report_error()
+        raise
 
 if __name__ == "__main__":
     main()

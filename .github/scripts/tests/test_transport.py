@@ -6,6 +6,8 @@ import unittest
 from oz_workflows.transport import (
     BASE64_ENCODING,
     GZIP_BASE64_ENCODING,
+    TRANSPORT_PATTERN,
+    cleanup_transport_comments,
     encode_transport_payload,
     parse_transport_comment,
     poll_for_transport_payload,
@@ -162,6 +164,71 @@ class PollForTransportPayloadTest(unittest.TestCase):
         self.assertEqual(github.request, ("warpdotdev", "oz-for-oss", 42))
         self.assertEqual(comment_id, 1)
         self.assertEqual(parsed["decoded_payload"], '{"hello": "world"}')
+
+
+class CleanupTransportCommentsTest(unittest.TestCase):
+    def test_deletes_transport_comments(self) -> None:
+        transport_body = transport_comment(
+            json.dumps(
+                {
+                    "token": "abc",
+                    "kind": "review-json",
+                    "encoding": BASE64_ENCODING,
+                    "payload": encoded_payload({"hello": "world"}, encoding=BASE64_ENCODING),
+                }
+            )
+        )
+
+        class FakeClient:
+            def __init__(self) -> None:
+                self.comments: list[dict[str, object]] = [
+                    {"id": 1, "body": "normal comment"},
+                    {"id": 2, "body": transport_body},
+                    {"id": 3, "body": "another normal comment"},
+                ]
+                self.deleted_ids: list[int] = []
+
+            def list_issue_comments(self, owner: str, repo: str, issue_number: int) -> list[dict[str, object]]:
+                return list(self.comments)
+
+            def delete_comment(self, owner: str, repo: str, comment_id: int) -> None:
+                self.deleted_ids.append(comment_id)
+                self.comments = [c for c in self.comments if int(c["id"]) != comment_id]
+
+        fake = FakeClient()
+        cleanup_transport_comments(fake, "acme", "widgets", 42)
+
+        self.assertEqual(fake.deleted_ids, [2])
+        self.assertEqual(len(fake.comments), 2)
+
+    def test_leaves_non_transport_comments_untouched(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.comments: list[dict[str, object]] = [
+                    {"id": 1, "body": "normal comment"},
+                    {"id": 2, "body": "another comment"},
+                ]
+                self.deleted_ids: list[int] = []
+
+            def list_issue_comments(self, owner: str, repo: str, issue_number: int) -> list[dict[str, object]]:
+                return list(self.comments)
+
+            def delete_comment(self, owner: str, repo: str, comment_id: int) -> None:
+                self.deleted_ids.append(comment_id)
+
+        fake = FakeClient()
+        cleanup_transport_comments(fake, "acme", "widgets", 42)
+
+        self.assertEqual(fake.deleted_ids, [])
+        self.assertEqual(len(fake.comments), 2)
+
+    def test_swallows_errors_silently(self) -> None:
+        class FakeClient:
+            def list_issue_comments(self, owner: str, repo: str, issue_number: int) -> list[dict[str, object]]:
+                raise RuntimeError("API error")
+
+        # Should not raise
+        cleanup_transport_comments(FakeClient(), "acme", "widgets", 42)
 
 
 if __name__ == "__main__":

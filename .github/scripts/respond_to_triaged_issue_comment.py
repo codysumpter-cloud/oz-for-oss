@@ -14,7 +14,7 @@ from oz_workflows.helpers import (
     triggering_comment_prompt_text,
 )
 from oz_workflows.oz_client import build_agent_config, run_agent
-from oz_workflows.transport import new_transport_token, poll_for_transport_payload
+from oz_workflows.transport import cleanup_transport_comments, new_transport_token, poll_for_transport_payload
 from oz_workflows.triage import extract_original_issue_report
 
 
@@ -130,33 +130,38 @@ def main() -> None:
             config_name=WORKFLOW_NAME,
             workspace=workspace(),
         )
-        run_agent(
-            prompt=prompt,
-            skill_name="triage-issue",
-            title=f"Respond to triaged issue comment #{issue_number}",
-            config=config,
-            on_poll=lambda current_run: record_run_session_link(progress, current_run),
-        )
-        payload, transport_comment_id = poll_for_transport_payload(
-            github,
-            owner,
-            repo,
-            issue_number,
-            token=transport_token,
-            kind="issue-comment-response",
-            timeout_seconds=300,
-        )
-        issue.get_comment(transport_comment_id).delete()
-        result = json.loads(payload["decoded_payload"])
-        if not isinstance(result, dict):
-            raise RuntimeError("Issue response must decode to a JSON object")
-        analysis_comment = extract_analysis_comment(result)
-        if not analysis_comment:
-            analysis_comment = (
-                "I reviewed the issue discussion and the latest mention, "
-                "but I don’t have additional analysis to add yet."
+        try:
+            run_agent(
+                prompt=prompt,
+                skill_name="triage-issue",
+                title=f"Respond to triaged issue comment #{issue_number}",
+                config=config,
+                on_poll=lambda current_run: record_run_session_link(progress, current_run),
             )
-        progress.complete(analysis_comment)
+            payload, transport_comment_id = poll_for_transport_payload(
+                github,
+                owner,
+                repo,
+                issue_number,
+                token=transport_token,
+                kind="issue-comment-response",
+                timeout_seconds=300,
+            )
+            issue.get_comment(transport_comment_id).delete()
+            result = json.loads(payload["decoded_payload"])
+            if not isinstance(result, dict):
+                raise RuntimeError("Issue response must decode to a JSON object")
+            analysis_comment = extract_analysis_comment(result)
+            if not analysis_comment:
+                analysis_comment = (
+                    "I reviewed the issue discussion and the latest mention, "
+                    "but I don't have additional analysis to add yet."
+                )
+            progress.complete(analysis_comment)
+        except Exception:
+            progress.report_error()
+            cleanup_transport_comments(github, owner, repo, issue_number)
+            raise
 
 if __name__ == "__main__":
     main()

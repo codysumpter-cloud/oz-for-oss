@@ -13,7 +13,7 @@ from oz_workflows.helpers import (
     WorkflowProgressComment,
 )
 from oz_workflows.oz_client import build_agent_config, run_agent
-from oz_workflows.transport import new_transport_token, poll_for_transport_payload
+from oz_workflows.transport import cleanup_transport_comments, new_transport_token, poll_for_transport_payload
 
 
 def main() -> None:
@@ -111,50 +111,55 @@ def main() -> None:
             config_name="review-pull-request",
             workspace=workspace(),
         )
-        run_agent(
-            prompt=prompt,
-            skill_name=skill_name,
-            title=f"PR review #{pr_number}",
-            config=config,
-            on_poll=lambda current_run: record_run_session_link(progress, current_run),
-        )
-        payload, transport_comment_id = poll_for_transport_payload(
-            github,
-            owner,
-            repo,
-            pr_number,
-            token=transport_token,
-            kind="review-json",
-        )
-        pr.get_issue_comment(transport_comment_id).delete()
-        review = json.loads(payload["decoded_payload"])
-        summary = str(review.get("summary") or "").strip()
-        comments = []
-        for raw_comment in review.get("comments", []):
-            path = str(raw_comment.get("path") or "").strip().removeprefix("a/").removeprefix("b/").removeprefix("./")
-            line = raw_comment.get("line")
-            body = str(raw_comment.get("body") or "").strip()
-            if not path or not isinstance(line, int) or line <= 0 or not body:
-                continue
-            normalized = {
-                "path": path,
-                "line": line,
-                "side": raw_comment.get("side") if raw_comment.get("side") in {"LEFT", "RIGHT"} else "RIGHT",
-                "body": body,
-            }
-            start_line = raw_comment.get("start_line")
-            if isinstance(start_line, int) and 0 < start_line < line:
-                normalized["start_line"] = start_line
-                normalized["start_side"] = normalized["side"]
-            comments.append(normalized)
-        if not summary and not comments:
-            progress.complete("I completed the review and did not identify any actionable feedback for this pull request.")
-            return
-        if comments:
-            pr.create_review(body=summary or "Automated review by Oz", event="COMMENT", comments=comments)
-        else:
-            pr.create_review(body=summary or "Automated review by Oz", event="COMMENT")
-        progress.complete("I completed the review and posted feedback on this pull request.")
+        try:
+            run_agent(
+                prompt=prompt,
+                skill_name=skill_name,
+                title=f"PR review #{pr_number}",
+                config=config,
+                on_poll=lambda current_run: record_run_session_link(progress, current_run),
+            )
+            payload, transport_comment_id = poll_for_transport_payload(
+                github,
+                owner,
+                repo,
+                pr_number,
+                token=transport_token,
+                kind="review-json",
+            )
+            pr.get_issue_comment(transport_comment_id).delete()
+            review = json.loads(payload["decoded_payload"])
+            summary = str(review.get("summary") or "").strip()
+            comments = []
+            for raw_comment in review.get("comments", []):
+                path = str(raw_comment.get("path") or "").strip().removeprefix("a/").removeprefix("b/").removeprefix("./")
+                line = raw_comment.get("line")
+                body = str(raw_comment.get("body") or "").strip()
+                if not path or not isinstance(line, int) or line <= 0 or not body:
+                    continue
+                normalized = {
+                    "path": path,
+                    "line": line,
+                    "side": raw_comment.get("side") if raw_comment.get("side") in {"LEFT", "RIGHT"} else "RIGHT",
+                    "body": body,
+                }
+                start_line = raw_comment.get("start_line")
+                if isinstance(start_line, int) and 0 < start_line < line:
+                    normalized["start_line"] = start_line
+                    normalized["start_side"] = normalized["side"]
+                comments.append(normalized)
+            if not summary and not comments:
+                progress.complete("I completed the review and did not identify any actionable feedback for this pull request.")
+                return
+            if comments:
+                pr.create_review(body=summary or "Automated review by Oz", event="COMMENT", comments=comments)
+            else:
+                pr.create_review(body=summary or "Automated review by Oz", event="COMMENT")
+            progress.complete("I completed the review and posted feedback on this pull request.")
+        except Exception:
+            progress.report_error()
+            cleanup_transport_comments(github, owner, repo, pr_number)
+            raise
 
 if __name__ == "__main__":
     main()
