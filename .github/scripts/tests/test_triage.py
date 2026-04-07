@@ -5,11 +5,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from triage_new_issues import (
+    AGENT_PROHIBITED_LABELS,
     apply_triage_result,
     build_duplicate_comment,
     build_follow_up_comment,
     extract_duplicate_of,
     extract_follow_up_questions,
+    extract_requested_labels,
     format_recent_issues_for_dedupe,
     format_issue_comments,
     load_recent_issues_for_dedupe,
@@ -295,6 +297,32 @@ class FormatRecentIssuesForDedupeTest(unittest.TestCase):
             format_recent_issues_for_dedupe(None, current_issue_number=10),
             "Unable to fetch recent issues for duplicate detection.",
         )
+
+
+class ExtractRequestedLabelsTest(unittest.TestCase):
+    def test_strips_prohibited_labels(self) -> None:
+        result = {"labels": ["bug", "ready-to-implement", "triaged", "ready-to-spec"]}
+        self.assertEqual(
+            extract_requested_labels(result),
+            ["bug", "triaged"],
+        )
+
+    def test_returns_normal_labels_unchanged(self) -> None:
+        result = {"labels": ["bug", "repro:high", "area:workflow"]}
+        self.assertEqual(
+            extract_requested_labels(result),
+            ["bug", "repro:high", "area:workflow"],
+        )
+
+    def test_returns_empty_when_only_prohibited_labels(self) -> None:
+        result = {"labels": ["ready-to-implement", "ready-to-spec"]}
+        self.assertEqual(extract_requested_labels(result), [])
+
+    def test_returns_empty_for_non_list(self) -> None:
+        self.assertEqual(extract_requested_labels({"labels": "bug"}), [])
+
+    def test_returns_empty_for_missing_labels_key(self) -> None:
+        self.assertEqual(extract_requested_labels({}), [])
 
 
 class ExtractFollowUpQuestionsTest(unittest.TestCase):
