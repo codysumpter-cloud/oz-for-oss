@@ -44,7 +44,7 @@ The GitHub Actions environment variables needed for the workflow run link (`GITH
 
 #### 1. Add `report_error()` to `WorkflowProgressComment` in `helpers.py`
 
-Add a new method that builds the error message with a workflow run link and calls `replace_body()`:
+Add a new method that builds the error message with a workflow run link and preserves the session link if one was recorded:
 
 ```python
 def report_error(self) -> None:
@@ -55,10 +55,15 @@ def report_error(self) -> None:
             "Oz ran into an unexpected error while working on this. "
             f"You can view the [workflow run]({run_url}) for more details."
         )
-        self.replace_body(message)
+        sections = [message]
+        if self.session_link:
+            sections.append(_format_progress_link_section(self.session_link))
+        self.replace_body("\n\n".join(sections))
     except Exception:
         pass
 ```
+
+The method preserves the session link because it is a useful debugging tool for maintainers. `self.session_link` is set by `record_session_link()` (see change below).
 
 The method is wrapped in a bare try/except so it never raises — it is always called from an error path and must not mask the original exception.
 
@@ -78,6 +83,18 @@ def _workflow_run_url() -> str:
 This requires importing `optional_env` from `oz_workflows.env` in `helpers.py`. The `env` module is already a dependency of the workflow scripts but not currently imported by `helpers.py`. This is a new import — it creates a dependency from `helpers.py` → `env.py`, which is acceptable since `env.py` has no dependencies on `helpers.py` (no circular import risk).
 
 If the URL cannot be constructed (e.g. missing env vars in a test environment), `_workflow_run_url()` returns an empty string and the error message can be adjusted (e.g. omit the link portion or use a fallback text).
+
+Additionally, update `record_session_link()` to store the link on `self.session_link` so that `report_error()` can include it in the error comment:
+
+```python
+def record_session_link(self, session_link: str) -> None:
+    if not session_link.strip():
+        return
+    self.session_link = session_link.strip()
+    self._append_sections([_format_progress_link_section(session_link)])
+```
+
+The `self.session_link` field already exists on the class (initialized to `""` in `__init__`), but is not currently set by `record_session_link()`. This change stores the link so `report_error()` can re-include it in the error state.
 
 #### 2. Add `cleanup_transport_comments()` to `transport.py`
 
@@ -208,6 +225,7 @@ Mitigation: `_workflow_run_url()` uses `optional_env()` and returns an empty str
 - Test that the `@requester` mention is preserved.
 - Test that the metadata marker is preserved.
 - Test that if the progress comment was never created (no `start()` call), `report_error()` creates one.
+- Test that if a session link was recorded before the error, it is preserved in the error comment.
 
 **Unit tests for `cleanup_transport_comments()`:**
 - Add a test in `test_transport.py` that creates comments with transport markers and verifies they are deleted.
@@ -224,6 +242,5 @@ Mitigation: `_workflow_run_url()` uses `optional_env()` and returns an empty str
 
 ### Follow-ups
 
-- Consider adding the Oz session link to the error message if one was recorded before the failure. This is noted as an open question in the product spec and can be addressed in a follow-up.
 - Consider adding structured error categorization (timeout vs. agent failure vs. API error) in a future iteration if the generic message proves insufficient for debugging.
 - The `triage_new_issues.py` outer try/except in `main()` (lines 137-139) could also call `progress.report_error()`, but since the progress comment is created inside `process_issue()`, the `progress` variable is not in scope there. A follow-up could restructure this if needed.

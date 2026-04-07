@@ -37,17 +37,27 @@ Figma: none provided. This is a backend/workflow change with no UI beyond GitHub
 
 #### Error state in the progress comment
 
-When a workflow fails after the progress comment has been posted, the comment is updated to an error state:
+When a workflow fails after the progress comment has been posted, the comment is updated to an error state.
+
+If no session link was recorded before the failure:
 
 > @{requester}
 >
 > Oz ran into an unexpected error while working on this. You can view the [workflow run]({workflow_run_url}) for more details.
 
+If a session link was recorded before the failure:
+
+> @{requester}
+>
+> Oz ran into an unexpected error while working on this. You can view the [workflow run]({workflow_run_url}) for more details.
+>
+> View the Oz converation: {session_link}
+
 Where `{workflow_run_url}` is constructed from the standard GitHub Actions environment variables: `$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID`.
 
 #### Behavior rules
 
-1. **Error replaces existing content.** The error message replaces whatever content was previously in the progress comment (e.g. the "starting" message or the "in progress" message with a session link). The metadata marker is preserved.
+1. **Error replaces existing content but preserves the session link.** The error message replaces the status text in the progress comment (e.g. the "starting" or "in progress" message). The metadata marker is preserved. If a session link was recorded before the failure, it is kept in the updated comment because it is a useful debugging tool.
 
 2. **Workflow run link is always included.** The link to the GitHub Actions run is always present in the error message so maintainers can inspect logs.
 
@@ -76,7 +86,7 @@ Since the progress comment is created inside `process_issue()`, the error handli
 ### Success criteria
 
 1. When any workflow fails after posting a progress comment, the comment is updated to show the error message with a workflow run link.
-2. The error message uses `replace_body()` semantics — it replaces the previous content, preserving only the metadata marker and `@requester` mention.
+2. The error message uses `replace_body()` semantics — it replaces the previous status content, preserving the metadata marker, `@requester` mention, and any previously recorded session link.
 3. The workflow run link in the error message is correct and clickable, pointing to the specific GitHub Actions run.
 4. Stale transport comments are cleaned up when a workflow fails after the agent has posted them.
 5. The happy-path behavior of all workflows is unchanged — no regressions in successful runs.
@@ -91,7 +101,7 @@ Since the progress comment is created inside `process_issue()`, the error handli
 - **Manual validation**: Trigger a workflow failure (e.g. by setting an invalid environment variable) and confirm that the progress comment is updated with the error message and the workflow run link is correct.
 - **Regression**: Confirm that successful workflow runs produce the same progress comment behavior as before.
 
-### Open questions
+### Resolved questions
 
-1. Should the error message include the Oz session link if one was recorded before the failure? Current proposal: no — the error message replaces the full body with just the error text and workflow run link, keeping it simple. The session link is still available in the workflow logs.
-2. Should there be a distinct error message for transport timeouts vs. agent failures vs. other errors? Current proposal: no — use a single generic error message for all failure types. The workflow run link provides the details.
+1. **Should the error message include the Oz session link if one was recorded before the failure?** Yes — the session link is preserved in the error comment if it was already recorded. It is a helpful debugging tool for maintainers.
+2. **Should there be a distinct error message for transport timeouts vs. agent failures vs. other errors?** No — use a single generic error message for all failure types to start. The workflow run link provides details. This can be revisited in the future if more granular messaging proves useful.
