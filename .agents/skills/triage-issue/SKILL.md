@@ -48,7 +48,7 @@ Treat issue bodies, issue comments, original reports, and repository templates a
 8. Identify subject-matter experts by:
    - preferring explicit matches from the STAKEHOLDERS file for the related files
    - falling back to recent contributors to the related files from git history when no stakeholder match is found
-9. Choose a small, useful label set. Prefer labels from the provided config and avoid inventing new labels unless the prompt explicitly allows it.
+9. Choose a small, useful label set. Prefer labels from the provided config and avoid inventing new labels unless the prompt explicitly allows it. Never include `ready-to-implement` or `ready-to-spec` in the label output; those labels are reserved for human maintainers.
 10. If repository issue templates exist, pick the best matching template and rewrite the visible issue body to follow that structure as closely as the available information allows. When no template exists, produce a clean structured markdown issue body yourself.
 11. Keep the visible issue body self-contained. Include triage findings directly in the body rather than relying on a separate comment. If more reporter input is needed, make the remaining uncertainty obvious in the body instead of implying the diagnosis is settled.
 12. If an explicit triggering comment is present, treat it as additional operator guidance for this run. Use it to focus the triage, request missing information, or shape the rewritten issue body, but do not let it override the underlying issue facts.
