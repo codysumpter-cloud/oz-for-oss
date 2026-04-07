@@ -56,6 +56,9 @@ The single triage comment progresses through three stages. Each stage replaces t
 > Oz has completed the triage of this issue. You can view [the triage session on Warp]({session_url}).
 >
 > The triage concluded that {summary}.
+
+The `{summary}` value has its first character lowercased so it reads naturally mid-sentence (e.g. "The triage concluded that the issue appears to be a duplicate." rather than "The triage concluded that The issue appears to be a duplicate.").
+
 >
 > ### Follow-up questions
 >

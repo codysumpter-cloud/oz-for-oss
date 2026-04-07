@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from triage_new_issues import (
     TRIAGE_DISCLAIMER,
+    _lowercase_first,
     apply_triage_result,
     build_duplicate_comment,
     build_duplicate_section,
@@ -814,6 +815,37 @@ class MutualExclusivityTest(unittest.TestCase):
         self.assertNotIn("### Follow-up questions", body)
         self.assertNotIn("### Potential duplicates", body)
         self.assertIn(TRIAGE_DISCLAIMER, body)
+
+
+class LowercaseFirstTest(unittest.TestCase):
+    def test_lowercases_initial_uppercase(self) -> None:
+        self.assertEqual(_lowercase_first("This is a bug"), "this is a bug")
+
+    def test_preserves_already_lowercase(self) -> None:
+        self.assertEqual(_lowercase_first("already lowercase"), "already lowercase")
+
+    def test_handles_empty_string(self) -> None:
+        self.assertEqual(_lowercase_first(""), "")
+
+    def test_handles_single_character(self) -> None:
+        self.assertEqual(_lowercase_first("A"), "a")
+
+    def test_preserves_rest_of_string(self) -> None:
+        self.assertEqual(_lowercase_first("The GPU driver is outdated"), "the GPU driver is outdated")
+
+
+class SummaryCasingInStage3Test(unittest.TestCase):
+    """Verify that the summary is lowercased when embedded mid-sentence."""
+
+    def test_uppercase_summary_reads_naturally(self) -> None:
+        summary = _lowercase_first(str("This is a new summary").strip())
+        sentence = f"The triage concluded that {summary}."
+        self.assertEqual(sentence, "The triage concluded that this is a new summary.")
+
+    def test_fallback_summary_stays_lowercase(self) -> None:
+        summary = _lowercase_first(str("triage completed").strip())
+        sentence = f"The triage concluded that {summary}."
+        self.assertEqual(sentence, "The triage concluded that triage completed.")
 
 
 class FakeTriageGitHubClient:

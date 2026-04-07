@@ -44,6 +44,13 @@ OZ_AGENT_METADATA_PREFIX = "<!-- oz-agent-metadata:"
 TRIAGE_DISCLAIMER = "*This is an automated analysis by Oz and may be incorrect. A maintainer will verify the details.*"
 
 
+def _lowercase_first(text: str) -> str:
+    """Lowercase the first character of *text* so it reads naturally mid-sentence."""
+    if not text:
+        return text
+    return text[0].lower() + text[1:]
+
+
 def triage_heuristics_prompt(owner: str, repo: str) -> str:
     """Return repository-specific triage guidance for the agent prompt."""
     if owner == "warpdotdev" and repo == "Warp":
@@ -308,7 +315,7 @@ def process_issue(
     )
 
     labels_text = ", ".join(extract_requested_labels(result)) or "no labels"
-    summary = str(result.get("summary") or "triage completed").strip()
+    summary = _lowercase_first(str(result.get("summary") or "triage completed").strip())
     session_link = progress.session_link
 
     # Build the consolidated Stage 3 comment body.

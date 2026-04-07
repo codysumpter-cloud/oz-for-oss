@@ -112,7 +112,7 @@ Where `_record_triage_session_link()` is a local function in `triage_new_issues.
 Build the complete Stage 3 body and call `progress.replace_body()`:
 
 ```python
-summary = str(result.get("summary") or "triage completed").strip()
+summary = _lowercase_first(str(result.get("summary") or "triage completed").strip())
 session_link_text = _format_progress_link_section(session_link) if session_link else ""
 
 parts = []
@@ -127,6 +127,9 @@ else:
         f"Oz has completed the triage of this issue. "
         f"The triage concluded that {summary}."
     )
+```
+
+`_lowercase_first()` lowercases the first character of the summary so it reads naturally mid-sentence (e.g. "The triage concluded that the issue appears..." instead of "The triage concluded that The issue appears...").
 
 follow_up_questions = extract_follow_up_questions(result)
 duplicates = extract_duplicate_of(result, current_issue_number=issue_number)
