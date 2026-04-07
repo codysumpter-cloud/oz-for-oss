@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from triage_new_issues import (
-    AGENT_PROHIBITED_LABELS,
     apply_triage_result,
     build_duplicate_comment,
     build_follow_up_comment,

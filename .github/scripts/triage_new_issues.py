@@ -427,7 +427,8 @@ def extract_requested_labels(result: dict[str, Any]) -> list[str]:
         return []
     return [
         label for label in dedupe_strings(raw_labels)
-        if label not in AGENT_PROHIBITED_LABELS
+        if label.lower() not in {s.lower() for s in AGENT_PROHIBITED_LABELS}
+    ]
     ]
 
 
