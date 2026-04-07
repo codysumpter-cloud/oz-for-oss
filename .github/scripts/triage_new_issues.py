@@ -39,6 +39,7 @@ from oz_workflows.triage import (
 WORKFLOW_NAME = "triage-new-issues"
 PRIMARY_TRIAGE_LABELS = {"bug", "duplicate", "enhancement", "documentation", "needs-info", "triaged"}
 REPRO_LABEL_PREFIX = "repro:"
+AGENT_PROHIBITED_LABELS = {"ready-to-implement", "ready-to-spec"}
 OZ_AGENT_METADATA_PREFIX = "<!-- oz-agent-metadata:"
 TRIAGE_DISCLAIMER = "*This is an automated analysis by Oz and may be incorrect. A maintainer will verify the details.*"
 
@@ -415,11 +416,19 @@ def ensure_label_exists(
 
 
 def extract_requested_labels(result: dict[str, Any]) -> list[str]:
-    """Normalize the requested label list from a triage result payload."""
+    """Normalize the requested label list from a triage result payload.
+
+    Labels in ``AGENT_PROHIBITED_LABELS`` are silently removed so the
+    triage agent cannot promote an issue to ``ready-to-implement`` or
+    ``ready-to-spec`` on its own.
+    """
     raw_labels = result.get("labels")
     if not isinstance(raw_labels, list):
         return []
-    return dedupe_strings(raw_labels)
+    return [
+        label for label in dedupe_strings(raw_labels)
+        if label.lower() not in {s.lower() for s in AGENT_PROHIBITED_LABELS}
+    ]
 
 
 def extract_follow_up_questions(result: dict[str, Any]) -> list[str]:
