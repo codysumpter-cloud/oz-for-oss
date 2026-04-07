@@ -299,7 +299,7 @@ def process_issue(
             issue_number,
             token=transport_token,
             kind="issue-triage",
-            timeout_seconds=300,
+            timeout_seconds=600,
         )
         issue.get_comment(transport_comment_id).delete()
 

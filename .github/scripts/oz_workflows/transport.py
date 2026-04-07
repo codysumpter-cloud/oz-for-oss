@@ -108,7 +108,7 @@ def poll_for_transport_payload(
     *,
     token: str,
     kind: str,
-    timeout_seconds: int = 120,
+    timeout_seconds: int = 600,
     poll_interval_seconds: int = 5,
 ) -> tuple[dict[str, Any], int]:
     deadline = time.monotonic() + timeout_seconds

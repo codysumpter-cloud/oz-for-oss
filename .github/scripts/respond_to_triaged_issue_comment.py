@@ -145,7 +145,7 @@ def main() -> None:
                 issue_number,
                 token=transport_token,
                 kind="issue-comment-response",
-                timeout_seconds=300,
+            timeout_seconds=600,
             )
             issue.get_comment(transport_comment_id).delete()
             result = json.loads(payload["decoded_payload"])
