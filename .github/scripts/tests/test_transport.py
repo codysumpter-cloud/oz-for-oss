@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import unittest
 
@@ -92,6 +93,23 @@ class ParseTransportCommentTest(unittest.TestCase):
                     "kind": "review-json",
                     "encoding": GZIP_BASE64_ENCODING,
                     "payload": encoded_payload({"hello": "world"}, encoding=BASE64_ENCODING),
+                }
+            )
+        )
+        self.assertIsNone(parse_transport_comment(body))
+
+    def test_returns_none_for_corrupt_gzip_body(self) -> None:
+        # Valid gzip header (1f 8b) but corrupt compressed data after the header.
+        # This triggers zlib.error rather than gzip.BadGzipFile / OSError.
+        corrupt_gzip = b"\x1f\x8b\x08\x00" + b"\x00" * 6 + b"\xff\xfe\xfd\xfc"
+        corrupt_b64 = base64.b64encode(corrupt_gzip).decode("utf-8")
+        body = transport_comment(
+            json.dumps(
+                {
+                    "token": "abc",
+                    "kind": "review-json",
+                    "encoding": GZIP_BASE64_ENCODING,
+                    "payload": corrupt_b64,
                 }
             )
         )
