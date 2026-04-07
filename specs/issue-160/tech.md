@@ -51,10 +51,13 @@ def report_error(self) -> None:
     """Update the progress comment to indicate a workflow failure."""
     try:
         run_url = _workflow_run_url()
-        message = (
-            "Oz ran into an unexpected error while working on this. "
-            f"You can view the [workflow run]({run_url}) for more details."
-        )
+        if run_url:
+            message = (
+                "Oz ran into an unexpected error while working on this. "
+                f"You can view the [workflow run]({run_url}) for more details."
+            )
+        else:
+            message = "Oz ran into an unexpected error while working on this."
         sections = [message]
         if self.session_link:
             sections.append(_format_progress_link_section(self.session_link))
@@ -82,7 +85,7 @@ def _workflow_run_url() -> str:
 
 This requires importing `optional_env` from `oz_workflows.env` in `helpers.py`. The `env` module is already a dependency of the workflow scripts but not currently imported by `helpers.py`. This is a new import — it creates a dependency from `helpers.py` → `env.py`, which is acceptable since `env.py` has no dependencies on `helpers.py` (no circular import risk).
 
-If the URL cannot be constructed (e.g. missing env vars in a test environment), `_workflow_run_url()` returns an empty string and the error message can be adjusted (e.g. omit the link portion or use a fallback text).
+If the URL cannot be constructed (e.g. missing env vars in a test environment), `_workflow_run_url()` returns an empty string. When the URL is empty, `report_error()` omits the workflow run link entirely and uses a plain error message without producing an empty or broken link.
 
 Additionally, update `record_session_link()` to store the link on `self.session_link` so that `report_error()` can include it in the error comment:
 

@@ -39,13 +39,19 @@ Figma: none provided. This is a backend/workflow change with no UI beyond GitHub
 
 When a workflow fails after the progress comment has been posted, the comment is updated to an error state.
 
-If no session link was recorded before the failure:
+When the workflow run URL can be resolved, the error includes a link to the GitHub Actions run:
 
 > @{requester}
 >
 > Oz ran into an unexpected error while working on this. You can view the [workflow run]({workflow_run_url}) for more details.
 
-If a session link was recorded before the failure:
+When the workflow run URL cannot be resolved (e.g. missing environment variables), the link is dropped entirely:
+
+> @{requester}
+>
+> Oz ran into an unexpected error while working on this.
+
+If a session link was recorded before the failure, it is preserved regardless of whether the workflow run link is present:
 
 > @{requester}
 >
@@ -53,13 +59,13 @@ If a session link was recorded before the failure:
 >
 > View the Oz converation: {session_link}
 
-Where `{workflow_run_url}` is constructed from the standard GitHub Actions environment variables: `$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID`.
+The workflow run URL `{workflow_run_url}` is resolved deterministically from the standard GitHub Actions environment variables: `$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID`. If `GITHUB_REPOSITORY` or `GITHUB_RUN_ID` is absent, the link is omitted rather than producing an empty or broken link.
 
 #### Behavior rules
 
 1. **Error replaces existing content but preserves the session link.** The error message replaces the status text in the progress comment (e.g. the "starting" or "in progress" message). The metadata marker is preserved. If a session link was recorded before the failure, it is kept in the updated comment because it is a useful debugging tool.
 
-2. **Workflow run link is always included.** The link to the GitHub Actions run is always present in the error message so maintainers can inspect logs.
+2. **Workflow run link is included when available.** The link to the GitHub Actions run is present in the error message when the URL can be resolved from the standard GitHub Actions environment variables (`GITHUB_SERVER_URL`, `GITHUB_REPOSITORY`, `GITHUB_RUN_ID`). When the URL cannot be constructed (e.g. missing environment variables), the link is dropped entirely rather than producing an empty or broken link. The error message still indicates that an unexpected error occurred.
 
 3. **Transport comment cleanup on error.** If the workflow used transport comments, any stale `<!-- oz-workflow-transport ... -->` comments on the issue/PR are deleted as part of error handling. This prevents orphaned bot comments from cluttering the timeline.
 
