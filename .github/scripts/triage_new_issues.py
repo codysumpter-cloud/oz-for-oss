@@ -13,6 +13,7 @@ from oz_workflows.actions import append_summary, warning
 from oz_workflows.env import load_event, optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.helpers import (
     _field,
+    _format_triage_session_link,
     _label_name,
     _login,
     _timestamp_text,
@@ -184,7 +185,8 @@ def process_issue(
         workflow=WORKFLOW_NAME,
         event_payload=event_payload,
     )
-    progress.start("Oz has started triaging this issue.")
+    progress.start("Oz is starting to work on triaging this issue.")
+    _cleanup_legacy_triage_comments(github, owner, repo, issue)
     comments = list(issue.get_comments())
     comments_text = format_issue_comments(comments, exclude_comment_id=triggering_comment_id)
     current_body = str(issue.body or "").strip()
@@ -278,9 +280,9 @@ def process_issue(
         skill_name="triage-issue",
         title=f"Triage issue #{issue_number}",
         config=agent_config,
-        on_poll=lambda current_run: record_run_session_link(progress, current_run),
+        on_poll=lambda current_run: _record_triage_session_link(progress, current_run),
     )
-    record_run_session_link(progress, run)
+    _record_triage_session_link(progress, run)
     payload, transport_comment_id = poll_for_transport_payload(
         github,
         owner,
@@ -304,27 +306,38 @@ def process_issue(
         configured_labels=configured_labels,
         repo_labels=repo_labels,
     )
-    sync_follow_up_comment(
-        github,
-        owner,
-        repo,
-        issue,
-        questions=extract_follow_up_questions(result),
-    )
-    sync_duplicate_comment(
-        github,
-        owner,
-        repo,
-        issue,
-        duplicates=extract_duplicate_of(result, current_issue_number=issue_number),
-    )
 
     labels_text = ", ".join(extract_requested_labels(result)) or "no labels"
     summary = str(result.get("summary") or "triage completed").strip()
-    progress.complete(
-        f"I completed triage for this issue and updated the issue with the triage result. "
-        f"Summary: {summary}\n\n{TRIAGE_DISCLAIMER}"
-    )
+    session_link = progress.session_link
+
+    # Build the consolidated Stage 3 comment body.
+    parts: list[str] = []
+    if session_link:
+        link_text = _format_triage_session_link(session_link)
+        parts.append(
+            f"Oz has completed the triage of this issue. "
+            f"You can view {link_text}.\n\n"
+            f"The triage concluded that {summary}."
+        )
+    else:
+        parts.append(
+            f"Oz has completed the triage of this issue. "
+            f"The triage concluded that {summary}."
+        )
+
+    follow_up_questions = extract_follow_up_questions(result)
+    duplicates = extract_duplicate_of(result, current_issue_number=issue_number)
+
+    # Follow-up questions and duplicates are mutually exclusive.
+    # If duplicates are found, suppress follow-up questions.
+    if duplicates:
+        parts.append(build_duplicate_section(issue, duplicates))
+    elif follow_up_questions:
+        parts.append(build_follow_up_section(issue, follow_up_questions))
+
+    parts.append(TRIAGE_DISCLAIMER)
+    progress.replace_body("\n\n".join(parts))
     append_summary(f"- Issue #{issue_number}: {summary} Labels: {labels_text}.\n")
 
 
@@ -440,6 +453,91 @@ def should_replace_triage_label(label_name: str) -> bool:
     return label_name in PRIMARY_TRIAGE_LABELS or label_name.startswith(REPRO_LABEL_PREFIX)
 
 
+def _record_triage_session_link(progress: WorkflowProgressComment, run: object) -> None:
+    """Triage-specific session link callback that uses replace_body for Stage 2."""
+    session_link = getattr(run, "session_link", None) or ""
+    if not session_link.strip():
+        return
+    progress.session_link = session_link.strip()
+    link = _format_triage_session_link(progress.session_link)
+    progress.replace_body(
+        f"Oz is triaging this issue. You can follow {link}."
+    )
+
+
+def _cleanup_legacy_triage_comments(
+    github: Repository,
+    owner: str,
+    repo: str,
+    issue: Any,
+) -> None:
+    """Delete orphaned standalone follow-up and duplicate comments from prior triage runs."""
+    issue_number = int(_field(issue, "number"))
+    follow_up_marker = follow_up_comment_metadata(issue_number)
+    duplicate_marker = duplicate_comment_metadata(issue_number)
+    comments = (
+        list(issue.get_comments())
+        if hasattr(issue, "get_comments")
+        else github.list_issue_comments(owner, repo, issue_number)
+    )
+    for comment in comments:
+        body = str(_field(comment, "body") or "")
+        if follow_up_marker in body or duplicate_marker in body:
+            try:
+                if hasattr(comment, "delete"):
+                    comment.delete()
+                else:
+                    github.delete_comment(owner, repo, int(_field(comment, "id")))
+            except Exception:
+                pass
+
+
+def build_follow_up_section(issue: Any, questions: list[str]) -> str:
+    """Build the follow-up questions section for embedding in the progress comment."""
+    reporter_login = _login(_field(issue, "user")).strip()
+    lines: list[str] = ["### Follow-up questions", ""]
+    if reporter_login:
+        lines.append(f"@{reporter_login}")
+        lines.append("")
+    lines.append(
+        "Thanks for the report. I'm missing a few issue-specific details "
+        "before I can narrow this down confidently:"
+    )
+    lines.append("")
+    lines.extend(f"{i}. {q}" for i, q in enumerate(questions, start=1))
+    lines.append("")
+    lines.append(
+        "Reply in-thread with those details and the triage workflow will "
+        "automatically re-evaluate the issue and update the diagnosis, "
+        "labels, and next steps."
+    )
+    return "\n".join(lines)
+
+
+def build_duplicate_section(issue: Any, duplicates: list[dict[str, Any]]) -> str:
+    """Build the duplicate detection section for embedding in the progress comment."""
+    lines: list[str] = ["### Potential duplicates", ""]
+    lines.append("This issue appears likely to overlap with the following existing issues:")
+    lines.append("")
+    for dup in duplicates:
+        num = dup["issue_number"]
+        title = dup.get("title") or ""
+        reason = dup.get("similarity_reason") or ""
+        line = f"- #{num}"
+        if title:
+            line += f" — {title}"
+        lines.append(line)
+        if reason:
+            lines.append(f"  Why it looks similar: {reason}")
+    lines.append("")
+    lines.append(
+        "If this report is meaningfully different, please comment with the "
+        "additional context or distinguishing behavior so a maintainer can "
+        "review it. Otherwise, a maintainer may close it as a duplicate after review."
+    )
+    return "\n".join(lines)
+
+
 def follow_up_comment_metadata(issue_number: int) -> str:
     return (
         '<!-- oz-agent-metadata: '
@@ -471,6 +569,8 @@ def sync_follow_up_comment(
     *,
     questions: list[str],
 ) -> None:
+    # Deprecated: follow-up content is now embedded in the progress comment
+    # via build_follow_up_section(). Retained for backward compatibility.
     if not questions:
         issue_number = int(_field(issue, "number"))
         metadata = follow_up_comment_metadata(issue_number)
@@ -579,6 +679,8 @@ def sync_duplicate_comment(
     *,
     duplicates: list[dict[str, Any]],
 ) -> None:
+    # Deprecated: duplicate content is now embedded in the progress comment
+    # via build_duplicate_section(). Retained for backward compatibility.
     if not duplicates:
         return
     _sync_managed_issue_comment(

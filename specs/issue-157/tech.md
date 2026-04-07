@@ -36,19 +36,18 @@ The `WorkflowProgressComment` class uses `append_comment_sections()` to update i
 
 ### Proposed changes
 
-#### 1. Update `_format_progress_link_section()` in `helpers.py`
+#### 1. Add `_format_triage_session_link()` in `helpers.py`
 
-Change the session link formatting to use markdown link syntax with expanded link text. The link text is always "the triage session on Warp" regardless of whether the URL is a conversation link or a sharing link:
+Add a new triage-specific session link formatter that uses markdown link syntax. The existing `_format_progress_link_section()` is preserved unchanged to avoid breaking non-triage workflows that use `record_session_link()` and the `_PROGRESS_LINK_PREFIXES` dedup logic in `append_comment_sections()`.
 
 ```python
-def _format_progress_link_section(session_link: str) -> str:
+def _format_triage_session_link(session_link: str) -> str:
+    """Format a session link as a markdown link for the triage workflow."""
     normalized_link = session_link.strip()
     return f"[the triage session on Warp]({normalized_link})"
 ```
 
-This returns only the markdown link fragment, not a full sentence. The sentence context will be provided by the callers in the progress comment stages.
-
-Update `_PROGRESS_LINK_PREFIXES` to be removed or replaced since link sections will no longer start with a static text prefix. Instead, use a dedicated marker approach (see below).
+This returns only the markdown link fragment, not a full sentence. The sentence context is provided by the callers in the triage progress comment stages.
 
 #### 2. Change progress comment stages in `WorkflowProgressComment`
 
