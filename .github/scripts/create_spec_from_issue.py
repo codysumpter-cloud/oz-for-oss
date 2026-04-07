@@ -96,57 +96,61 @@ def main() -> None:
             workspace=workspace(),
         )
 
-        run = run_agent(
-            prompt=prompt,
-            skill_name=SPEC_DRIVEN_IMPLEMENTATION_SKILL,
-            title=f"Create specs for issue #{issue_number}",
-            config=config,
-            on_poll=lambda current_run: record_run_session_link(progress, current_run),
-        )
+        try:
+            run = run_agent(
+                prompt=prompt,
+                skill_name=SPEC_DRIVEN_IMPLEMENTATION_SKILL,
+                title=f"Create specs for issue #{issue_number}",
+                config=config,
+                on_poll=lambda current_run: record_run_session_link(progress, current_run),
+            )
 
-        if not branch_updated_since(
-            github,
-            owner,
-            repo,
-            branch_name,
-            created_after=run.created_at - timedelta(minutes=1),
-        ):
-            progress.complete("I analyzed this issue but did not produce a spec diff.")
-            return
-        existing_prs = list(github.get_pulls(state="open", head=f"{owner}:{branch_name}"))
-        pr_body = build_pr_body(
-            github,
-            owner,
-            repo,
-            issue_number=issue_number,
-            head=branch_name,
-            base=default_branch,
-            session_link=getattr(run, "session_link", None) or "",
-            closing_keyword="",
-        )
-        if existing_prs:
-            pr = existing_prs[0]
-            pr.edit(title=f"spec: {issue_title}", body=pr_body)
-        else:
-            pr = github.create_pull(
-                title=f"spec: {issue_title}",
+            if not branch_updated_since(
+                github,
+                owner,
+                repo,
+                branch_name,
+                created_after=run.created_at - timedelta(minutes=1),
+            ):
+                progress.complete("I analyzed this issue but did not produce a spec diff.")
+                return
+            existing_prs = list(github.get_pulls(state="open", head=f"{owner}:{branch_name}"))
+            pr_body = build_pr_body(
+                github,
+                owner,
+                repo,
+                issue_number=issue_number,
                 head=branch_name,
                 base=default_branch,
-                body=pr_body,
-                draft=False,
+                session_link=getattr(run, "session_link", None) or "",
+                closing_keyword="",
             )
-        spec_preview_section = build_spec_preview_section(owner, repo, branch_name, issue_number)
-        next_steps_section = build_next_steps_section(
-            [
-                "Review the spec PR and confirm that the proposed approach looks right.",
-                "Request or make any needed spec updates before moving on to implementation.",
-            ]
-        )
-        progress.complete(
-            f"I created a spec PR for this issue: {pr.html_url}\n\n"
-            f"{spec_preview_section}\n\n"
-            f"{next_steps_section}"
-        )
+            if existing_prs:
+                pr = existing_prs[0]
+                pr.edit(title=f"spec: {issue_title}", body=pr_body)
+            else:
+                pr = github.create_pull(
+                    title=f"spec: {issue_title}",
+                    head=branch_name,
+                    base=default_branch,
+                    body=pr_body,
+                    draft=False,
+                )
+            spec_preview_section = build_spec_preview_section(owner, repo, branch_name, issue_number)
+            next_steps_section = build_next_steps_section(
+                [
+                    "Review the spec PR and confirm that the proposed approach looks right.",
+                    "Request or make any needed spec updates before moving on to implementation.",
+                ]
+            )
+            progress.complete(
+                f"I created a spec PR for this issue: {pr.html_url}\n\n"
+                f"{spec_preview_section}\n\n"
+                f"{next_steps_section}"
+            )
+        except Exception:
+            progress.report_error()
+            raise
 
 if __name__ == "__main__":
     main()

@@ -24,7 +24,7 @@ from oz_workflows.helpers import (
     WorkflowProgressComment,
 )
 from oz_workflows.oz_client import build_agent_config, run_agent
-from oz_workflows.transport import new_transport_token, poll_for_transport_payload
+from oz_workflows.transport import cleanup_transport_comments, new_transport_token, poll_for_transport_payload
 from oz_workflows.triage import (
     compose_triaged_issue_body,
     dedupe_strings,
@@ -283,70 +283,75 @@ def process_issue(
         """
     ).strip()
 
-    run = run_agent(
-        prompt=prompt,
-        skill_name="triage-issue",
-        title=f"Triage issue #{issue_number}",
-        config=agent_config,
-        on_poll=lambda current_run: _record_triage_session_link(progress, current_run),
-    )
-    _record_triage_session_link(progress, run)
-    payload, transport_comment_id = poll_for_transport_payload(
-        github,
-        owner,
-        repo,
-        issue_number,
-        token=transport_token,
-        kind="issue-triage",
-        timeout_seconds=300,
-    )
-    issue.get_comment(transport_comment_id).delete()
-
-    result = json.loads(payload["decoded_payload"])
-    if not isinstance(result, dict):
-        raise RuntimeError("Triage result must decode to a JSON object")
-    apply_triage_result(
-        github,
-        owner,
-        repo,
-        issue,
-        result=result,
-        configured_labels=configured_labels,
-        repo_labels=repo_labels,
-    )
-
-    labels_text = ", ".join(extract_requested_labels(result)) or "no labels"
-    summary = _lowercase_first(str(result.get("summary") or "triage completed").strip())
-    session_link = progress.session_link
-
-    # Build the consolidated Stage 3 comment body.
-    parts: list[str] = []
-    if session_link:
-        link_text = _format_triage_session_link(session_link)
-        parts.append(
-            f"Oz has completed the triage of this issue. "
-            f"You can view {link_text}.\n\n"
-            f"The triage concluded that {summary}."
+    try:
+        run = run_agent(
+            prompt=prompt,
+            skill_name="triage-issue",
+            title=f"Triage issue #{issue_number}",
+            config=agent_config,
+            on_poll=lambda current_run: _record_triage_session_link(progress, current_run),
         )
-    else:
-        parts.append(
-            f"Oz has completed the triage of this issue. "
-            f"The triage concluded that {summary}."
+        _record_triage_session_link(progress, run)
+        payload, transport_comment_id = poll_for_transport_payload(
+            github,
+            owner,
+            repo,
+            issue_number,
+            token=transport_token,
+            kind="issue-triage",
+            timeout_seconds=300,
+        )
+        issue.get_comment(transport_comment_id).delete()
+
+        result = json.loads(payload["decoded_payload"])
+        if not isinstance(result, dict):
+            raise RuntimeError("Triage result must decode to a JSON object")
+        apply_triage_result(
+            github,
+            owner,
+            repo,
+            issue,
+            result=result,
+            configured_labels=configured_labels,
+            repo_labels=repo_labels,
         )
 
-    follow_up_questions = extract_follow_up_questions(result)
-    duplicates = extract_duplicate_of(result, current_issue_number=issue_number)
+        labels_text = ", ".join(extract_requested_labels(result)) or "no labels"
+        summary = _lowercase_first(str(result.get("summary") or "triage completed").strip())
+        session_link = progress.session_link
 
-    # Follow-up questions and duplicates are mutually exclusive.
-    # If duplicates are found, suppress follow-up questions.
-    if duplicates:
-        parts.append(build_duplicate_section(issue, duplicates))
-    elif follow_up_questions:
-        parts.append(build_follow_up_section(issue, follow_up_questions))
+        # Build the consolidated Stage 3 comment body.
+        parts: list[str] = []
+        if session_link:
+            link_text = _format_triage_session_link(session_link)
+            parts.append(
+                f"Oz has completed the triage of this issue. "
+                f"You can view {link_text}.\n\n"
+                f"The triage concluded that {summary}."
+            )
+        else:
+            parts.append(
+                f"Oz has completed the triage of this issue. "
+                f"The triage concluded that {summary}."
+            )
 
-    parts.append(TRIAGE_DISCLAIMER)
-    progress.replace_body("\n\n".join(parts))
-    append_summary(f"- Issue #{issue_number}: {summary} Labels: {labels_text}.\n")
+        follow_up_questions = extract_follow_up_questions(result)
+        duplicates = extract_duplicate_of(result, current_issue_number=issue_number)
+
+        # Follow-up questions and duplicates are mutually exclusive.
+        # If duplicates are found, suppress follow-up questions.
+        if duplicates:
+            parts.append(build_duplicate_section(issue, duplicates))
+        elif follow_up_questions:
+            parts.append(build_follow_up_section(issue, follow_up_questions))
+
+        parts.append(TRIAGE_DISCLAIMER)
+        progress.replace_body("\n\n".join(parts))
+        append_summary(f"- Issue #{issue_number}: {summary} Labels: {labels_text}.\n")
+    except Exception:
+        progress.report_error()
+        cleanup_transport_comments(github, owner, repo, issue_number)
+        raise
 
 
 def apply_triage_result(

@@ -144,60 +144,64 @@ def main() -> None:
             workspace=workspace(),
         )
 
-        run = run_agent(
-            prompt=prompt,
-            skill_name=IMPLEMENT_SPECS_SKILL,
-            title=f"Implement issue #{issue_number}",
-            config=config,
-            on_poll=lambda current_run: record_run_session_link(progress, current_run),
-        )
-
-        if not branch_updated_since(
-            github,
-            owner,
-            repo,
-            target_branch,
-            created_after=run.created_at - timedelta(minutes=1),
-        ):
-            progress.complete("I analyzed this issue but did not produce an implementation diff.")
-            return
-
-        commit_type = conventional_commit_prefix(issue.get("labels", []))
-
-        if selected_spec_pr:
-            github.get_pull(int(selected_spec_pr["number"])).edit(title=f"{commit_type}: {issue_title}")
-            progress.complete(
-                f"I pushed implementation updates to the linked approved spec PR: {selected_spec_pr['url']}\n\n"
-                f"{next_steps_section}"
+        try:
+            run = run_agent(
+                prompt=prompt,
+                skill_name=IMPLEMENT_SPECS_SKILL,
+                title=f"Implement issue #{issue_number}",
+                config=config,
+                on_poll=lambda current_run: record_run_session_link(progress, current_run),
             )
-            return
 
-        existing_prs = list(github.get_pulls(state="open", head=f"{owner}:{target_branch}"))
-        pr_body = build_pr_body(
-            github,
-            owner,
-            repo,
-            issue_number=issue_number,
-            head=target_branch,
-            base=default_branch,
-            session_link=getattr(run, "session_link", None) or "",
-            closing_keyword="Closes",
-        )
-        if existing_prs:
-            pr = existing_prs[0]
-            pr.edit(body=pr_body)
-        else:
-            pr = github.create_pull(
-                title=f"{commit_type}: {issue_title}",
+            if not branch_updated_since(
+                github,
+                owner,
+                repo,
+                target_branch,
+                created_after=run.created_at - timedelta(minutes=1),
+            ):
+                progress.complete("I analyzed this issue but did not produce an implementation diff.")
+                return
+
+            commit_type = conventional_commit_prefix(issue.get("labels", []))
+
+            if selected_spec_pr:
+                github.get_pull(int(selected_spec_pr["number"])).edit(title=f"{commit_type}: {issue_title}")
+                progress.complete(
+                    f"I pushed implementation updates to the linked approved spec PR: {selected_spec_pr['url']}\n\n"
+                    f"{next_steps_section}"
+                )
+                return
+
+            existing_prs = list(github.get_pulls(state="open", head=f"{owner}:{target_branch}"))
+            pr_body = build_pr_body(
+                github,
+                owner,
+                repo,
+                issue_number=issue_number,
                 head=target_branch,
                 base=default_branch,
-                body=pr_body,
-                draft=True,
+                session_link=getattr(run, "session_link", None) or "",
+                closing_keyword="Closes",
             )
-        progress.complete(
-            f"I created or updated a draft implementation PR for this issue: {pr.html_url}\n\n"
-            f"{next_steps_section}"
-        )
+            if existing_prs:
+                pr = existing_prs[0]
+                pr.edit(body=pr_body)
+            else:
+                pr = github.create_pull(
+                    title=f"{commit_type}: {issue_title}",
+                    head=target_branch,
+                    base=default_branch,
+                    body=pr_body,
+                    draft=True,
+                )
+            progress.complete(
+                f"I created or updated a draft implementation PR for this issue: {pr.html_url}\n\n"
+                f"{next_steps_section}"
+            )
+        except Exception:
+            progress.report_error()
+            raise
 
 if __name__ == "__main__":
     main()

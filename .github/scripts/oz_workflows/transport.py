@@ -59,6 +59,47 @@ def parse_transport_comment(body: str) -> dict[str, Any] | None:
     return payload
 
 
+def cleanup_transport_comments(
+    github: Repository | Any,
+    owner: str,
+    repo: str,
+    issue_number: int,
+) -> None:
+    """Delete any oz-workflow-transport comments on the given issue/PR. Best-effort."""
+    try:
+        if hasattr(github, "get_issue"):
+            comments = list(github.get_issue(issue_number).get_comments())
+        else:
+            comments = github.list_issue_comments(owner, repo, issue_number)
+        for comment in comments:
+            body = (
+                str(comment.get("body") or "")
+                if isinstance(comment, dict)
+                else str(getattr(comment, "body", "") or "")
+            )
+            if not TRANSPORT_PATTERN.search(body):
+                continue
+            try:
+                comment_id = (
+                    comment.get("id")
+                    if isinstance(comment, dict)
+                    else getattr(comment, "id", None)
+                )
+                if comment_id is not None:
+                    if hasattr(comment, "delete"):
+                        comment.delete()
+                    else:
+                        from .helpers import _delete_issue_comment
+
+                        _delete_issue_comment(
+                            github, owner, repo, issue_number, int(comment_id)
+                        )
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 def poll_for_transport_payload(
     github: Repository | Any,
     owner: str,
