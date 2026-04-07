@@ -215,6 +215,12 @@ def _format_progress_link_section(session_link: str) -> str:
     return f"Sharing session at: {normalized_link}"
 
 
+def _format_triage_session_link(session_link: str) -> str:
+    """Format a session link as a markdown link for the triage workflow."""
+    normalized_link = session_link.strip()
+    return f"[the triage session on Warp]({normalized_link})"
+
+
 def append_comment_sections(existing_body: str, metadata: str, sections: list[str]) -> str:
     content, metadata = split_comment_body(existing_body, metadata)
     normalized_sections = [section.strip() for section in sections if section and section.strip()]
@@ -323,6 +329,7 @@ class WorkflowProgressComment:
         self.metadata = comment_metadata(workflow, issue_number, run_id=self.run_id)
         self._workflow_prefix = _workflow_metadata_prefix(workflow, issue_number)
         self.comment_id: int | None = None
+        self.session_link: str = ""
 
     def start(self, status_line: str) -> None:
         self._append_sections([status_line])
@@ -334,6 +341,42 @@ class WorkflowProgressComment:
 
     def complete(self, status_line: str) -> None:
         self._append_sections([status_line])
+
+    def replace_body(self, content: str) -> None:
+        """Replace the full comment body, preserving the metadata marker."""
+        requester = resolve_progress_requester_login(
+            self.github,
+            self.owner,
+            self.repo,
+            self.issue_number,
+            event_payload=self.event_payload,
+            requester_login=self.requester_login,
+        )
+        sections: list[str] = []
+        if requester:
+            sections.append(f"@{requester}")
+        sections.append(content)
+        body = build_comment_body("\n\n".join(sections), self.metadata)
+        existing = self._get_or_find_existing_comment()
+        if existing is None:
+            created = _create_issue_comment(
+                self.github,
+                self.owner,
+                self.repo,
+                self.issue_number,
+                body,
+            )
+            self.comment_id = int(_field(created, "id"))
+            return
+        _update_issue_comment(
+            self.github,
+            self.owner,
+            self.repo,
+            self.issue_number,
+            int(_field(existing, "id")),
+            body,
+        )
+        self.comment_id = int(_field(existing, "id"))
 
     def cleanup(self) -> None:
         """Delete the progress comment if one exists from this or a previous run."""

@@ -5,11 +5,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from triage_new_issues import (
+    TRIAGE_DISCLAIMER,
+    _lowercase_first,
     apply_triage_result,
     build_duplicate_comment,
+    build_duplicate_section,
     build_follow_up_comment,
+    build_follow_up_section,
     extract_duplicate_of,
     extract_follow_up_questions,
+    follow_up_comment_metadata,
+    duplicate_comment_metadata,
     extract_requested_labels,
     format_recent_issues_for_dedupe,
     format_issue_comments,
@@ -17,6 +23,13 @@ from triage_new_issues import (
     resolve_issue_number_override,
     sync_duplicate_comment,
     sync_follow_up_comment,
+    _cleanup_legacy_triage_comments,
+)
+
+from oz_workflows.helpers import (
+    WorkflowProgressComment,
+    _format_triage_session_link,
+    build_comment_body,
 )
 
 from oz_workflows.triage import (
@@ -635,6 +648,233 @@ class SyncDuplicateCommentTest(unittest.TestCase):
         self.assertEqual(len(github.comments), 1)
 
 
+class FormatTriageSessionLinkTest(unittest.TestCase):
+    def test_formats_conversation_link_as_markdown(self) -> None:
+        result = _format_triage_session_link("https://app.warp.dev/conversation/abc")
+        self.assertEqual(result, "[the triage session on Warp](https://app.warp.dev/conversation/abc)")
+
+    def test_formats_sharing_link_as_markdown(self) -> None:
+        result = _format_triage_session_link("https://app.warp.dev/session/xyz")
+        self.assertEqual(result, "[the triage session on Warp](https://app.warp.dev/session/xyz)")
+
+    def test_strips_whitespace(self) -> None:
+        result = _format_triage_session_link("  https://example.test/session  ")
+        self.assertEqual(result, "[the triage session on Warp](https://example.test/session)")
+
+
+class BuildFollowUpSectionTest(unittest.TestCase):
+    def test_includes_reporter_mention_and_questions(self) -> None:
+        issue = {"number": 42, "user": {"login": "alice"}}
+        section = build_follow_up_section(issue, ["What OS?", "What version?"])
+        self.assertIn("### Follow-up questions", section)
+        self.assertIn("@alice", section)
+        self.assertIn("1. What OS?", section)
+        self.assertIn("2. What version?", section)
+        self.assertIn("Thanks for the report", section)
+        self.assertIn("Reply in-thread", section)
+
+    def test_omits_reporter_when_missing(self) -> None:
+        issue = {"number": 42, "user": {"login": ""}}
+        section = build_follow_up_section(issue, ["What OS?"])
+        self.assertIn("### Follow-up questions", section)
+        self.assertNotIn("@", section)
+        self.assertIn("1. What OS?", section)
+
+
+class BuildDuplicateSectionTest(unittest.TestCase):
+    def test_includes_issue_links_and_reasons(self) -> None:
+        issue = {"number": 42, "user": {"login": "alice"}}
+        duplicates = [
+            {"issue_number": 10, "title": "Original bug", "similarity_reason": "Same error"},
+            {"issue_number": 20, "title": "Another", "similarity_reason": ""},
+        ]
+        section = build_duplicate_section(issue, duplicates)
+        self.assertIn("### Potential duplicates", section)
+        self.assertIn("#10", section)
+        self.assertIn("Original bug", section)
+        self.assertIn("Why it looks similar: Same error", section)
+        self.assertIn("#20", section)
+        self.assertIn("Another", section)
+        self.assertNotIn("Why it looks similar: \n", section)
+        self.assertIn("close it as a duplicate after review", section)
+
+    def test_omits_reason_when_empty(self) -> None:
+        issue = {"number": 42, "user": {"login": "alice"}}
+        duplicates = [
+            {"issue_number": 5, "title": "Dupe", "similarity_reason": ""},
+        ]
+        section = build_duplicate_section(issue, duplicates)
+        self.assertNotIn("Why it looks similar", section)
+
+
+class CleanupLegacyTriageCommentsTest(unittest.TestCase):
+    def test_deletes_follow_up_and_duplicate_comments(self) -> None:
+        github = FakeTriageGitHubClient()
+        issue_number = 42
+        follow_up_body = build_comment_body(
+            "follow-up content",
+            follow_up_comment_metadata(issue_number),
+        )
+        dup_body = build_comment_body(
+            "duplicate content",
+            duplicate_comment_metadata(issue_number),
+        )
+        github.create_comment("acme", "widgets", issue_number, follow_up_body)
+        github.create_comment("acme", "widgets", issue_number, dup_body)
+        github.create_comment("acme", "widgets", issue_number, "unrelated comment")
+        self.assertEqual(len(github.comments), 3)
+        issue = {"number": issue_number}
+        _cleanup_legacy_triage_comments(github, "acme", "widgets", issue)
+        self.assertEqual(len(github.comments), 1)
+        self.assertIn("unrelated", str(github.comments[0]["body"]))
+
+    def test_noop_when_no_legacy_comments(self) -> None:
+        github = FakeTriageGitHubClient()
+        github.create_comment("acme", "widgets", 42, "normal comment")
+        issue = {"number": 42}
+        _cleanup_legacy_triage_comments(github, "acme", "widgets", issue)
+        self.assertEqual(len(github.comments), 1)
+
+
+class ReplaceBodyTest(unittest.TestCase):
+    def test_replaces_comment_content_preserving_metadata(self) -> None:
+        github = FakeTriageGitHubClient()
+        progress = WorkflowProgressComment(
+            github, "acme", "widgets", 42,
+            workflow="triage-new-issues",
+            event_payload={"sender": {"login": "alice"}},
+        )
+        progress.start("Stage 1 message")
+        self.assertEqual(len(github.comments), 1)
+        body_before = str(github.comments[0]["body"])
+        self.assertIn("Stage 1 message", body_before)
+        self.assertIn(progress.metadata, body_before)
+
+        progress.replace_body("Stage 2 message")
+        body_after = str(github.comments[0]["body"])
+        self.assertNotIn("Stage 1 message", body_after)
+        self.assertIn("Stage 2 message", body_after)
+        self.assertIn(progress.metadata, body_after)
+        self.assertIn("@alice", body_after)
+
+    def test_creates_comment_when_none_exists(self) -> None:
+        github = FakeTriageGitHubClient()
+        progress = WorkflowProgressComment(
+            github, "acme", "widgets", 42,
+            workflow="triage-new-issues",
+            event_payload={"sender": {"login": "bob"}},
+        )
+        progress.replace_body("Direct replace")
+        self.assertEqual(len(github.comments), 1)
+        self.assertIn("Direct replace", str(github.comments[0]["body"]))
+        self.assertIn(progress.metadata, str(github.comments[0]["body"]))
+
+
+class MutualExclusivityTest(unittest.TestCase):
+    """Verify that when both follow-up questions and duplicates are present,
+    only the duplicate section appears."""
+
+    def test_duplicates_suppress_follow_up_questions(self) -> None:
+        issue = {"number": 42, "user": {"login": "alice"}}
+        result = {
+            "summary": "looks like a dupe",
+            "follow_up_questions": ["What OS?"],
+            "duplicate_of": [
+                {"issue_number": 10, "title": "Original", "similarity_reason": "Same"},
+            ],
+        }
+        follow_up_questions = extract_follow_up_questions(result)
+        duplicates = extract_duplicate_of(result, current_issue_number=42)
+
+        # Simulate the logic from process_issue
+        parts: list[str] = ["Oz has completed the triage of this issue. The triage concluded that looks like a dupe."]
+        if duplicates:
+            parts.append(build_duplicate_section(issue, duplicates))
+        elif follow_up_questions:
+            parts.append(build_follow_up_section(issue, follow_up_questions))
+        parts.append(TRIAGE_DISCLAIMER)
+        body = "\n\n".join(parts)
+
+        self.assertIn("### Potential duplicates", body)
+        self.assertNotIn("### Follow-up questions", body)
+        self.assertIn(TRIAGE_DISCLAIMER, body)
+
+    def test_follow_up_when_no_duplicates(self) -> None:
+        issue = {"number": 42, "user": {"login": "alice"}}
+        result = {
+            "summary": "needs more info",
+            "follow_up_questions": ["What version?"],
+            "duplicate_of": [],
+        }
+        follow_up_questions = extract_follow_up_questions(result)
+        duplicates = extract_duplicate_of(result, current_issue_number=42)
+
+        parts: list[str] = ["Oz has completed the triage of this issue. The triage concluded that needs more info."]
+        if duplicates:
+            parts.append(build_duplicate_section(issue, duplicates))
+        elif follow_up_questions:
+            parts.append(build_follow_up_section(issue, follow_up_questions))
+        parts.append(TRIAGE_DISCLAIMER)
+        body = "\n\n".join(parts)
+
+        self.assertIn("### Follow-up questions", body)
+        self.assertNotIn("### Potential duplicates", body)
+        self.assertIn(TRIAGE_DISCLAIMER, body)
+
+    def test_neither_section_when_both_empty(self) -> None:
+        issue = {"number": 42, "user": {"login": "alice"}}
+        result = {
+            "summary": "all good",
+            "follow_up_questions": [],
+            "duplicate_of": [],
+        }
+        follow_up_questions = extract_follow_up_questions(result)
+        duplicates = extract_duplicate_of(result, current_issue_number=42)
+
+        parts: list[str] = ["Oz has completed the triage of this issue. The triage concluded that all good."]
+        if duplicates:
+            parts.append(build_duplicate_section(issue, duplicates))
+        elif follow_up_questions:
+            parts.append(build_follow_up_section(issue, follow_up_questions))
+        parts.append(TRIAGE_DISCLAIMER)
+        body = "\n\n".join(parts)
+
+        self.assertNotIn("### Follow-up questions", body)
+        self.assertNotIn("### Potential duplicates", body)
+        self.assertIn(TRIAGE_DISCLAIMER, body)
+
+
+class LowercaseFirstTest(unittest.TestCase):
+    def test_lowercases_initial_uppercase(self) -> None:
+        self.assertEqual(_lowercase_first("This is a bug"), "this is a bug")
+
+    def test_preserves_already_lowercase(self) -> None:
+        self.assertEqual(_lowercase_first("already lowercase"), "already lowercase")
+
+    def test_handles_empty_string(self) -> None:
+        self.assertEqual(_lowercase_first(""), "")
+
+    def test_handles_single_character(self) -> None:
+        self.assertEqual(_lowercase_first("A"), "a")
+
+    def test_preserves_rest_of_string(self) -> None:
+        self.assertEqual(_lowercase_first("The GPU driver is outdated"), "the GPU driver is outdated")
+
+
+class SummaryCasingInStage3Test(unittest.TestCase):
+    """Verify that the summary is lowercased when embedded mid-sentence."""
+
+    def test_uppercase_summary_reads_naturally(self) -> None:
+        summary = _lowercase_first(str("This is a new summary").strip())
+        sentence = f"The triage concluded that {summary}."
+        self.assertEqual(sentence, "The triage concluded that this is a new summary.")
+
+    def test_fallback_summary_stays_lowercase(self) -> None:
+        summary = _lowercase_first(str("triage completed").strip())
+        sentence = f"The triage concluded that {summary}."
+        self.assertEqual(sentence, "The triage concluded that triage completed.")
+
+
 class FakeTriageGitHubClient:
     def __init__(self) -> None:
         self.comments: list[dict[str, object]] = []
@@ -661,6 +901,12 @@ class FakeTriageGitHubClient:
         comment = {"id": len(self.comments) + 1, "body": body}
         self.comments.append(comment)
         return dict(comment)
+
+    def get_comment(self, owner: str, repo: str, comment_id: int) -> dict[str, object]:
+        for comment in self.comments:
+            if int(comment["id"]) == comment_id:
+                return dict(comment)
+        raise AssertionError(f"Missing comment {comment_id}")
 
     def update_comment(self, owner: str, repo: str, comment_id: int, body: str) -> dict[str, object]:
         for comment in self.comments:
