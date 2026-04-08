@@ -4,6 +4,7 @@ import base64
 import binascii
 import gzip
 import json
+import logging
 import re
 import time
 import uuid
@@ -138,7 +139,6 @@ def cleanup_transport_comments(
                     if hasattr(comment, "delete"):
                         comment.delete()
                     else:
-
                         _delete_issue_comment(
                             github, owner, repo, issue_number, int(comment_id)
                         )
@@ -170,7 +170,13 @@ def poll_for_transport_payload(
                 comment_id,
                 issue_number=issue_number,
             )
-        except Exception:
+        except Exception as exc:
+            logging.warning(
+                "Failed to fetch transport comment %d on issue/PR #%d: %s",
+                comment_id,
+                issue_number,
+                exc,
+            )
             comment = None
         if comment is not None:
             body = (
