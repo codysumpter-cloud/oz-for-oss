@@ -2,7 +2,9 @@ from __future__ import annotations
 from contextlib import closing
 
 import json
+import re
 from textwrap import dedent
+from typing import Any
 from github import Auth, Github
 
 from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, workspace
@@ -19,6 +21,138 @@ from oz_workflows.transport import (
     new_transport_token,
     poll_for_transport_payload,
 )
+
+HUNK_HEADER_PATTERN = re.compile(
+    r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))? \+(?P<new_start>\d+)(?:,(?P<new_count>\d+))? @@"
+)
+
+
+def _normalize_review_path(value: Any) -> str:
+    path = str(value or "").strip()
+    path = re.sub(r"^(a/|b/|\./)", "", path)
+    return path
+
+
+def _commentable_lines_for_patch(patch: str | None) -> dict[str, set[int]]:
+    commentable_lines = {"LEFT": set(), "RIGHT": set()}
+    if not patch:
+        return commentable_lines
+
+    old_line: int | None = None
+    new_line: int | None = None
+
+    for raw_line in patch.splitlines():
+        header_match = HUNK_HEADER_PATTERN.match(raw_line)
+        if header_match:
+            old_line = int(header_match.group("old_start"))
+            new_line = int(header_match.group("new_start"))
+            continue
+        if old_line is None or new_line is None or raw_line.startswith("\\"):
+            continue
+        marker = raw_line[:1]
+        if marker == "-":
+            commentable_lines["LEFT"].add(old_line)
+            old_line += 1
+        elif marker == "+":
+            commentable_lines["RIGHT"].add(new_line)
+            new_line += 1
+        elif marker == " ":
+            commentable_lines["LEFT"].add(old_line)
+            commentable_lines["RIGHT"].add(new_line)
+            old_line += 1
+            new_line += 1
+
+    return commentable_lines
+
+
+def _build_diff_line_map(pr: Any) -> dict[str, dict[str, set[int]]]:
+    return {
+        _normalize_review_path(file.filename): _commentable_lines_for_patch(
+            getattr(file, "patch", None)
+        )
+        for file in pr.get_files()
+    }
+
+
+def _normalize_review_payload(
+    review: dict[str, Any], diff_line_map: dict[str, dict[str, set[int]]]
+) -> tuple[str, list[dict[str, Any]]]:
+    if not isinstance(review, dict):
+        raise ValueError("Review payload must be a JSON object.")
+
+    summary = review.get("summary") or ""
+    if not isinstance(summary, str):
+        raise ValueError("Review payload `summary` must be a string.")
+
+    raw_comments = review.get("comments") or []
+    if not isinstance(raw_comments, list):
+        raise ValueError("Review payload `comments` must be a list.")
+
+    normalized_comments: list[dict[str, Any]] = []
+    errors: list[str] = []
+
+    for index, raw_comment in enumerate(raw_comments):
+        if not isinstance(raw_comment, dict):
+            errors.append(f"`comments[{index}]` must be an object.")
+            continue
+
+        path = _normalize_review_path(raw_comment.get("path"))
+        line = raw_comment.get("line")
+        body = str(raw_comment.get("body") or "").strip()
+        side = raw_comment.get("side") if raw_comment.get("side") in {"LEFT", "RIGHT"} else "RIGHT"
+
+        if not path:
+            errors.append(f"`comments[{index}]` is missing `path`.")
+            continue
+        if path not in diff_line_map:
+            errors.append(
+                f"`comments[{index}]` references `{path}`, which is not part of the PR diff. Move that feedback to `summary` instead."
+            )
+            continue
+        if not isinstance(line, int) or line <= 0:
+            errors.append(
+                f"`comments[{index}]` for `{path}` must include a positive integer `line`."
+            )
+            continue
+        if not body:
+            errors.append(f"`comments[{index}]` for `{path}` is missing `body`.")
+            continue
+
+        allowed_lines = diff_line_map[path][side]
+        if line not in allowed_lines:
+            errors.append(
+                f"`comments[{index}]` references `{path}:{line}` on `{side}`, which is not commentable in the PR diff."
+            )
+            continue
+
+        normalized_comment: dict[str, Any] = {
+            "path": path,
+            "line": line,
+            "side": side,
+            "body": body,
+        }
+
+        if "start_line" in raw_comment and raw_comment.get("start_line") is not None:
+            start_line = raw_comment.get("start_line")
+            if not isinstance(start_line, int) or start_line <= 0 or start_line >= line:
+                errors.append(
+                    f"`comments[{index}]` for `{path}` has invalid `start_line`; it must be a positive integer smaller than `line`."
+                )
+                continue
+            if start_line not in allowed_lines:
+                errors.append(
+                    f"`comments[{index}]` references `{path}:{start_line}` on `{side}` as `start_line`, which is not commentable in the PR diff."
+                )
+                continue
+            normalized_comment["start_line"] = start_line
+            normalized_comment["start_side"] = side
+
+        normalized_comments.append(normalized_comment)
+
+    for err in errors:
+        print(f"[review-validation] Dropped comment: {err}")
+
+    return summary.strip(), normalized_comments
 
 
 def main() -> None:
@@ -112,6 +246,7 @@ def main() -> None:
             - You are running in a cloud environment rather than a local workflow checkout.
             - Fetch the PR branch, generate `pr_description.txt`, and generate `pr_diff.txt` yourself before applying the review skill.
             - The annotated diff must use the same prefixes as the old workflow: `[OLD:n]`, `[NEW:n]`, and `[OLD:n,NEW:m]`.
+            - Only include comments for files and lines that exist in the generated PR diff. If feedback does not map to a diff file or commentable diff line, put it in `summary` instead of `comments`.
             - If spec context is present above, write it to `spec_context.md` before reviewing so the repository's `check-impl-against-spec` skill can be used.
             - Do not post the final review directly.
             - A reserved transport comment already exists on PR #{pr_number} as issue comment ID {transport_comment_id}. Do not create another transport comment.
@@ -145,25 +280,8 @@ def main() -> None:
             )
             pr.get_issue_comment(transport_comment_id).delete()
             review = json.loads(payload["decoded_payload"])
-            summary = str(review.get("summary") or "").strip()
-            comments = []
-            for raw_comment in review.get("comments", []):
-                path = str(raw_comment.get("path") or "").strip().removeprefix("a/").removeprefix("b/").removeprefix("./")
-                line = raw_comment.get("line")
-                body = str(raw_comment.get("body") or "").strip()
-                if not path or not isinstance(line, int) or line <= 0 or not body:
-                    continue
-                normalized = {
-                    "path": path,
-                    "line": line,
-                    "side": raw_comment.get("side") if raw_comment.get("side") in {"LEFT", "RIGHT"} else "RIGHT",
-                    "body": body,
-                }
-                start_line = raw_comment.get("start_line")
-                if isinstance(start_line, int) and 0 < start_line < line:
-                    normalized["start_line"] = start_line
-                    normalized["start_side"] = normalized["side"]
-                comments.append(normalized)
+            diff_line_map = _build_diff_line_map(pr)
+            summary, comments = _normalize_review_payload(review, diff_line_map)
             if not summary and not comments:
                 progress.complete("I completed the review and did not identify any actionable feedback for this pull request.")
                 return
