@@ -11,6 +11,8 @@ import zlib
 from typing import Any
 from github.Repository import Repository
 
+from .helpers import _create_issue_comment, _delete_issue_comment, _get_issue_comment
+
 
 TRANSPORT_PATTERN = re.compile(r"<!-- oz-workflow-transport (?P<payload>\{.*\}) -->", re.DOTALL)
 BASE64_ENCODING = "base64"
@@ -19,6 +21,50 @@ GZIP_BASE64_ENCODING = "gzip+base64"
 
 def new_transport_token() -> str:
     return uuid.uuid4().hex
+
+
+def _transport_comment_body(
+    *,
+    token: str,
+    kind: str,
+    payload: str = "",
+    encoding: str = "",
+) -> str:
+    transport_payload: dict[str, str] = {
+        "token": token,
+        "kind": kind,
+    }
+    if payload:
+        transport_payload["encoding"] = encoding or BASE64_ENCODING
+        transport_payload["payload"] = payload
+    else:
+        transport_payload["state"] = "pending"
+    return f"<!-- oz-workflow-transport {json.dumps(transport_payload, separators=(',', ':'))} -->"
+
+
+def create_transport_placeholder_comment(
+    github: Repository | Any,
+    owner: str,
+    repo: str,
+    issue_number: int,
+    *,
+    token: str,
+    kind: str,
+) -> int:
+    """Create a reserved transport comment whose ID can be handed to the agent."""
+    created = _create_issue_comment(
+        github,
+        owner,
+        repo,
+        issue_number,
+        _transport_comment_body(token=token, kind=kind),
+    )
+    comment_id = created.get("id") if isinstance(created, dict) else getattr(created, "id", None)
+    if comment_id is None:
+        raise RuntimeError(
+            f"Failed to create transport placeholder comment for {kind} ({token})"
+        )
+    return int(comment_id)
 
 
 def encode_transport_payload(decoded_payload: str, *, encoding: str = GZIP_BASE64_ENCODING) -> str:
@@ -52,6 +98,8 @@ def parse_transport_comment(body: str) -> dict[str, Any] | None:
         if not isinstance(payload, dict):
             return None
         encoded = str(payload.get("payload", "") or "")
+        if not encoded.strip():
+            return None
         encoding = str(payload.get("encoding") or BASE64_ENCODING).strip().lower()
         decoded = decode_transport_payload(encoded, encoding=encoding)
     except (TypeError, ValueError, json.JSONDecodeError, binascii.Error, UnicodeDecodeError, OSError, zlib.error, EOFError):
@@ -90,7 +138,6 @@ def cleanup_transport_comments(
                     if hasattr(comment, "delete"):
                         comment.delete()
                     else:
-                        from .helpers import _delete_issue_comment
 
                         _delete_issue_comment(
                             github, owner, repo, issue_number, int(comment_id)
@@ -107,6 +154,7 @@ def poll_for_transport_payload(
     repo: str,
     issue_number: int,
     *,
+    comment_id: int,
     token: str,
     kind: str,
     timeout_seconds: int = 600,
@@ -114,25 +162,27 @@ def poll_for_transport_payload(
 ) -> tuple[dict[str, Any], int]:
     deadline = time.monotonic() + timeout_seconds
     while True:
-        if hasattr(github, "get_issue"):
-            comments = list(github.get_issue(issue_number).get_comments())
-        else:
-            comments = github.list_issue_comments(owner, repo, issue_number)
-        for comment in reversed(comments):
+        try:
+            comment = _get_issue_comment(
+                github,
+                owner,
+                repo,
+                comment_id,
+                issue_number=issue_number,
+            )
+        except Exception:
+            comment = None
+        if comment is not None:
             body = (
                 str(comment.get("body") or "")
                 if isinstance(comment, dict)
                 else str(getattr(comment, "body", "") or "")
             )
             parsed = parse_transport_comment(body)
-            if not parsed:
-                continue
-            if parsed.get("token") != token or parsed.get("kind") != kind:
-                continue
-            comment_id = comment.get("id") if isinstance(comment, dict) else getattr(comment, "id", None)
-            return parsed, int(comment_id)
+            if parsed and parsed.get("token") == token and parsed.get("kind") == kind:
+                return parsed, comment_id
         if time.monotonic() >= deadline:
             raise RuntimeError(
-                f"Timed out waiting for Oz transport payload {kind} ({token}) on issue/PR #{issue_number}"
+                f"Timed out waiting for Oz transport payload {kind} ({token}) in comment {comment_id} on issue/PR #{issue_number}"
             )
         time.sleep(poll_interval_seconds)

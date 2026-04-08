@@ -24,7 +24,12 @@ from oz_workflows.helpers import (
     WorkflowProgressComment,
 )
 from oz_workflows.oz_client import build_agent_config, run_agent
-from oz_workflows.transport import cleanup_transport_comments, new_transport_token, poll_for_transport_payload
+from oz_workflows.transport import (
+    cleanup_transport_comments,
+    create_transport_placeholder_comment,
+    new_transport_token,
+    poll_for_transport_payload,
+)
 from oz_workflows.triage import (
     compose_triaged_issue_body,
     dedupe_strings,
@@ -201,6 +206,14 @@ def process_issue(
     original_report = extract_original_issue_report(current_body)
     recent_issues_text = format_recent_issues_for_dedupe(recent_open_issues, issue_number)
     transport_token = new_transport_token()
+    transport_comment_id = create_transport_placeholder_comment(
+        github,
+        owner,
+        repo,
+        issue_number,
+        token=transport_token,
+        kind="issue-triage",
+    )
     prompt = dedent(
         f"""
         Triage GitHub issue #{issue_number} in repository {owner}/{repo}.
@@ -276,10 +289,11 @@ def process_issue(
         - Keep the triage analysis in the visible issue body, and include SME `@mentions` there when useful.
         - Do not include the preserved original-report appendix in `issue_body`; the workflow will append it automatically.
         - Validate `triage_result.json` with `jq`.
-        - Do not update GitHub directly beyond the transport comment below.
+        - A reserved transport comment already exists on issue #{issue_number} as issue comment ID {transport_comment_id}. Do not create another transport comment or make other GitHub changes.
         - After validating the JSON, gzip the UTF-8 contents of `triage_result.json` and then base64 encode the compressed bytes.
-        - After validating the JSON, post exactly one temporary issue comment on issue #{issue_number} whose body is a single HTML comment in this exact format:
+        - After validating the JSON, replace the entire body of issue comment ID {transport_comment_id} with a single HTML comment in this exact format:
           <!-- oz-workflow-transport {{"token":"{transport_token}","kind":"issue-triage","encoding":"gzip+base64","payload":"<BASE64_OF_GZIPPED_TRIAGE_JSON>"}} -->
+        - After editing issue comment ID {transport_comment_id}, fetch that same issue comment and verify its body exactly matches what you wrote before exiting.
         """
     ).strip()
 
@@ -297,6 +311,7 @@ def process_issue(
             owner,
             repo,
             issue_number,
+            comment_id=transport_comment_id,
             token=transport_token,
             kind="issue-triage",
             timeout_seconds=600,
