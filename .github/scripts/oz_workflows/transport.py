@@ -54,7 +54,7 @@ def parse_transport_comment(body: str) -> dict[str, Any] | None:
         encoded = str(payload.get("payload", "") or "")
         encoding = str(payload.get("encoding") or BASE64_ENCODING).strip().lower()
         decoded = decode_transport_payload(encoded, encoding=encoding)
-    except (TypeError, ValueError, json.JSONDecodeError, binascii.Error, UnicodeDecodeError, OSError, zlib.error):
+    except (TypeError, ValueError, json.JSONDecodeError, binascii.Error, UnicodeDecodeError, OSError, zlib.error, EOFError):
         return None
     payload["decoded_payload"] = decoded
     return payload
