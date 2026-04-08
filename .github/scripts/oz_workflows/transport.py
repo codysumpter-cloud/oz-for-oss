@@ -7,6 +7,7 @@ import json
 import re
 import time
 import uuid
+import zlib
 from typing import Any
 from github.Repository import Repository
 
@@ -53,7 +54,7 @@ def parse_transport_comment(body: str) -> dict[str, Any] | None:
         encoded = str(payload.get("payload", "") or "")
         encoding = str(payload.get("encoding") or BASE64_ENCODING).strip().lower()
         decoded = decode_transport_payload(encoded, encoding=encoding)
-    except (TypeError, ValueError, json.JSONDecodeError, binascii.Error, UnicodeDecodeError, OSError):
+    except (TypeError, ValueError, json.JSONDecodeError, binascii.Error, UnicodeDecodeError, OSError, zlib.error, EOFError):
         return None
     payload["decoded_payload"] = decoded
     return payload
