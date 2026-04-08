@@ -12,6 +12,7 @@ from oz_workflows.helpers import (
     build_spec_preview_section,
     build_pr_body,
     coauthor_prompt_lines,
+    is_automation_user,
     org_member_comments_text,
     record_run_session_link,
     resolve_coauthor_line,
@@ -30,6 +31,8 @@ CREATE_TECH_SPEC_SKILL = "create-tech-spec"
 def main() -> None:
     owner, repo = repo_parts()
     event = load_event()
+    if is_automation_user((event.get("comment") or {}).get("user")):
+        return
     issue = event["issue"]
     issue_number = int(issue["number"])
     issue_title = issue["title"]

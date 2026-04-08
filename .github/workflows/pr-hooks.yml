@@ -20,7 +20,14 @@ concurrency:
   cancel-in-progress: false
 jobs:
   resolve_review_context:
-    if: github.event_name != 'pull_request_target'
+    if: >-
+      github.event_name != 'pull_request_target' &&
+      (
+        github.event_name != 'issue_comment' || (
+          github.event.comment.user.type != 'Bot' &&
+          !endsWith(github.event.comment.user.login, '[bot]')
+        )
+      )
     runs-on: ubuntu-slim
     outputs:
       should_review: ${{ steps.resolve.outputs.should_review }}

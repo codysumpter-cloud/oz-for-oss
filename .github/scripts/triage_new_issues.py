@@ -19,6 +19,7 @@ from oz_workflows.helpers import (
     _timestamp_text,
     build_comment_body,
     format_issue_comments_for_prompt,
+    is_automation_user,
     record_run_session_link,
     triggering_comment_prompt_text,
     WorkflowProgressComment,
@@ -85,6 +86,9 @@ def main() -> None:
     owner, repo = repo_parts()
     event = load_event()
     event_name = optional_env("GITHUB_EVENT_NAME")
+    if event_name == "issue_comment" and is_automation_user((event.get("comment") or {}).get("user")):
+        append_summary("Skipping automation-authored issue comment.\n")
+        return
     triage_config = load_triage_config(workspace() / ".github" / "issue-triage" / "config.json")
     configured_labels = triage_config["labels"]
     stakeholder_entries = load_stakeholders(workspace() / ".github" / "STAKEHOLDERS")
