@@ -50,6 +50,8 @@ Write comments with these constraints:
 - Prefer single-line comments.
 - Keep ranges to at most 10 lines.
 - Restrict inline comments to valid changed lines in this PR.
+- Only create file-level or inline comments for files that exist in this PR's diff.
+- If the relevant file or line is not part of the diff, put the feedback in `summary` instead of `comments`.
 
 ## Suggestion Blocks
 
