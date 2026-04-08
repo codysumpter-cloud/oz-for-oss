@@ -108,6 +108,9 @@ jobs:
               elif not should_run:
                   fh.write("skip_reason=event-not-enabled\n")
           PY
+      - name: Skip direct trigger because PR hooks are present
+        if: steps.resolve.outputs.should_run != 'true' && steps.resolve.outputs.skip_reason == 'pr-hooks-present'
+        run: echo "PR review orchestration skipped because .github/workflows/pr-hooks.yml is present."
       - name: Create GitHub App token
         if: steps.resolve.outputs.should_run == 'true'
         id: app_token
@@ -119,18 +122,17 @@ jobs:
       - name: React to triggering comment
         if: steps.resolve.outputs.should_run == 'true' && steps.resolve.outputs.comment_id != ''
         uses: actions/github-script@v7
+        env:
+          INPUT_COMMENT_ID: ${{ steps.resolve.outputs.comment_id }}
         with:
           github-token: ${{ steps.app_token.outputs.token }}
           script: |
             await github.rest.reactions.createForIssueComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              comment_id: parseInt('${{ steps.resolve.outputs.comment_id }}'),
+              comment_id: parseInt(process.env.INPUT_COMMENT_ID),
               content: 'eyes'
             });
-      - name: Skip direct trigger because PR hooks are present
-        if: steps.resolve.outputs.should_run != 'true' && steps.resolve.outputs.skip_reason == 'pr-hooks-present'
-        run: echo "PR review orchestration skipped because .github/workflows/pr-hooks.yml is present."
       - name: Checkout PR
         if: steps.resolve.outputs.should_run == 'true'
         env:
@@ -163,16 +165,21 @@ jobs:
         if: steps.resolve.outputs.should_run == 'true'
         id: prompt
         uses: actions/github-script@v7
+        env:
+          INPUT_PR_NUMBER: ${{ steps.resolve.outputs.pr_number }}
+          INPUT_TRIGGER_SOURCE: ${{ steps.resolve.outputs.trigger_source }}
+          INPUT_REQUESTER: ${{ steps.resolve.outputs.requester }}
+          INPUT_FOCUS: ${{ steps.resolve.outputs.focus }}
         with:
           github-token: ${{ steps.app_token.outputs.token }}
           script: |
             const fs = require('fs');
             const path = require('path');
             const { owner, repo } = context.repo;
-            const prNumber = parseInt('${{ steps.resolve.outputs.pr_number }}');
-            const triggerSource = '${{ steps.resolve.outputs.trigger_source }}';
-            const requester = '${{ steps.resolve.outputs.requester }}';
-            const focus = `${{ steps.resolve.outputs.focus }}`;
+            const prNumber = parseInt(process.env.INPUT_PR_NUMBER);
+            const triggerSource = process.env.INPUT_TRIGGER_SOURCE || '';
+            const requester = process.env.INPUT_REQUESTER || '';
+            const focus = process.env.INPUT_FOCUS || '';
 
             const { data: pr } = await github.rest.pulls.get({
               owner, repo, pull_number: prNumber,
@@ -373,12 +380,14 @@ jobs:
       - name: Post Review
         uses: actions/github-script@v7
         if: always() && steps.resolve.outputs.should_run == 'true'
+        env:
+          INPUT_PR_NUMBER: ${{ steps.resolve.outputs.pr_number }}
         with:
           github-token: ${{ steps.app_token.outputs.token }}
           script: |
             const fs = require('fs');
             const { owner, repo } = context.repo;
-            const prNumber = parseInt('${{ steps.resolve.outputs.pr_number }}');
+            const prNumber = parseInt(process.env.INPUT_PR_NUMBER);
 
             try {
               if (!fs.existsSync('review.json')) {
@@ -433,7 +442,7 @@ jobs:
                 if (typeof c.path !== 'string' || !c.path.trim()) continue;
 
                 const normalizedPath = c.path.trim()
-                  .replace(/^([ab]\/)*/, '')
+                  .replace(/^[ab]\//, '')
                   .replace(/^\.\//,  '');
 
                 if (!validPaths.has(normalizedPath)) {
