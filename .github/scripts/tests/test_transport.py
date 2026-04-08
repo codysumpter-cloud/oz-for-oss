@@ -9,6 +9,7 @@ from oz_workflows.transport import (
     GZIP_BASE64_ENCODING,
     TRANSPORT_PATTERN,
     cleanup_transport_comments,
+    create_transport_placeholder_comment,
     encode_transport_payload,
     parse_transport_comment,
     poll_for_transport_payload,
@@ -98,6 +99,18 @@ class ParseTransportCommentTest(unittest.TestCase):
         )
         self.assertIsNone(parse_transport_comment(body))
 
+    def test_returns_none_for_placeholder_comment_without_payload(self) -> None:
+        body = transport_comment(
+            json.dumps(
+                {
+                    "token": "abc",
+                    "kind": "review-json",
+                    "state": "pending",
+                }
+            )
+        )
+        self.assertIsNone(parse_transport_comment(body))
+
     def test_returns_none_for_corrupt_gzip_body(self) -> None:
         # Valid gzip header (1f 8b) but corrupt compressed data after the header.
         # This triggers zlib.error rather than gzip.BadGzipFile / OSError.
@@ -136,8 +149,44 @@ class ParseTransportCommentTest(unittest.TestCase):
         self.assertLess(len(compressed), len(plain))
 
 
+class CreateTransportPlaceholderCommentTest(unittest.TestCase):
+    def test_creates_reserved_transport_comment(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.comments: list[dict[str, object]] = []
+
+            def create_comment(
+                self,
+                owner: str,
+                repo: str,
+                issue_number: int,
+                body: str,
+            ) -> dict[str, object]:
+                comment = {"id": len(self.comments) + 1, "body": body}
+                self.comments.append(comment)
+                return comment
+
+        fake = FakeClient()
+        comment_id = create_transport_placeholder_comment(
+            fake,
+            "acme",
+            "widgets",
+            42,
+            token="abc",
+            kind="review-json",
+        )
+
+        self.assertEqual(comment_id, 1)
+        self.assertEqual(len(fake.comments), 1)
+        body = str(fake.comments[0]["body"])
+        self.assertRegex(body, TRANSPORT_PATTERN)
+        self.assertIn('"token":"abc"', body)
+        self.assertIn('"kind":"review-json"', body)
+        self.assertIn('"state":"pending"', body)
+
+
 class PollForTransportPayloadTest(unittest.TestCase):
-    def test_skips_malformed_transport_comments(self) -> None:
+    def test_reads_the_reserved_transport_comment_by_id(self) -> None:
         valid_comment = transport_comment(
             json.dumps(
                 {
@@ -148,24 +197,16 @@ class PollForTransportPayloadTest(unittest.TestCase):
                 }
             )
         )
-        malformed_comment = transport_comment(
-            json.dumps(
-                {
-                    "token": "abc",
-                    "kind": "review-json",
-                    "encoding": BASE64_ENCODING,
-                    "payload": "%%%not-base64%%%",
-                }
-            )
-        )
 
         class FakeGitHubClient:
-            def list_issue_comments(self, owner: str, repo: str, issue_number: int) -> list[dict[str, object]]:
-                self.request = (owner, repo, issue_number)
-                return [
-                    {"id": 1, "body": valid_comment},
-                    {"id": 2, "body": malformed_comment},
-                ]
+            def get_comment(
+                self,
+                owner: str,
+                repo: str,
+                comment_id: int,
+            ) -> dict[str, object]:
+                self.request = (owner, repo, comment_id)
+                return {"id": comment_id, "body": valid_comment}
 
         github = FakeGitHubClient()
         parsed, comment_id = poll_for_transport_payload(
@@ -173,14 +214,67 @@ class PollForTransportPayloadTest(unittest.TestCase):
             "warpdotdev",
             "oz-for-oss",
             42,
+            comment_id=7,
             token="abc",
             kind="review-json",
             timeout_seconds=0,
             poll_interval_seconds=0,
         )
 
-        self.assertEqual(github.request, ("warpdotdev", "oz-for-oss", 42))
-        self.assertEqual(comment_id, 1)
+        self.assertEqual(github.request, ("warpdotdev", "oz-for-oss", 7))
+        self.assertEqual(comment_id, 7)
+        self.assertEqual(parsed["decoded_payload"], '{"hello": "world"}')
+
+    def test_waits_for_reserved_comment_to_be_filled(self) -> None:
+        placeholder_comment = transport_comment(
+            json.dumps(
+                {
+                    "token": "abc",
+                    "kind": "review-json",
+                    "state": "pending",
+                }
+            )
+        )
+        final_comment = transport_comment(
+            json.dumps(
+                {
+                    "token": "abc",
+                    "kind": "review-json",
+                    "encoding": BASE64_ENCODING,
+                    "payload": encoded_payload({"hello": "world"}, encoding=BASE64_ENCODING),
+                }
+            )
+        )
+
+        class FakeGitHubClient:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def get_comment(
+                self,
+                owner: str,
+                repo: str,
+                comment_id: int,
+            ) -> dict[str, object]:
+                self.calls += 1
+                body = placeholder_comment if self.calls == 1 else final_comment
+                return {"id": comment_id, "body": body}
+
+        github = FakeGitHubClient()
+        parsed, comment_id = poll_for_transport_payload(
+            github,
+            "warpdotdev",
+            "oz-for-oss",
+            42,
+            comment_id=7,
+            token="abc",
+            kind="review-json",
+            timeout_seconds=1,
+            poll_interval_seconds=0,
+        )
+
+        self.assertEqual(comment_id, 7)
+        self.assertEqual(github.calls, 2)
         self.assertEqual(parsed["decoded_payload"], '{"hello": "world"}')
 
 
@@ -206,7 +300,12 @@ class CleanupTransportCommentsTest(unittest.TestCase):
                 ]
                 self.deleted_ids: list[int] = []
 
-            def list_issue_comments(self, owner: str, repo: str, issue_number: int) -> list[dict[str, object]]:
+            def list_issue_comments(
+                self,
+                owner: str,
+                repo: str,
+                issue_number: int,
+            ) -> list[dict[str, object]]:
                 return list(self.comments)
 
             def delete_comment(self, owner: str, repo: str, comment_id: int) -> None:
@@ -228,7 +327,12 @@ class CleanupTransportCommentsTest(unittest.TestCase):
                 ]
                 self.deleted_ids: list[int] = []
 
-            def list_issue_comments(self, owner: str, repo: str, issue_number: int) -> list[dict[str, object]]:
+            def list_issue_comments(
+                self,
+                owner: str,
+                repo: str,
+                issue_number: int,
+            ) -> list[dict[str, object]]:
                 return list(self.comments)
 
             def delete_comment(self, owner: str, repo: str, comment_id: int) -> None:
@@ -242,10 +346,14 @@ class CleanupTransportCommentsTest(unittest.TestCase):
 
     def test_swallows_errors_silently(self) -> None:
         class FakeClient:
-            def list_issue_comments(self, owner: str, repo: str, issue_number: int) -> list[dict[str, object]]:
+            def list_issue_comments(
+                self,
+                owner: str,
+                repo: str,
+                issue_number: int,
+            ) -> list[dict[str, object]]:
                 raise RuntimeError("API error")
 
-        # Should not raise
         cleanup_transport_comments(FakeClient(), "acme", "widgets", 42)
 
 

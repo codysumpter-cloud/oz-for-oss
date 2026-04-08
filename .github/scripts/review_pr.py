@@ -13,7 +13,12 @@ from oz_workflows.helpers import (
     WorkflowProgressComment,
 )
 from oz_workflows.oz_client import build_agent_config, run_agent
-from oz_workflows.transport import cleanup_transport_comments, new_transport_token, poll_for_transport_payload
+from oz_workflows.transport import (
+    cleanup_transport_comments,
+    create_transport_placeholder_comment,
+    new_transport_token,
+    poll_for_transport_payload,
+)
 
 
 def main() -> None:
@@ -69,6 +74,14 @@ def main() -> None:
         skill_name = "review-spec" if spec_only else "review-pr"
 
         transport_token = new_transport_token()
+        transport_comment_id = create_transport_placeholder_comment(
+            github,
+            owner,
+            repo,
+            pr_number,
+            token=transport_token,
+            kind="review-json",
+        )
         focus_line = (
             f"Additional focus from @{requester}: {focus}"
             if focus
@@ -101,9 +114,11 @@ def main() -> None:
             - The annotated diff must use the same prefixes as the old workflow: `[OLD:n]`, `[NEW:n]`, and `[OLD:n,NEW:m]`.
             - If spec context is present above, write it to `spec_context.md` before reviewing so the repository's `check-impl-against-spec` skill can be used.
             - Do not post the final review directly.
+            - A reserved transport comment already exists on PR #{pr_number} as issue comment ID {transport_comment_id}. Do not create another transport comment.
             - After you create and validate `review.json`, gzip the UTF-8 contents of that file and then base64 encode the compressed bytes.
-            - After you create and validate `review.json`, post exactly one temporary issue comment on PR #{pr_number} whose body is a single HTML comment in this exact format:
+            - After you create and validate `review.json`, replace the entire body of issue comment ID {transport_comment_id} with a single HTML comment in this exact format:
               <!-- oz-workflow-transport {{"token":"{transport_token}","kind":"review-json","encoding":"gzip+base64","payload":"<BASE64_OF_GZIPPED_REVIEW_JSON>"}} -->
+            - After editing issue comment ID {transport_comment_id}, fetch that same issue comment and verify its body exactly matches what you wrote before exiting.
             """
         ).strip()
 
@@ -124,6 +139,7 @@ def main() -> None:
                 owner,
                 repo,
                 pr_number,
+                comment_id=transport_comment_id,
                 token=transport_token,
                 kind="review-json",
             )

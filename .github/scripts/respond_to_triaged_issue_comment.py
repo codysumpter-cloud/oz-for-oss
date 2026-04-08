@@ -14,7 +14,12 @@ from oz_workflows.helpers import (
     triggering_comment_prompt_text,
 )
 from oz_workflows.oz_client import build_agent_config, run_agent
-from oz_workflows.transport import cleanup_transport_comments, new_transport_token, poll_for_transport_payload
+from oz_workflows.transport import (
+    cleanup_transport_comments,
+    create_transport_placeholder_comment,
+    new_transport_token,
+    poll_for_transport_payload,
+)
 from oz_workflows.triage import extract_original_issue_report
 
 
@@ -72,6 +77,14 @@ def main() -> None:
         original_report = extract_original_issue_report(current_body)
         triggering_comment_text = triggering_comment_prompt_text(event)
         transport_token = new_transport_token()
+        transport_comment_id = create_transport_placeholder_comment(
+            github,
+            owner,
+            repo,
+            issue_number,
+            token=transport_token,
+            kind="issue-comment-response",
+        )
         prompt = dedent(
             f"""
             Respond inline to a mention on GitHub issue #{issue_number} in repository {owner}/{repo}.
@@ -120,9 +133,11 @@ def main() -> None:
             - `analysis_comment` must be a direct reply suitable for posting as Oz's inline response.
             - Do not include HTML metadata or transport markup inside `analysis_comment`.
             - Validate `issue_response.json` with `jq`.
+            - A reserved transport comment already exists on issue #{issue_number} as issue comment ID {transport_comment_id}. Do not create another transport comment.
             - After validating the JSON, gzip the UTF-8 contents of `issue_response.json` and then base64 encode the compressed bytes.
-            - After validating the JSON, post exactly one temporary issue comment on issue #{issue_number} whose body is a single HTML comment in this exact format:
+            - After validating the JSON, replace the entire body of issue comment ID {transport_comment_id} with a single HTML comment in this exact format:
               <!-- oz-workflow-transport {{"token":"{transport_token}","kind":"issue-comment-response","encoding":"gzip+base64","payload":"<BASE64_OF_GZIPPED_RESPONSE_JSON>"}} -->
+            - After editing issue comment ID {transport_comment_id}, fetch that same issue comment and verify its body exactly matches what you wrote before exiting.
             """
         ).strip()
 
@@ -143,9 +158,10 @@ def main() -> None:
                 owner,
                 repo,
                 issue_number,
+                comment_id=transport_comment_id,
                 token=transport_token,
                 kind="issue-comment-response",
-            timeout_seconds=600,
+                timeout_seconds=600,
             )
             issue.get_comment(transport_comment_id).delete()
             result = json.loads(payload["decoded_payload"])
