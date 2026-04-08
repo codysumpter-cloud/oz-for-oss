@@ -10,6 +10,11 @@ on:
         required: true
 jobs:
   respond_inline:
+    if: >-
+      github.event_name != 'issue_comment' || (
+        github.event.comment.user.type != 'Bot' &&
+        !endsWith(github.event.comment.user.login, '[bot]')
+      )
     runs-on: ubuntu-slim
     permissions:
       contents: read

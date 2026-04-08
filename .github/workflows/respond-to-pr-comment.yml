@@ -12,7 +12,8 @@ jobs:
     if: >-
       contains(github.event.comment.body, '@oz-agent') &&
       contains(fromJSON('["COLLABORATOR","MEMBER","OWNER"]'), github.event.comment.author_association) &&
-      github.event.comment.user.login != 'github-actions[bot]' &&
+      github.event.comment.user.type != 'Bot' &&
+      !endsWith(github.event.comment.user.login, '[bot]') &&
       (github.event_name == 'pull_request_review_comment' || (github.event_name == 'issue_comment' && github.event.issue.pull_request))
     name: Respond to PR comment
     runs-on: ubuntu-slim

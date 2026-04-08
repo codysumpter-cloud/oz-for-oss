@@ -4,7 +4,7 @@ import re
 
 from oz_workflows.actions import notice, set_output
 from oz_workflows.env import load_event, optional_env
-from oz_workflows.helpers import ORG_MEMBER_ASSOCIATIONS
+from oz_workflows.helpers import ORG_MEMBER_ASSOCIATIONS, is_automation_user
 
 
 SLASH_COMMAND_PATTERN = re.compile(
@@ -42,7 +42,7 @@ def main() -> None:
             bool(issue.get("pull_request"))
             and bool(match)
             and comment.get("author_association") in ORG_MEMBER_ASSOCIATIONS
-            and requester != "github-actions[bot]"
+            and not is_automation_user(comment.get("user"))
         )
         if should_review:
             pr_number = str(issue["number"])

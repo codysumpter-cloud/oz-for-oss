@@ -12,6 +12,7 @@ from oz_workflows.helpers import (
     branch_updated_since,
     build_next_steps_section,
     coauthor_prompt_lines,
+    is_automation_user,
     org_member_comments_text,
     record_run_session_link,
     resolve_coauthor_line,
@@ -25,6 +26,8 @@ from oz_workflows.oz_client import build_agent_config, run_agent
 def main() -> None:
     owner, repo = repo_parts()
     event = load_event()
+    if is_automation_user((event.get("comment") or {}).get("user")):
+        return
     github_event_name = optional_env("GITHUB_EVENT_NAME")
     with closing(Github(auth=Auth.Token(require_env("GH_TOKEN")))) as client:
         github = client.get_repo(repo_slug())

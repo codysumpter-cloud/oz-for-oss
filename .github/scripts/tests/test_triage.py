@@ -214,16 +214,36 @@ class TriageWorkflowGuardsTest(unittest.TestCase):
     def _normalized_workflow_text(self, filename: str) -> str:
         workflow_path = Path(__file__).resolve().parents[2] / "workflows" / filename
         return " ".join(workflow_path.read_text(encoding="utf-8").split())
+    def test_comment_workflows_ignore_automation_commenters(self) -> None:
+        automation_guard = (
+            "github.event.comment.user.type != 'Bot' && "
+            "!endsWith(github.event.comment.user.login, '[bot]')"
+        )
+        for filename in (
+            "triage-new-issues.yml",
+            "triage-new-issues-local.yml",
+            "respond-to-triaged-issue-comment.yml",
+            "respond-to-triaged-issue-comment-local.yml",
+            "respond-to-pr-comment.yml",
+            "create-spec-from-issue-local.yml",
+            "create-implementation-from-issue-local.yml",
+            "pr-hooks.yml",
+        ):
+            with self.subTest(filename=filename):
+                self.assertIn(
+                    automation_guard,
+                    self._normalized_workflow_text(filename),
+                )
 
     def test_reusable_workflow_ignores_bot_issue_comment_events(self) -> None:
         self.assertIn(
-            "if: >- github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot'",
+            "if: >- github.event_name != 'issue_comment' || ( github.event.comment.user.type != 'Bot' && !endsWith(github.event.comment.user.login, '[bot]') )",
             self._normalized_workflow_text("triage-new-issues.yml"),
         )
 
     def test_local_workflow_ignores_bot_issue_comment_events(self) -> None:
         self.assertIn(
-            "github.event_name == 'issue_comment' && !github.event.issue.pull_request && github.event.comment.user.type != 'Bot' && (",
+            "github.event_name == 'issue_comment' && !github.event.issue.pull_request && github.event.comment.user.type != 'Bot' && !endsWith(github.event.comment.user.login, '[bot]') && (",
             self._normalized_workflow_text("triage-new-issues-local.yml"),
         )
 

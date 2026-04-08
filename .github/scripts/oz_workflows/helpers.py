@@ -35,6 +35,16 @@ def _login(item: Any) -> str:
     return str(getattr(item, "login", "") or "")
 
 
+def is_automation_user(user: Any) -> bool:
+    """Return whether *user* is an automation account that should not trigger workflows."""
+    login = _login(user).strip().lower()
+    user_type = str(_field(user, "type", "") or "").strip().lower()
+    return (
+        user_type == "bot"
+        or (bool(login) and login.endswith("[bot]"))
+    )
+
+
 def _timestamp_text(value: Any) -> str:
     if isinstance(value, datetime):
         return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")

@@ -10,6 +10,7 @@ from oz_workflows.env import load_event, repo_parts, repo_slug, require_env, wor
 from oz_workflows.helpers import (
     WorkflowProgressComment,
     format_issue_comments_for_prompt,
+    is_automation_user,
     record_run_session_link,
     triggering_comment_prompt_text,
 )
@@ -48,6 +49,8 @@ def extract_analysis_comment(result: dict[str, Any]) -> str:
 def main() -> None:
     owner, repo = repo_parts()
     event = load_event()
+    if is_automation_user((event.get("comment") or {}).get("user")):
+        return
     issue_number = int(event["issue"]["number"])
     triggering_comment_id = int((event.get("comment") or {}).get("id") or 0) or None
     requester = ((event.get("comment") or {}).get("user") or {}).get("login") or ""

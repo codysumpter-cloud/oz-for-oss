@@ -11,6 +11,7 @@ from oz_workflows.helpers import (
     coauthor_prompt_lines,
     conventional_commit_prefix,
     extract_issue_numbers_from_text,
+    is_automation_user,
     is_spec_only_pr,
     org_member_comments_text,
     resolve_coauthor_line,
@@ -61,6 +62,16 @@ class TriggeringCommentPromptTextTest(unittest.TestCase):
             ),
             "@alice commented:\n@oz-agent please focus on rollout safety",
         )
+
+class IsAutomationUserTest(unittest.TestCase):
+    def test_detects_github_bot_user_type(self) -> None:
+        self.assertTrue(is_automation_user({"login": "some-user", "type": "Bot"}))
+
+    def test_detects_bot_suffix_login(self) -> None:
+        self.assertTrue(is_automation_user({"login": "dependabot[bot]", "type": "User"}))
+
+    def test_returns_false_for_human_user(self) -> None:
+        self.assertFalse(is_automation_user({"login": "alice", "type": "User"}))
 
 
 class ResolveProgressRequesterLoginTest(unittest.TestCase):

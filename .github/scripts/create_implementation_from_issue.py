@@ -13,6 +13,7 @@ from oz_workflows.helpers import (
     build_pr_body,
     coauthor_prompt_lines,
     conventional_commit_prefix,
+    is_automation_user,
     org_member_comments_text,
     record_run_session_link,
     resolve_coauthor_line,
@@ -30,6 +31,8 @@ IMPLEMENT_ISSUE_SKILL = "implement-issue"
 def main() -> None:
     owner, repo = repo_parts()
     event = load_event()
+    if is_automation_user((event.get("comment") or {}).get("user")):
+        return
     issue = event["issue"]
     issue_number = int(issue["number"])
     issue_title = issue["title"]
