@@ -42,9 +42,15 @@ on:
       - labeled
 jobs:
   review_pr:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
+    env:
+      WARP_ENVIRONMENT_ID: ${{ vars.WARP_ENVIRONMENT_ID || '' }}
+      WORKFLOW_CODE_REPOSITORY: warpdotdev/oz-for-oss
+      WORKFLOW_CODE_REF: ${{ github.repository == 'warpdotdev/oz-for-oss' && github.sha || 'main' }}
+      WORKFLOW_CODE_PATH: __oz_shared
     permissions:
       contents: read
+      id-token: write
       pull-requests: write
       issues: write
     steps:
@@ -108,9 +114,6 @@ jobs:
               elif not should_run:
                   fh.write("skip_reason=event-not-enabled\n")
           PY
-      - name: Skip direct trigger because PR hooks are present
-        if: steps.resolve.outputs.should_run != 'true' && steps.resolve.outputs.skip_reason == 'pr-hooks-present'
-        run: echo "PR review orchestration skipped because .github/workflows/pr-hooks.yml is present."
       - name: Create GitHub App token
         if: steps.resolve.outputs.should_run == 'true'
         id: app_token
@@ -119,427 +122,58 @@ jobs:
           app-id: ${{ secrets.OZ_MGMT_GHA_APP_ID }}
           owner: ${{ github.repository_owner }}
           private-key: ${{ secrets.OZ_MGMT_GHA_PRIVATE_KEY }}
-      - name: React to triggering comment
-        if: steps.resolve.outputs.should_run == 'true' && steps.resolve.outputs.comment_id != ''
-        uses: actions/github-script@v7
-        env:
-          INPUT_COMMENT_ID: ${{ steps.resolve.outputs.comment_id }}
-        with:
-          github-token: ${{ steps.app_token.outputs.token }}
-          script: |
-            await github.rest.reactions.createForIssueComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: parseInt(process.env.INPUT_COMMENT_ID),
-              content: 'eyes'
-            });
-      - name: Checkout PR
+      - name: Checkout workflow code
         if: steps.resolve.outputs.should_run == 'true'
-        env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.WORKFLOW_CODE_REPOSITORY }}
+          ref: ${{ env.WORKFLOW_CODE_REF }}
+          path: ${{ env.WORKFLOW_CODE_PATH }}
+          token: ${{ steps.app_token.outputs.token }}
+      - name: Authenticate to Google Cloud for staging secret access
+        if: steps.resolve.outputs.should_run == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/643991131484/locations/global/workloadIdentityPools/github-actions/providers/warp-terraform
+      - name: Set up Cloud SDK
+        if: steps.resolve.outputs.should_run == 'true'
+        uses: google-github-actions/setup-gcloud@v2
+      - name: Resolve staging origin token
+        if: steps.resolve.outputs.should_run == 'true'
+        id: staging_origin_token
         run: |
-          PR_NUMBER="${{ steps.resolve.outputs.pr_number }}"
-          gh pr checkout "$PR_NUMBER"
-          BASE_REF=$(gh pr view "$PR_NUMBER" --json baseRefName -q '.baseRefName')
-          BASE_SHA=$(gh pr view "$PR_NUMBER" --json baseRefOid -q '.baseRefOid')
-          git fetch origin "$BASE_REF"
-          git diff "$BASE_SHA"...HEAD | awk '
-          /^diff --git/ { print; next }
-          /^index / { print; next }
-          /^---/ { print; next }
-          /^\+\+\+/ { print; next }
-          /^Binary files / { print; next }
-          /^@@/ {
-            split($2, old_parts, ",")
-            split($3, new_parts, ",")
-            old_line = -old_parts[1]
-            new_line = substr(new_parts[1], 2)
-            print
-            next
-          }
-          /^-/ { printf "[OLD:%d]%s\n", old_line++, $0; next }
-          /^\+/ { printf "[NEW:%d]%s\n", new_line++, $0; next }
-          { printf "[OLD:%d,NEW:%d]%s\n", old_line++, new_line++, $0 }
-          ' > pr_diff.txt
-      - name: Construct review prompt
+          token="$(gcloud --project=warp-server-staging secrets versions access latest --secret=staging-origin-token)"
+          printf '::add-mask::%s\n' "$token"
+          {
+            echo 'token<<EOF'
+            printf '%s\n' "$token"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+      - name: Set up Python
         if: steps.resolve.outputs.should_run == 'true'
-        id: prompt
-        uses: actions/github-script@v7
-        env:
-          INPUT_PR_NUMBER: ${{ steps.resolve.outputs.pr_number }}
-          INPUT_TRIGGER_SOURCE: ${{ steps.resolve.outputs.trigger_source }}
-          INPUT_REQUESTER: ${{ steps.resolve.outputs.requester }}
-          INPUT_FOCUS: ${{ steps.resolve.outputs.focus }}
+        uses: actions/setup-python@v6
         with:
-          github-token: ${{ steps.app_token.outputs.token }}
-          script: |
-            const fs = require('fs');
-            const path = require('path');
-            const { owner, repo } = context.repo;
-            const prNumber = parseInt(process.env.INPUT_PR_NUMBER);
-            const triggerSource = process.env.INPUT_TRIGGER_SOURCE || '';
-            const requester = process.env.INPUT_REQUESTER || '';
-            const focus = process.env.INPUT_FOCUS || '';
-
-            const { data: pr } = await github.rest.pulls.get({
-              owner, repo, pull_number: prNumber,
-            });
-
-            const diffPath = path.resolve('pr_diff.txt');
-            const descriptionPath = path.resolve('pr_description.txt');
-            fs.writeFileSync(descriptionPath, pr.body || 'No description provided.', 'utf8');
-
-            // Fetch existing PR comments.
-            const commentsPath = path.resolve('pr_comments.txt');
-            const commentSections = [];
-
-            const issueComments = await github.paginate(
-              github.rest.issues.listComments,
-              { owner, repo, issue_number: prNumber }
-            );
-            if (issueComments.length > 0) {
-              commentSections.push('## PR-level comments\n');
-              for (const c of issueComments) {
-                commentSections.push(`### Comment by @${c.user.login} (${c.created_at})`);
-                commentSections.push(c.body || '');
-                commentSections.push('');
-              }
-            }
-
-            const reviewComments = await github.paginate(
-              github.rest.pulls.listReviewComments,
-              { owner, repo, pull_number: prNumber }
-            );
-            if (reviewComments.length > 0) {
-              commentSections.push('## Inline review comments\n');
-              for (const c of reviewComments) {
-                commentSections.push(`### Comment by @${c.user.login} on ${c.path}${c.line ? `:${c.line}` : ''} (${c.created_at})`);
-                if (c.diff_hunk) {
-                  commentSections.push('```diff');
-                  commentSections.push(c.diff_hunk);
-                  commentSections.push('```');
-                }
-                commentSections.push(c.body || '');
-                commentSections.push('');
-              }
-            }
-
-            fs.writeFileSync(
-              commentsPath,
-              commentSections.length > 0 ? commentSections.join('\n') : 'No existing comments on this PR.',
-              'utf8'
-            );
-
-            // Determine changed files and whether this is a spec-only PR.
-            const prFiles = await github.paginate(
-              github.rest.pulls.listFiles,
-              { owner, repo, pull_number: prNumber }
-            );
-            const changedFiles = prFiles.map(f => f.filename);
-            const specOnly = changedFiles.length > 0 && changedFiles.every(f => f.startsWith('specs/'));
-
-            // Resolve issue number from branch name, spec file paths, and PR body.
-            const headRef = pr.head.ref || '';
-            const branchMatches = [...headRef.matchAll(/(?:^|\/)(?:spec|implement)-issue-(\d+)(?:$|[\/\-])/g)]
-              .map(m => parseInt(m[1]));
-            const specFileMatches = changedFiles
-              .map(f => f.match(/^specs\/issue-(\d+)\/(?:product|tech)\.md$/))
-              .filter(Boolean)
-              .map(m => parseInt(m[1]));
-            const bodyText = pr.body || '';
-            const issueRefPattern = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?|implements?|issue)\s*:?\s+#(\d+)/gi;
-            const bodyMatches = [...bodyText.matchAll(issueRefPattern)].map(m => parseInt(m[1]));
-            const urlPattern = new RegExp(`https://github\.com/${owner}/${repo}/issues/(\\d+)`, 'gi');
-            const urlMatches = [...bodyText.matchAll(urlPattern)].map(m => parseInt(m[1]));
-            const candidates = [...new Set([...branchMatches, ...specFileMatches, ...bodyMatches, ...urlMatches])];
-
-            let issueNumber = null;
-            for (const candidate of candidates) {
-              try {
-                const { data: issue } = await github.rest.issues.get({
-                  owner, repo, issue_number: candidate,
-                });
-                if (!issue.pull_request) {
-                  issueNumber = candidate;
-                  break;
-                }
-              } catch (_e) { /* not found, skip */ }
-            }
-
-            // Resolve spec context from approved spec PRs or local files.
-            const specContextSections = [];
-            let specContextSource = '';
-            if (issueNumber) {
-              const specBranch = `oz-agent/spec-issue-${issueNumber}`;
-              try {
-                const specPrs = await github.paginate(
-                  github.rest.pulls.list,
-                  { owner, repo, state: 'all', head: `${owner}:${specBranch}` }
-                );
-                for (const specPr of specPrs) {
-                  const { data: labels } = await github.rest.issues.listLabelsOnIssue({
-                    owner, repo, issue_number: specPr.number,
-                  });
-                  if (labels.some(l => l.name === 'plan-approved')) {
-                    specContextSource = 'approved-pr';
-                    specContextSections.push(
-                      `Linked approved spec PR: #${specPr.number} (${specPr.html_url})`
-                    );
-                    const specPrFiles = await github.paginate(
-                      github.rest.pulls.listFiles,
-                      { owner, repo, pull_number: specPr.number }
-                    );
-                    for (const file of specPrFiles) {
-                      if (file.filename.startsWith('specs/')) {
-                        try {
-                          const { data: content } = await github.rest.repos.getContent({
-                            owner, repo, path: file.filename, ref: specPr.head.ref,
-                          });
-                          if (!Array.isArray(content) && content.content) {
-                            const decoded = Buffer.from(content.content, 'base64').toString('utf8').trim();
-                            specContextSections.push(`## ${file.filename}\n\n${decoded}`);
-                          }
-                        } catch (_e) { /* skip missing */ }
-                      }
-                    }
-                    break;
-                  }
-                }
-              } catch (_e) { /* no spec PRs */ }
-
-              if (!specContextSource) {
-                const specDir = `specs/issue-${issueNumber}`;
-                for (const name of ['product.md', 'tech.md']) {
-                  const specPath = path.join(specDir, name);
-                  if (fs.existsSync(specPath)) {
-                    if (!specContextSource) {
-                      specContextSource = 'directory';
-                      specContextSections.push('Repository spec context was found in `specs/`.');
-                    }
-                    const content = fs.readFileSync(specPath, 'utf8').trim();
-                    specContextSections.push(`## ${specDir}/${name}\n\n${content}`);
-                  }
-                }
-              }
-            }
-
-            if (specContextSections.length > 0) {
-              fs.writeFileSync('spec_context.md', specContextSections.join('\n\n'), 'utf8');
-            }
-
-            // Choose skill based on whether this is a spec-only PR.
-            const skillName = specOnly ? 'review-spec' : 'review-pr';
-            core.setOutput('skill_name', `warpdotdev/oz-for-oss:${skillName}`);
-
-            // Build focus line.
-            let focusLine;
-            if (focus) {
-              focusLine = `Additional focus from @${requester}: ${focus}`;
-            } else if (triggerSource === 'issue_comment') {
-              focusLine = `The review was requested by @${requester} via a review command. Perform a general review if no extra guidance was provided.`;
-            } else {
-              focusLine = 'Perform a general review of the pull request.';
-            }
-
-            const issueLine = issueNumber
-              ? `#${issueNumber}`
-              : 'No associated issue resolved for spec lookup.';
-
-            const specContextStatus = specContextSections.length > 0
-              ? 'Spec context has been written to `spec_context.md` — use it during review.'
-              : 'No approved or repository spec context was found for this PR.';
-
-            const prompt = [
-              `Review pull request #${prNumber} in repository ${owner}/${repo}.`,
-              '',
-              `PR title: ${pr.title}`,
-              `PR description: Read \`${descriptionPath}\``,
-              `Annotated diff: Read \`${diffPath}\``,
-              `Existing PR comments: Read \`${commentsPath}\``,
-              `Trigger: ${triggerSource}`,
-              focusLine,
-              `Issue: ${issueLine}`,
-              '',
-              specContextStatus,
-              '',
-              'Use the review skill instructions as the base behavior. Apply them to this PR only.',
-            ].join('\n');
-
-            core.setOutput('prompt', prompt);
-      - name: Run Oz Agent Review
+          python-version: '3.11'
+      - name: Install Python workflow dependencies
         if: steps.resolve.outputs.should_run == 'true'
-        uses: warpdotdev/oz-agent-action@v1
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r "${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/requirements.txt"
+      - name: Skip direct trigger because PR hooks are present
+        if: steps.resolve.outputs.should_run != 'true' && steps.resolve.outputs.skip_reason == 'pr-hooks-present'
+        run: echo "PR review orchestration skipped because .github/workflows/pr-hooks.yml is present."
+      - name: Run PR review workflow
+        if: steps.resolve.outputs.should_run == 'true'
         env:
+          PYTHONPATH: ${{ env.WORKFLOW_CODE_PATH }}/.github/scripts
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
-        with:
-          skill: ${{ steps.prompt.outputs.skill_name }}
-          prompt: ${{ steps.prompt.outputs.prompt }}
-          warp_api_key: ${{ secrets.WARP_API_KEY }}
-          model: ${{ vars.WARP_AGENT_MODEL || '' }}
-          mcp: ${{ vars.WARP_AGENT_MCP || '' }}
-      - name: Post Review
-        uses: actions/github-script@v7
-        if: always() && steps.resolve.outputs.should_run == 'true'
-        env:
-          INPUT_PR_NUMBER: ${{ steps.resolve.outputs.pr_number }}
-        with:
-          github-token: ${{ steps.app_token.outputs.token }}
-          script: |
-            const fs = require('fs');
-            const { owner, repo } = context.repo;
-            const prNumber = parseInt(process.env.INPUT_PR_NUMBER);
-
-            try {
-              if (!fs.existsSync('review.json')) {
-                console.log('No review.json found. Skipping review posting.');
-                return;
-              }
-
-              const reviewContent = fs.readFileSync('review.json', 'utf8');
-
-              let review;
-              try {
-                review = JSON.parse(reviewContent);
-              } catch (parseError) {
-                core.warning(
-                  `Failed to parse review.json. Attempting to sanitize. Original error: ${parseError.message}`
-                );
-                const sanitized = reviewContent.replace(/[\u0000-\u001F]+/g, ' ');
-                try {
-                  review = JSON.parse(sanitized);
-                } catch (sanitizedError) {
-                  core.setFailed(
-                    `Failed to parse review.json even after sanitizing: ${sanitizedError.message}`
-                  );
-                  return;
-                }
-              }
-
-              const decodeNewlines = (text) => {
-                if (typeof text !== 'string') return text;
-                return text
-                  .replace(/\r\n/g, '\n')
-                  .replace(/\\n/g, '\n');
-              };
-
-              const rawComments = Array.isArray(review.comments) ? review.comments : [];
-
-              const prFiles = await github.paginate(
-                github.rest.pulls.listFiles,
-                { owner, repo, pull_number: prNumber }
-              );
-              const validPaths = new Set(prFiles.map(f => f.filename));
-              const patchlessPaths = new Set(
-                prFiles.filter(f => !f.patch).map(f => f.filename)
-              );
-
-              const comments = [];
-              const fileComments = [];
-
-              for (const c of rawComments) {
-                if (!c || typeof c !== 'object') continue;
-                if (typeof c.body !== 'string' || !c.body.trim()) continue;
-                if (typeof c.path !== 'string' || !c.path.trim()) continue;
-
-                const normalizedPath = c.path.trim()
-                  .replace(/^[ab]\//, '')
-                  .replace(/^\.\//,  '');
-
-                if (!validPaths.has(normalizedPath)) {
-                  console.log(`Skipping comment with invalid path: ${c.path} -> ${normalizedPath}`);
-                  continue;
-                }
-
-                const isBinary = patchlessPaths.has(normalizedPath);
-
-                if (isBinary) {
-                  fileComments.push({
-                    path: normalizedPath,
-                    body: decodeNewlines(c.body),
-                  });
-                  continue;
-                }
-
-                const line = Number(c.line);
-                if (!Number.isInteger(line) || line <= 0) {
-                  console.log('Skipping comment with invalid line:', c);
-                  continue;
-                }
-
-                let side = (c.side || 'RIGHT').toString().toUpperCase();
-                if (side !== 'LEFT' && side !== 'RIGHT') {
-                  side = 'RIGHT';
-                }
-
-                let startLine;
-                if (c.start_line !== undefined && c.start_line !== null) {
-                  startLine = Number(c.start_line);
-                  if (!Number.isInteger(startLine) || startLine <= 0 || startLine >= line) {
-                    startLine = undefined;
-                  }
-                }
-
-                const commentPayload = {
-                  path: normalizedPath,
-                  line,
-                  side,
-                  body: decodeNewlines(c.body),
-                };
-
-                if (startLine && startLine < line) {
-                  commentPayload.start_line = startLine;
-                  commentPayload.start_side = side;
-                }
-
-                comments.push(commentPayload);
-              }
-
-              const summary =
-                typeof review.summary === 'string' ? decodeNewlines(review.summary).trim() : '';
-
-              if (!summary && comments.length === 0 && fileComments.length === 0) {
-                console.log('No valid summary or inline comments found. Skipping review posting.');
-                return;
-              }
-
-              if (summary || comments.length > 0) {
-                const payload = {
-                  owner,
-                  repo,
-                  pull_number: prNumber,
-                  event: 'COMMENT',
-                  body: summary || 'Automated review by Oz',
-                };
-
-                if (comments.length > 0) {
-                  payload.comments = comments;
-                }
-
-                await github.rest.pulls.createReview(payload);
-                console.log('Review posted successfully.');
-              }
-
-              // Post binary-file comments as file-level review comments.
-              const { data: currentPr } = await github.rest.pulls.get({
-                owner, repo, pull_number: prNumber,
-              });
-              const commitId = currentPr.head.sha;
-              for (const bc of fileComments) {
-                try {
-                  await github.rest.pulls.createReviewComment({
-                    owner,
-                    repo,
-                    pull_number: prNumber,
-                    commit_id: commitId,
-                    path: bc.path,
-                    body: bc.body,
-                    subject_type: 'file',
-                  });
-                  console.log(`Posted binary file comment on ${bc.path}`);
-                } catch (commentError) {
-                  core.warning(`Failed to post binary file comment on ${bc.path}: ${commentError.message}`);
-                }
-              }
-            } catch (error) {
-              core.setFailed(`Failed to post review: ${error.message}`);
-            }
+          PR_NUMBER: ${{ steps.resolve.outputs.pr_number }}
+          TRIGGER_SOURCE: ${{ steps.resolve.outputs.trigger_source }}
+          REQUESTER: ${{ steps.resolve.outputs.requester }}
+          REVIEW_FOCUS: ${{ steps.resolve.outputs.focus }}
+          COMMENT_ID: ${{ steps.resolve.outputs.comment_id }}
+          WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
+          WARP_AGENT_MODEL: ${{ vars.WARP_AGENT_MODEL || '' }}
+          WARP_AGENT_MCP: ${{ vars.WARP_AGENT_MCP || '' }}
+          STAGING_ORIGIN_TOKEN: ${{ steps.staging_origin_token.outputs.token }}
+        run: python "${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/review_pr.py"
