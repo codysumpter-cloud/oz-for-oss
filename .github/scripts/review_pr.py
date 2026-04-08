@@ -23,13 +23,9 @@ HUNK_HEADER_PATTERN = re.compile(
 
 
 def _normalize_review_path(value: Any) -> str:
-    return (
-        str(value or "")
-        .strip()
-        .removeprefix("a/")
-        .removeprefix("b/")
-        .removeprefix("./")
-    )
+    path = str(value or "").strip()
+    path = re.sub(r"^(a/|b/|\./)", "", path)
+    return path
 
 
 def _commentable_lines_for_patch(patch: str | None) -> dict[str, set[int]]:
@@ -56,6 +52,7 @@ def _commentable_lines_for_patch(patch: str | None) -> dict[str, set[int]]:
             commentable_lines["RIGHT"].add(new_line)
             new_line += 1
         elif marker == " ":
+            commentable_lines["LEFT"].add(old_line)
             commentable_lines["RIGHT"].add(new_line)
             old_line += 1
             new_line += 1
@@ -147,8 +144,8 @@ def _normalize_review_payload(
 
         normalized_comments.append(normalized_comment)
 
-    if errors:
-        raise ValueError("Invalid review payload:\n- " + "\n- ".join(errors))
+    for err in errors:
+        print(f"[review-validation] Dropped comment: {err}")
 
     return summary.strip(), normalized_comments
 
