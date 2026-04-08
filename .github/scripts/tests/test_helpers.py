@@ -73,6 +73,9 @@ class IsAutomationUserTest(unittest.TestCase):
     def test_returns_false_for_human_user(self) -> None:
         self.assertFalse(is_automation_user({"login": "alice", "type": "User"}))
 
+    def test_returns_false_for_none_user(self) -> None:
+        self.assertFalse(is_automation_user(None))
+
 
 class ResolveProgressRequesterLoginTest(unittest.TestCase):
     def test_prefers_explicit_requester_login(self) -> None:

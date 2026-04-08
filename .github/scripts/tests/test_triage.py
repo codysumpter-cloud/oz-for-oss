@@ -214,6 +214,7 @@ class TriageWorkflowGuardsTest(unittest.TestCase):
     def _normalized_workflow_text(self, filename: str) -> str:
         workflow_path = Path(__file__).resolve().parents[2] / "workflows" / filename
         return " ".join(workflow_path.read_text(encoding="utf-8").split())
+
     def test_comment_workflows_ignore_automation_commenters(self) -> None:
         automation_guard = (
             "github.event.comment.user.type != 'Bot' && "
