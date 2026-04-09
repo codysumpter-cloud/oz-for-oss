@@ -626,10 +626,18 @@ def coauthor_prompt_lines(coauthor_line: str) -> str:
         lines.append("- Do not include any Co-Authored-By lines in commit messages.")
     return "\n".join(lines)
 
+def spec_directory_name(issue_number: int) -> str:
+    return f"GH{issue_number}"
+
+
+def spec_directory_path(issue_number: int) -> str:
+    return f"specs/{spec_directory_name(issue_number)}"
+
 
 def build_spec_preview_section(owner: str, repo: str, branch_name: str, issue_number: int) -> str:
-    product_path = f"specs/issue-{issue_number}/product.md"
-    tech_path = f"specs/issue-{issue_number}/tech.md"
+    spec_dir = spec_directory_path(issue_number)
+    product_path = f"{spec_dir}/product.md"
+    tech_path = f"{spec_dir}/tech.md"
     product_url = f"https://github.com/{owner}/{repo}/blob/{branch_name}/{product_path}"
     tech_url = f"https://github.com/{owner}/{repo}/blob/{branch_name}/{tech_path}"
     return (
@@ -784,12 +792,13 @@ def find_matching_spec_prs(
 
 
 def read_local_spec_files(workspace: Path, issue_number: int) -> list[tuple[str, str]]:
-    spec_dir = workspace / "specs" / f"issue-{issue_number}"
+    spec_dir_name = spec_directory_name(issue_number)
+    spec_dir = workspace / "specs" / spec_dir_name
     results: list[tuple[str, str]] = []
     for name in ("product.md", "tech.md"):
         path = spec_dir / name
         if path.exists():
-            rel = f"specs/issue-{issue_number}/{name}"
+            rel = f"specs/{spec_dir_name}/{name}"
             results.append((rel, path.read_text(encoding="utf-8").strip()))
     return results
 
@@ -929,7 +938,7 @@ def resolve_issue_number_for_pr(
     spec_file_issue_numbers = [
         int(match.group(1))
         for filename in changed_files
-        for match in [re.match(r"^specs/issue-(\d+)/(?:product|tech)\.md$", filename)]
+        for match in [re.match(r"^specs/GH(\d+)/(?:product|tech)\.md$", filename)]
         if match
     ]
     explicit_issue_numbers = extract_issue_numbers_from_text(owner, repo, str(_field(pr, "body") or ""))

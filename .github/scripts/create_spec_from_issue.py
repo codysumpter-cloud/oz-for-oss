@@ -85,8 +85,8 @@ def main() -> None:
             - You are running in a cloud environment, so the caller cannot read your local diff.
             - Start from the repository default branch `{default_branch}`.
             - Use the shared spec-first skill `{spec_driven_implementation_skill_path}` as the base workflow for this run. Prefer the consuming repository's version when present; otherwise use the checked-in oz-for-oss copy.
-            - First, read the shared product-spec skill `{write_product_spec_skill_path}`, then read the Oz wrapper skill `{create_product_spec_skill_path}`, and create a product spec at `specs/issue-{issue_number}/product.md`.
-            - Then, read the shared tech-spec skill `{write_tech_spec_skill_path}`, then read the Oz wrapper skill `{create_tech_spec_skill_path}`, and create a tech spec at `specs/issue-{issue_number}/tech.md`.
+            - First, read the shared product-spec skill `{write_product_spec_skill_path}`, then read the Oz wrapper skill `{create_product_spec_skill_path}`, and create a product spec at `specs/GH{issue_number}/product.md`.
+            - Then, read the shared tech-spec skill `{write_tech_spec_skill_path}`, then read the Oz wrapper skill `{create_tech_spec_skill_path}`, and create a tech spec at `specs/GH{issue_number}/tech.md`.
             - If you produce spec changes, commit only the spec changes to branch `{branch_name}` and push that branch to origin.
             - Do not open or update the pull request yourself.
             - If there is no worthwhile spec diff, do not push the branch.

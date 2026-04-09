@@ -31,8 +31,8 @@ class BuildSpecPreviewSectionTest(unittest.TestCase):
     def test_builds_markdown_links_for_spec_branch(self) -> None:
         result = build_spec_preview_section("warpdotdev", "oz-oss-testbed", "oz-agent/spec-issue-20", 20)
         self.assertIn("Preview generated specs:", result)
-        self.assertIn("[specs/issue-20/product.md](https://github.com/warpdotdev/oz-oss-testbed/blob/oz-agent/spec-issue-20/specs/issue-20/product.md)", result)
-        self.assertIn("[specs/issue-20/tech.md](https://github.com/warpdotdev/oz-oss-testbed/blob/oz-agent/spec-issue-20/specs/issue-20/tech.md)", result)
+        self.assertIn("[specs/GH20/product.md](https://github.com/warpdotdev/oz-oss-testbed/blob/oz-agent/spec-issue-20/specs/GH20/product.md)", result)
+        self.assertIn("[specs/GH20/tech.md](https://github.com/warpdotdev/oz-oss-testbed/blob/oz-agent/spec-issue-20/specs/GH20/tech.md)", result)
 
 
 class BuildNextStepsSectionTest(unittest.TestCase):
@@ -455,13 +455,13 @@ class CoauthorPromptLinesTest(unittest.TestCase):
 
 class IsSpecOnlyPrTest(unittest.TestCase):
     def test_all_specs_files(self) -> None:
-        self.assertTrue(is_spec_only_pr(["specs/issue-42/product.md", "specs/issue-42/tech.md"]))
+        self.assertTrue(is_spec_only_pr(["specs/GH42/product.md", "specs/GH42/tech.md"]))
 
     def test_single_spec_file(self) -> None:
-        self.assertTrue(is_spec_only_pr(["specs/issue-10/product.md"]))
+        self.assertTrue(is_spec_only_pr(["specs/GH10/product.md"]))
 
     def test_mixed_files(self) -> None:
-        self.assertFalse(is_spec_only_pr(["specs/issue-42/product.md", "src/review_pr.py"]))
+        self.assertFalse(is_spec_only_pr(["specs/GH42/product.md", "src/review_pr.py"]))
 
     def test_no_spec_files(self) -> None:
         self.assertFalse(is_spec_only_pr(["src/main.py", "README.md"]))

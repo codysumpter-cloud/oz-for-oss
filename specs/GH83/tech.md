@@ -24,13 +24,13 @@
 
 - Delete `plans/.gitkeep` and any existing plan files (`plans/issue-56.md`, `plans/issue-65.md`).
 - Create `specs/.gitkeep`.
-- Migrate existing plans to `specs/issue-56/tech.md` and `specs/issue-65/tech.md` (treat them as tech specs since that's what they are).
+- Migrate existing plans to `specs/GH56/tech.md` and `specs/GH65/tech.md` (treat them as tech specs since that's what they are).
 
 #### 2. New skill: `create-product-spec`
 
 Create `.agents/skills/create-product-spec/SKILL.md`:
 - Inputs: issue number, title, description, labels, assignees, issue comments.
-- Instructs the agent to produce `specs/issue-{issue-number}/product.md`.
+- Instructs the agent to produce `specs/GH{issue-number}/product.md`.
 - Content guidance: describe intended behavior, user goals, acceptance criteria, scope boundaries, and open product questions.
 - Do not include implementation details — those belong in the tech spec.
 - Follow the same cloud-workflow conventions as the current `create-plan` skill (default no-commit; cloud mode allows commit/push when instructed).
@@ -39,7 +39,7 @@ Create `.agents/skills/create-product-spec/SKILL.md`:
 
 Create `.agents/skills/create-tech-spec/SKILL.md`:
 - Inputs: issue number, title, description, labels, assignees, issue comments, plus the product spec content when available.
-- Instructs the agent to produce `specs/issue-{issue-number}/tech.md`.
+- Instructs the agent to produce `specs/GH{issue-number}/tech.md`.
 - Content guidance: problem/goal, current-state observations, proposed changes with file-level detail, risks, dependencies, open technical questions.
 - This is the direct successor to the `create-plan` skill content, adapted for the new path.
 - Follow the same cloud-workflow conventions.
@@ -61,7 +61,7 @@ Create `.github/workflows/create-spec-from-issue.yml` and delete `create-plan-fr
 
 Replace `src/create_plan_from_issue.py` with `src/create_spec_from_issue.py`:
 - Branch naming: `oz-agent/spec-issue-{number}`.
-- The agent prompt instructs the agent to produce both `specs/issue-{issue-number}/product.md` and `specs/issue-{issue-number}/tech.md` in a single run. Both skill files are referenced in the prompt text; the `skill_name` parameter is omitted from `run_agent()` and the agent reads both skills via prompting.
+- The agent prompt instructs the agent to produce both `specs/GH{issue-number}/product.md` and `specs/GH{issue-number}/tech.md` in a single run. Both skill files are referenced in the prompt text; the `skill_name` parameter is omitted from `run_agent()` and the agent reads both skills via prompting.
 - PR title: `spec: {issue title}`.
 - Update progress messages from "implementation plan" to "spec".
 - Update the preview section to point to both spec files.
@@ -69,19 +69,19 @@ Replace `src/create_plan_from_issue.py` with `src/create_spec_from_issue.py`:
 #### 7. Update `src/create_implementation_from_issue.py`
 
 - Update `resolve_plan_context_for_issue()` calls — the function itself will be renamed (see below), but the call sites need to use the new name.
-- Pass both the product spec and the tech spec as context into the implementation agent prompt. The implementation workflow should read both `specs/issue-{number}/product.md` and `specs/issue-{number}/tech.md` and include their contents in `spec_context.md`.
+- Pass both the product spec and the tech spec as context into the implementation agent prompt. The implementation workflow should read both `specs/GH{number}/product.md` and `specs/GH{number}/tech.md` and include their contents in `spec_context.md`.
 - Update progress messages from "plan" to "spec" where visible to users.
 
 #### 8. Update `src/oz_workflows/helpers.py`
 
 Rename and update the following functions:
 
-- `build_plan_preview_section()` → `build_spec_preview_section()`: generate preview links for both `specs/issue-{number}/product.md` and `specs/issue-{number}/tech.md`.
-- `read_local_plan_file()` → `read_local_spec_files()`: read from `specs/issue-{number}/product.md` and `specs/issue-{number}/tech.md`.
+- `build_plan_preview_section()` → `build_spec_preview_section()`: generate preview links for both `specs/GH{number}/product.md` and `specs/GH{number}/tech.md`.
+- `read_local_plan_file()` → `read_local_spec_files()`: read from `specs/GH{number}/product.md` and `specs/GH{number}/tech.md`.
 - `find_matching_plan_prs()` → `find_matching_spec_prs()`: look for branches named `oz-agent/spec-issue-{number}` instead of `oz-agent/plan-issue-{number}`. Update the file-matching logic to look for files under `specs/` instead of `plans/`.
 - `resolve_plan_context_for_issue()` → `resolve_spec_context_for_issue()`: update all internal references to use the renamed functions and new paths.
 - `resolve_plan_context_for_pr()` → `resolve_spec_context_for_pr()`: same updates.
-- `resolve_issue_number_for_pr()`: update the regex for branch name matching from `(?:plan|implement)-issue-` to `(?:spec|implement)-issue-`, and the file path regex from `^plans/issue-(\\d+)\\.md$` to `^specs/issue-(\\d+)/(?:product|tech)\\.md$`.
+- `resolve_issue_number_for_pr()`: update the regex for branch name matching from `(?:plan|implement)-issue-` to `(?:spec|implement)-issue-`, and the file path regex from `^plans/issue-(\\d+)\\.md$` to `^specs/GH(\\d+)/(?:product|tech)\\.md$`.
 
 #### 9. Update `src/enforce_pr_issue_state.py`
 

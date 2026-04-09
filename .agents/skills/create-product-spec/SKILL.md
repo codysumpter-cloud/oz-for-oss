@@ -1,6 +1,6 @@
 ---
 name: create-product-spec
-description: Create a product spec from a GitHub issue in this repository by applying the local shared `write-product-spec` workflow with Oz-specific issue context and output paths. Use when an issue should be turned into a product spec artifact stored under `specs/issue-<issue-number>/product.md` and the agent should prepare file changes only, without creating commits or pull requests itself unless a cloud workflow explicitly asks for it.
+description: Create a product spec from a GitHub issue in this repository by applying the local shared `write-product-spec` workflow with Oz-specific issue context and output paths. Use when an issue should be turned into a product spec artifact stored under `specs/GH<issue-number>/product.md` and the agent should prepare file changes only, without creating commits or pull requests itself unless a cloud workflow explicitly asks for it.
 ---
 
 # create-product-spec
@@ -18,7 +18,7 @@ Use that shared local skill as the base behavior and structure unless this wrapp
 The Oz-specific differences are:
 
 - the primary input is a GitHub issue, not a Linear issue
-- the output path is `specs/issue-<issue-number>/product.md`
+- the output path is `specs/GH<issue-number>/product.md`
 - `issue_comments.txt` and triggering-comment context are first-class inputs
 - do not create or edit Linear issues as part of this workflow
 
@@ -33,7 +33,7 @@ If a triggering comment or other workflow-provided comment context is present, t
 1. Start from the local shared `write-product-spec` guidance and follow its structure and writing standards unless this wrapper says otherwise.
 2. Read the issue details carefully. If `issue_comments.txt` exists, review it for clarifications, prior decisions, and issue-comment nuance that should influence the spec.
 3. Inspect the repository enough to understand the current user workflow and likely scope before writing the spec.
-4. Create or update `specs/issue-<issue-number>/product.md`.
+4. Create or update `specs/GH<issue-number>/product.md`.
 5. Keep the product spec focused on intended behavior and user-facing requirements. Use the shared skill's sections as the baseline, adapted to this repository and issue format. At minimum, cover:
    - summary
    - problem

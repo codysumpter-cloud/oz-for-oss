@@ -1,6 +1,6 @@
 ---
 name: create-tech-spec
-description: Create a technical spec from a GitHub issue in this repository by applying the local shared `write-tech-spec` workflow with Oz-specific issue context and output paths. Use when an issue should be turned into a tech spec artifact stored under `specs/issue-<issue-number>/tech.md` and the agent should prepare file changes only, without creating commits or pull requests itself unless a cloud workflow explicitly asks for it.
+description: Create a technical spec from a GitHub issue in this repository by applying the local shared `write-tech-spec` workflow with Oz-specific issue context and output paths. Use when an issue should be turned into a tech spec artifact stored under `specs/GH<issue-number>/tech.md` and the agent should prepare file changes only, without creating commits or pull requests itself unless a cloud workflow explicitly asks for it.
 ---
 
 # create-tech-spec
@@ -18,7 +18,7 @@ Use that shared local skill as the base behavior and structure unless this wrapp
 The Oz-specific differences are:
 
 - the primary input is a GitHub issue, not a Linear issue
-- the output path is `specs/issue-<issue-number>/tech.md`
+- the output path is `specs/GH<issue-number>/tech.md`
 - `issue_comments.txt` and triggering-comment context are additional design inputs
 - do not create or edit Linear issues as part of this workflow
 
@@ -26,14 +26,14 @@ The Oz-specific differences are:
 
 Expect issue details in the prompt, including the issue number, title, description, labels, assignees, and optional prior discussion captured in `issue_comments.txt`.
 
-When available, the product spec at `specs/issue-<issue-number>/product.md` should be treated as the primary input for understanding the intended behavior. The tech spec translates that product intent into an implementation approach.
+When available, the product spec at `specs/GH<issue-number>/product.md` should be treated as the primary input for understanding the intended behavior. The tech spec translates that product intent into an implementation approach.
 
 ## Workflow
 
 1. Start from the local shared `write-tech-spec` guidance and follow its structure and writing standards unless this wrapper says otherwise.
-2. Read the issue details carefully. If a product spec exists at `specs/issue-<issue-number>/product.md`, read it first to understand the intended behavior. If `issue_comments.txt` exists, review it for clarifications, prior decisions, and design nuance that should influence the tech plan.
+2. Read the issue details carefully. If a product spec exists at `specs/GH<issue-number>/product.md`, read it first to understand the intended behavior. If `issue_comments.txt` exists, review it for clarifications, prior decisions, and design nuance that should influence the tech plan.
 3. Inspect the repository to understand the current implementation and the likely scope of the requested work before writing the spec. Do not guess about current architecture when the code can be inspected directly.
-4. Create or update `specs/issue-<issue-number>/tech.md`.
+4. Create or update `specs/GH<issue-number>/tech.md`.
 5. Use the shared skill's structure as the baseline, adapted to this repository and issue format. At minimum, cover:
    - problem
    - relevant code

@@ -9,7 +9,7 @@ Reorient the repository's planning workflow from a single "plan" artifact to a t
 
 #### Directory structure
 - The current top-level `plans/` directory is renamed to `specs/`.
-- Each issue gets its own subdirectory: `specs/issue-{issue-number}/`.
+- Each issue gets its own subdirectory: `specs/GH{issue-number}/`.
 - Within each subdirectory, two files are produced:
   - `product.md` — describes the intended behavior, user-facing goals, and acceptance criteria.
   - `tech.md` — describes the implementation approach, file changes, risks, and technical details (equivalent to today's plan).
@@ -23,7 +23,7 @@ The current `ready-to-plan` label is replaced by `ready-to-spec` everywhere. The
 
 #### PR structure
 - The spec PR is titled `spec: {issue title}` (replacing `plan: {issue title}`).
-- The PR contains both `specs/issue-{issue-number}/product.md` and `specs/issue-{issue-number}/tech.md`.
+- The PR contains both `specs/GH{issue-number}/product.md` and `specs/GH{issue-number}/tech.md`.
 - Reviewers can iterate on product and tech spec content in the same PR.
 
 #### Agent skills
