@@ -16,11 +16,9 @@ from oz_workflows.helpers import (
     _format_triage_session_link,
     _label_name,
     _login,
-    _timestamp_text,
     build_comment_body,
     format_issue_comments_for_prompt,
     is_automation_user,
-    record_run_session_link,
     triggering_comment_prompt_text,
     WorkflowProgressComment,
 )
@@ -32,7 +30,6 @@ from oz_workflows.transport import (
     poll_for_transport_payload,
 )
 from oz_workflows.triage import (
-    compose_triaged_issue_body,
     dedupe_strings,
     discover_issue_templates,
     extract_original_issue_report,
@@ -265,9 +262,8 @@ def process_issue(
         - Estimate how reproducible the issue seems from the report.
         - Infer the most likely root cause and relevant files from the current codebase when possible.
         - Suggest subject-matter experts, preferring the stakeholder config and otherwise using recent git contributors to related files.
-        - If issue templates exist in the repository, rewrite the visible issue body so it follows the most relevant template structure as closely as possible with the information available.
         - Identify the specific ambiguities that still require reporter input, especially when the issue is environment-sensitive, account/backend-sensitive, or framed with an unverified root-cause claim.
-        - When an explicit triggering comment is present, treat it as additional triage guidance and incorporate it into the rewritten issue body when relevant.
+        - When an explicit triggering comment is present, treat it as additional triage guidance for this triage pass.
 
         Output Requirements:
         - Use the repository's local `triage-issue` skill as the base workflow.
@@ -285,13 +281,11 @@ def process_issue(
             "root_cause": {{"summary": "string", "confidence": "high | medium | low", "relevant_files": ["path/to/file"]}},
             "sme_candidates": [{{"login": "github-login", "reason": "string"}}],
             "selected_template_path": "path or empty string",
-            "issue_body": "full visible markdown issue body without the preserved-original-report appendix",
+            "issue_body": "markdown triage summary to post as a standalone issue comment",
             "follow_up_questions": ["question for the reporter"],
             "duplicate_of": [{{"issue_number": 123, "title": "existing issue title", "similarity_reason": "why it matches"}}]
           }}
-        - If template files are present, choose the most relevant one and mirror its section structure in `issue_body` where practical.
-        - Keep the triage analysis in the visible issue body, and include SME `@mentions` there when useful.
-        - Do not include the preserved original-report appendix in `issue_body`; the workflow will append it automatically.
+        - Populate `issue_body` with the markdown triage summary that should be posted as a separate issue comment. Do not rewrite the original issue description, and do not include HTML metadata in `issue_body`.
         - Validate `triage_result.json` with `jq`.
         - A reserved transport comment already exists on issue #{issue_number} as issue comment ID {transport_comment_id}. Do not create another transport comment or make other GitHub changes.
         - After validating the JSON, gzip the UTF-8 contents of `triage_result.json` and then base64 encode the compressed bytes.
@@ -422,16 +416,13 @@ def apply_triage_result(
             issue.add_to_labels(*managed_labels)
         else:
             github.add_labels(owner, repo, issue_number, managed_labels)
-    issue_body = str(result.get("issue_body") or "").strip()
-    if issue_body:
-        current_body = str(_field(issue, "body") or "").strip()
-        original_report = extract_original_issue_report(current_body)
-        updated_body = compose_triaged_issue_body(issue_body, original_report)
-        if updated_body != current_body:
-            if hasattr(issue, "edit"):
-                issue.edit(body=updated_body)
-            else:
-                github.update_issue(owner, repo, issue_number, body=updated_body)
+    sync_triage_summary_comment(
+        github,
+        owner,
+        repo,
+        issue,
+        issue_body=str(result.get("issue_body") or "").strip(),
+    )
 
 
 def ensure_label_exists(
@@ -576,6 +567,60 @@ def build_duplicate_section(issue: Any, duplicates: list[dict[str, Any]]) -> str
         "review it. Otherwise, a maintainer may close it as a duplicate after review."
     )
     return "\n".join(lines)
+
+
+def triage_summary_comment_metadata(issue_number: int) -> str:
+    return (
+        '<!-- oz-agent-metadata: '
+        f'{{"type":"issue-triage-summary","workflow":"{WORKFLOW_NAME}","issue":{issue_number}}} -->'
+    )
+
+
+def build_triage_summary_comment(issue: Any, issue_body: str) -> str:
+    return build_comment_body(
+        issue_body.strip(),
+        triage_summary_comment_metadata(int(_field(issue, "number"))),
+    )
+
+
+def sync_triage_summary_comment(
+    github: Repository,
+    owner: str,
+    repo: str,
+    issue: Any,
+    *,
+    issue_body: str,
+) -> None:
+    issue_number = int(_field(issue, "number"))
+    metadata = triage_summary_comment_metadata(issue_number)
+    if not issue_body.strip():
+        comments = (
+            list(issue.get_comments())
+            if hasattr(issue, "get_comments")
+            else github.list_issue_comments(owner, repo, issue_number)
+        )
+        existing = next(
+            (
+                comment
+                for comment in comments
+                if metadata in str(_field(comment, "body") or "")
+            ),
+            None,
+        )
+        if existing is not None:
+            if hasattr(existing, "delete"):
+                existing.delete()
+            else:
+                github.delete_comment(owner, repo, int(_field(existing, "id")))
+        return
+    _sync_managed_issue_comment(
+        github,
+        owner,
+        repo,
+        issue,
+        metadata=metadata,
+        comment_body=build_triage_summary_comment(issue, issue_body),
+    )
 
 
 def follow_up_comment_metadata(issue_number: int) -> str:

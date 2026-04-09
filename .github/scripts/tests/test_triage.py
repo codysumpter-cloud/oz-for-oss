@@ -12,6 +12,7 @@ from triage_new_issues import (
     build_duplicate_section,
     build_follow_up_comment,
     build_follow_up_section,
+    build_triage_summary_comment,
     extract_duplicate_of,
     extract_follow_up_questions,
     follow_up_comment_metadata,
@@ -23,6 +24,8 @@ from triage_new_issues import (
     resolve_issue_number_override,
     sync_duplicate_comment,
     sync_follow_up_comment,
+    sync_triage_summary_comment,
+    triage_summary_comment_metadata,
     _cleanup_legacy_triage_comments,
 )
 
@@ -418,7 +421,12 @@ class ApplyTriageResultTest(unittest.TestCase):
         )
         self.assertEqual(github.removed_labels, ["bug", "repro:unknown"])
         self.assertEqual(github.added_labels, ["enhancement", "repro:high", "area:workflow", "triaged"])
-        self.assertEqual(github.updated_issue_body, compose_triaged_issue_body("## Updated", "Original body"))
+        self.assertEqual(github.updated_issue_body, "")
+        self.assertEqual(len(github.comments), 1)
+        self.assertEqual(
+            github.comments[0]["body"],
+            build_triage_summary_comment(issue, "## Updated"),
+        )
 
 
     def test_skips_triaged_label_when_needs_info_present(self) -> None:
@@ -483,6 +491,37 @@ class ApplyTriageResultTest(unittest.TestCase):
         )
         self.assertIn("needs-info", github.added_labels)
         self.assertNotIn("triaged", github.added_labels)
+
+    def test_posts_issue_body_as_comment_without_rewriting_issue(self) -> None:
+        github = FakeTriageGitHubClient()
+        issue = {
+            "number": 58,
+            "labels": [],
+            "body": "Original body",
+        }
+        apply_triage_result(
+            github,
+            "acme",
+            "widgets",
+            issue,
+            result={
+                "labels": ["bug", "repro:low"],
+                "issue_body": "## Rewritten body that should be ignored",
+            },
+            configured_labels={
+                "triaged": {"color": "0E8A16", "description": "done"},
+                "bug": {"color": "D73A4A", "description": "bug"},
+                "repro:low": {"color": "CCCCCC", "description": "repro"},
+            },
+            repo_labels={
+                "triaged": {"name": "triaged"},
+                "bug": {"name": "bug"},
+                "repro:low": {"name": "repro:low"},
+            },
+        )
+        self.assertEqual(github.updated_issue_body, "")
+        self.assertEqual(len(github.comments), 1)
+        self.assertIn("## Rewritten body that should be ignored", str(github.comments[0]["body"]))
 
     def test_removes_triaged_on_retriage_with_needs_info(self) -> None:
         github = FakeTriageGitHubClient()
@@ -557,6 +596,65 @@ class SyncFollowUpCommentTest(unittest.TestCase):
         sync_follow_up_comment(github, "acme", "widgets", issue, questions=[])
         self.assertEqual(len(github.comments), 0)
         self.assertEqual(github.deleted_comment_ids, [])
+
+class SyncTriageSummaryCommentTest(unittest.TestCase):
+    def test_creates_managed_summary_comment(self) -> None:
+        github = FakeTriageGitHubClient()
+        issue = {"number": 42}
+        sync_triage_summary_comment(
+            github,
+            "acme",
+            "widgets",
+            issue,
+            issue_body="## Triage summary",
+        )
+        self.assertEqual(len(github.comments), 1)
+        self.assertEqual(
+            github.comments[0]["body"],
+            build_triage_summary_comment(issue, "## Triage summary"),
+        )
+
+    def test_updates_existing_managed_summary_comment(self) -> None:
+        github = FakeTriageGitHubClient()
+        issue = {"number": 42}
+        sync_triage_summary_comment(
+            github,
+            "acme",
+            "widgets",
+            issue,
+            issue_body="## First",
+        )
+        sync_triage_summary_comment(
+            github,
+            "acme",
+            "widgets",
+            issue,
+            issue_body="## Second",
+        )
+        self.assertEqual(len(github.comments), 1)
+        self.assertIn("## Second", str(github.comments[0]["body"]))
+        self.assertIn(triage_summary_comment_metadata(42), str(github.comments[0]["body"]))
+
+    def test_deletes_existing_summary_comment_when_issue_body_empty(self) -> None:
+        github = FakeTriageGitHubClient()
+        issue = {"number": 42}
+        sync_triage_summary_comment(
+            github,
+            "acme",
+            "widgets",
+            issue,
+            issue_body="## First",
+        )
+        comment_id = int(github.comments[0]["id"])
+        sync_triage_summary_comment(
+            github,
+            "acme",
+            "widgets",
+            issue,
+            issue_body="",
+        )
+        self.assertEqual(len(github.comments), 0)
+        self.assertIn(comment_id, github.deleted_comment_ids)
 
 
 class ExtractDuplicateOfTest(unittest.TestCase):
