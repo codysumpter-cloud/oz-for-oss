@@ -593,20 +593,20 @@ def sync_triage_summary_comment(
 ) -> None:
     issue_number = int(_field(issue, "number"))
     metadata = triage_summary_comment_metadata(issue_number)
-    comments = (
-        list(issue.get_comments())
-        if hasattr(issue, "get_comments")
-        else github.list_issue_comments(owner, repo, issue_number)
-    )
-    existing = next(
-        (
-            comment
-            for comment in comments
-            if metadata in str(_field(comment, "body") or "")
-        ),
-        None,
-    )
     if not issue_body.strip():
+        comments = (
+            list(issue.get_comments())
+            if hasattr(issue, "get_comments")
+            else github.list_issue_comments(owner, repo, issue_number)
+        )
+        existing = next(
+            (
+                comment
+                for comment in comments
+                if metadata in str(_field(comment, "body") or "")
+            ),
+            None,
+        )
         if existing is not None:
             if hasattr(existing, "delete"):
                 existing.delete()
