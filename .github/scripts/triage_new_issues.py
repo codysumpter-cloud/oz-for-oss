@@ -499,7 +499,7 @@ def _cleanup_legacy_triage_comments(
     repo: str,
     issue: Any,
 ) -> None:
-    """Delete orphaned standalone follow-up and duplicate comments from prior triage runs."""
+    """Delete orphaned standalone follow-up, duplicate, and summary comments from prior triage runs."""
     issue_number = int(_field(issue, "number"))
     follow_up_marker = follow_up_comment_metadata(issue_number)
     duplicate_marker = duplicate_comment_metadata(issue_number)
@@ -589,6 +589,8 @@ def sync_triage_summary_comment(
     *,
     issue_body: str,
 ) -> None:
+    # Deprecated: triage summary content is now embedded in the progress comment
+    # via process_issue(). Retained for backward compatibility.
     issue_number = int(_field(issue, "number"))
     metadata = triage_summary_comment_metadata(issue_number)
     if not issue_body.strip():
