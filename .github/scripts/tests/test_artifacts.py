@@ -60,6 +60,7 @@ class DownloadArtifactJsonTest(unittest.TestCase):
     def test_downloads_and_parses_json(self, mock_client_cls: MagicMock) -> None:
         expected = {"summary": "looks good", "comments": []}
         mock_response = MagicMock()
+        mock_response.status_code = 200
         mock_response.text = json.dumps(expected)
         mock_response.raise_for_status = MagicMock()
         mock_http = MagicMock()

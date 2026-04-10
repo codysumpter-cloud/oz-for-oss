@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import time
 from typing import Any, Protocol, cast
 
@@ -75,8 +74,13 @@ def _download_artifact_json(client: OzAPI, artifact_uid: str) -> dict[str, Any]:
             f"Artifact {artifact_uid} did not return a download URL"
         )
     with httpx.Client(timeout=30) as http:
-        download_response = http.get(download_url)
-        download_response.raise_for_status()
+        for attempt in range(2):
+            download_response = http.get(download_url)
+            if download_response.status_code >= 500 and attempt == 0:
+                time.sleep(1)
+                continue
+            download_response.raise_for_status()
+            break
     payload = json.loads(download_response.text)
     if not isinstance(payload, dict):
         raise RuntimeError(
