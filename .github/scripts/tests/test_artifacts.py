@@ -8,6 +8,7 @@ from oz_workflows.artifacts import (
     _download_artifact_text,
     _download_artifact_json,
     _find_file_artifact,
+    load_pr_description_artifact,
     poll_for_artifact,
     poll_for_text_artifact,
 )
@@ -79,6 +80,7 @@ class DownloadArtifactJsonTest(unittest.TestCase):
         self.assertEqual(result, "## Summary\n- Item")
         client.agent.get_artifact.assert_called_once_with("uid-123")
         mock_http.get.assert_called_once_with("https://storage.example.com/signed-url")
+
     @patch("oz_workflows.artifacts.httpx.Client")
     def test_downloads_and_parses_json(self, mock_client_cls: MagicMock) -> None:
         expected = {"summary": "looks good", "comments": []}
@@ -169,6 +171,22 @@ class PollForArtifactTest(unittest.TestCase):
             timeout_seconds=0,
         )
         self.assertEqual(result, "PR body")
+
+
+class LoadPrDescriptionArtifactTest(unittest.TestCase):
+    @patch("oz_workflows.artifacts.poll_for_text_artifact")
+    def test_returns_stripped_description(self, mock_poll: MagicMock) -> None:
+        mock_poll.return_value = "  Closes #42\n\n## Summary\n  "
+        result = load_pr_description_artifact("run-123")
+        self.assertEqual(result, "Closes #42\n\n## Summary")
+        mock_poll.assert_called_once_with("run-123", filename="pr_description.md")
+
+    @patch("oz_workflows.artifacts.poll_for_text_artifact")
+    def test_raises_when_empty(self, mock_poll: MagicMock) -> None:
+        mock_poll.return_value = "   "
+        with self.assertRaises(RuntimeError) as ctx:
+            load_pr_description_artifact("run-123")
+        self.assertIn("empty", str(ctx.exception))
 
 
 if __name__ == "__main__":

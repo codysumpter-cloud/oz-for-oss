@@ -4,7 +4,7 @@ from contextlib import closing
 from datetime import timedelta
 from textwrap import dedent
 from github import Auth, Github
-from oz_workflows.artifacts import poll_for_text_artifact
+from oz_workflows.artifacts import load_pr_description_artifact
 
 from oz_workflows.env import load_event, repo_parts, repo_slug, workspace, require_env
 from oz_workflows.helpers import (
@@ -26,19 +26,6 @@ WRITE_PRODUCT_SPEC_SKILL = "write-product-spec"
 WRITE_TECH_SPEC_SKILL = "write-tech-spec"
 CREATE_PRODUCT_SPEC_SKILL = "create-product-spec"
 CREATE_TECH_SPEC_SKILL = "create-tech-spec"
-PR_DESCRIPTION_FILENAME = "pr_description.md"
-
-
-def _load_pr_description(run_id: str) -> str:
-    pr_description = poll_for_text_artifact(
-        run_id,
-        filename=PR_DESCRIPTION_FILENAME,
-    ).strip()
-    if not pr_description:
-        raise RuntimeError(
-            f"Oz run {run_id} produced an empty {PR_DESCRIPTION_FILENAME} artifact"
-        )
-    return pr_description
 
 
 def main() -> None:
@@ -133,7 +120,7 @@ def main() -> None:
                 progress.complete("I analyzed this issue but did not produce a spec diff.")
                 return
             existing_prs = list(github.get_pulls(state="open", head=f"{owner}:{branch_name}"))
-            pr_body = _load_pr_description(run.run_id)
+            pr_body = load_pr_description_artifact(run.run_id)
             if existing_prs:
                 pr = existing_prs[0]
                 pr.edit(title=f"spec: {issue_title}", body=pr_body)

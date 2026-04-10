@@ -6,7 +6,7 @@ from textwrap import dedent
 from github import Auth, Github
 
 from oz_workflows.actions import append_summary
-from oz_workflows.artifacts import poll_for_text_artifact
+from oz_workflows.artifacts import load_pr_description_artifact
 from oz_workflows.env import load_event, repo_parts, repo_slug, workspace, require_env
 from oz_workflows.helpers import (
     branch_updated_since,
@@ -26,19 +26,6 @@ from oz_workflows.oz_client import build_agent_config, run_agent, skill_file_pat
 IMPLEMENT_SPECS_SKILL = "implement-specs"
 SPEC_DRIVEN_IMPLEMENTATION_SKILL = "spec-driven-implementation"
 IMPLEMENT_ISSUE_SKILL = "implement-issue"
-PR_DESCRIPTION_FILENAME = "pr_description.md"
-
-
-def _load_pr_description(run_id: str) -> str:
-    pr_description = poll_for_text_artifact(
-        run_id,
-        filename=PR_DESCRIPTION_FILENAME,
-    ).strip()
-    if not pr_description:
-        raise RuntimeError(
-            f"Oz run {run_id} produced an empty {PR_DESCRIPTION_FILENAME} artifact"
-        )
-    return pr_description
 
 
 def main() -> None:
@@ -182,7 +169,7 @@ def main() -> None:
                 return
 
             commit_type = conventional_commit_prefix(issue.get("labels", []))
-            pr_body = _load_pr_description(run.run_id)
+            pr_body = load_pr_description_artifact(run.run_id)
 
             if selected_spec_pr:
                 github.get_pull(int(selected_spec_pr["number"])).edit(

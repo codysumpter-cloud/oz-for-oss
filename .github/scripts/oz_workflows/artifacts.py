@@ -130,3 +130,19 @@ def _download_artifact_text(client: OzAPI, artifact_uid: str) -> str:
             download_response.raise_for_status()
             break
     return download_response.text
+
+
+PR_DESCRIPTION_FILENAME = "pr_description.md"
+
+
+def load_pr_description_artifact(run_id: str) -> str:
+    """Load and validate the pr_description.md artifact from a completed Oz run."""
+    pr_description = poll_for_text_artifact(
+        run_id,
+        filename=PR_DESCRIPTION_FILENAME,
+    ).strip()
+    if not pr_description:
+        raise RuntimeError(
+            f"Oz run {run_id} produced an empty {PR_DESCRIPTION_FILENAME} artifact"
+        )
+    return pr_description
