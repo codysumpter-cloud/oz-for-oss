@@ -1,22 +1,24 @@
 name: Respond to PR Comment
 on:
-  issue_comment:
-    types: [created]
-  pull_request_review_comment:
-    types: [created]
-concurrency:
-  group: respond-to-pr-comment-${{ github.event.pull_request.number || github.event.issue.number }}
-  cancel-in-progress: false
+  workflow_call:
+    secrets:
+      OZ_MGMT_GHA_APP_ID:
+        required: true
+      OZ_MGMT_GHA_PRIVATE_KEY:
+        required: true
+      WARP_API_KEY:
+        required: true
 jobs:
   respond:
     if: >-
-      contains(github.event.comment.body, '@oz-agent') &&
-      contains(fromJSON('["COLLABORATOR","MEMBER","OWNER"]'), github.event.comment.author_association) &&
       github.event.comment.user.type != 'Bot' &&
-      !endsWith(github.event.comment.user.login, '[bot]') &&
-      (github.event_name == 'pull_request_review_comment' || (github.event_name == 'issue_comment' && github.event.issue.pull_request))
+      !endsWith(github.event.comment.user.login, '[bot]')
     name: Respond to PR comment
     runs-on: ubuntu-slim
+    env:
+      WORKFLOW_CODE_REPOSITORY: warpdotdev/oz-for-oss
+      WORKFLOW_CODE_REF: ${{ github.repository == 'warpdotdev/oz-for-oss' && github.sha || 'main' }}
+      WORKFLOW_CODE_PATH: __oz_shared
     permissions:
       contents: write
       id-token: write
@@ -34,6 +36,13 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - name: Checkout workflow code
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.WORKFLOW_CODE_REPOSITORY }}
+          ref: ${{ env.WORKFLOW_CODE_REF }}
+          path: ${{ env.WORKFLOW_CODE_PATH }}
+          token: ${{ steps.app_token.outputs.token }}
       - name: Authenticate to Google Cloud for staging secret access
         uses: google-github-actions/auth@v2
         with:
@@ -57,14 +66,14 @@ jobs:
       - name: Install Python workflow dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r .github/scripts/requirements.txt
+          python -m pip install -r "${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/requirements.txt"
       - name: Run respond-to-pr-comment workflow
         env:
-          PYTHONPATH: .github/scripts
+          PYTHONPATH: ${{ env.WORKFLOW_CODE_PATH }}/.github/scripts
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
           WARP_AGENT_MODEL: ${{ vars.WARP_AGENT_MODEL || '' }}
           WARP_AGENT_MCP: ${{ vars.WARP_AGENT_MCP || '' }}
           WARP_ENVIRONMENT_ID: ${{ vars.WARP_ENVIRONMENT_ID || '' }}
           STAGING_ORIGIN_TOKEN: ${{ steps.staging_origin_token.outputs.token }}
-        run: python .github/scripts/respond_to_pr_comment.py
+        run: python "${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/respond_to_pr_comment.py"
