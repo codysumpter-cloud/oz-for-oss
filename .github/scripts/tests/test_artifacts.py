@@ -5,9 +5,12 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from oz_workflows.artifacts import (
+    _download_artifact_text,
     _download_artifact_json,
     _find_file_artifact,
+    load_pr_description_artifact,
     poll_for_artifact,
+    poll_for_text_artifact,
 )
 
 
@@ -56,6 +59,28 @@ class FindFileArtifactTest(unittest.TestCase):
 
 
 class DownloadArtifactJsonTest(unittest.TestCase):
+    @patch("oz_workflows.artifacts.httpx.Client")
+    def test_downloads_text(self, mock_client_cls: MagicMock) -> None:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "## Summary\n- Item"
+        mock_response.raise_for_status = MagicMock()
+        mock_http = MagicMock()
+        mock_http.get.return_value = mock_response
+        mock_http.__enter__ = MagicMock(return_value=mock_http)
+        mock_http.__exit__ = MagicMock(return_value=False)
+        mock_client_cls.return_value = mock_http
+
+        client = MagicMock()
+        artifact_response = MagicMock()
+        artifact_response.data.download_url = "https://storage.example.com/signed-url"
+        client.agent.get_artifact.return_value = artifact_response
+
+        result = _download_artifact_text(client, "uid-123")
+        self.assertEqual(result, "## Summary\n- Item")
+        client.agent.get_artifact.assert_called_once_with("uid-123")
+        mock_http.get.assert_called_once_with("https://storage.example.com/signed-url")
+
     @patch("oz_workflows.artifacts.httpx.Client")
     def test_downloads_and_parses_json(self, mock_client_cls: MagicMock) -> None:
         expected = {"summary": "looks good", "comments": []}
@@ -126,6 +151,42 @@ class PollForArtifactTest(unittest.TestCase):
                 poll_interval_seconds=0,
             )
         self.assertIn("Timed out", str(ctx.exception))
+
+    @patch("oz_workflows.artifacts.build_oz_client")
+    @patch("oz_workflows.artifacts._download_artifact_text")
+    def test_returns_text_artifact_when_present(
+        self, mock_download: MagicMock, mock_build_client: MagicMock
+    ) -> None:
+        mock_download.return_value = "PR body"
+
+        run = MagicMock()
+        run.artifacts = [_make_artifact("FILE", "pr_description.md", "uid-pr")]
+        client = MagicMock()
+        client.agent.runs.retrieve.return_value = run
+        mock_build_client.return_value = client
+
+        result = poll_for_text_artifact(
+            "run-123",
+            filename="pr_description.md",
+            timeout_seconds=0,
+        )
+        self.assertEqual(result, "PR body")
+
+
+class LoadPrDescriptionArtifactTest(unittest.TestCase):
+    @patch("oz_workflows.artifacts.poll_for_text_artifact")
+    def test_returns_stripped_description(self, mock_poll: MagicMock) -> None:
+        mock_poll.return_value = "  Closes #42\n\n## Summary\n  "
+        result = load_pr_description_artifact("run-123")
+        self.assertEqual(result, "Closes #42\n\n## Summary")
+        mock_poll.assert_called_once_with("run-123", filename="pr_description.md")
+
+    @patch("oz_workflows.artifacts.poll_for_text_artifact")
+    def test_raises_when_empty(self, mock_poll: MagicMock) -> None:
+        mock_poll.return_value = "   "
+        with self.assertRaises(RuntimeError) as ctx:
+            load_pr_description_artifact("run-123")
+        self.assertIn("empty", str(ctx.exception))
 
 
 if __name__ == "__main__":

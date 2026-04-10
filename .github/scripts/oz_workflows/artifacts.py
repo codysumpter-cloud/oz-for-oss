@@ -37,13 +37,51 @@ def poll_for_artifact(
     propagation delay.
     """
     client = build_oz_client()
+    artifact_uid = _poll_for_file_artifact_uid(
+        client,
+        run_id,
+        filename=filename,
+        timeout_seconds=timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+    )
+    return _download_artifact_json(client, artifact_uid)
+
+
+def poll_for_text_artifact(
+    run_id: str,
+    *,
+    filename: str,
+    timeout_seconds: int = 120,
+    poll_interval_seconds: int = 5,
+) -> str:
+    """Retrieve a FILE artifact by filename and return its raw text content."""
+    client = build_oz_client()
+    artifact_uid = _poll_for_file_artifact_uid(
+        client,
+        run_id,
+        filename=filename,
+        timeout_seconds=timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+    )
+    return _download_artifact_text(client, artifact_uid)
+
+
+def _poll_for_file_artifact_uid(
+    client: OzAPI,
+    run_id: str,
+    *,
+    filename: str,
+    timeout_seconds: int,
+    poll_interval_seconds: int,
+) -> str:
+    """Wait for a FILE artifact by filename and return its artifact UID."""
     deadline = time.monotonic() + timeout_seconds
 
     while True:
         run = client.agent.runs.retrieve(run_id)
         artifact_uid = _find_file_artifact(run, filename)
         if artifact_uid is not None:
-            return _download_artifact_json(client, artifact_uid)
+            return artifact_uid
         if time.monotonic() >= deadline:
             raise RuntimeError(
                 f"Timed out waiting for FILE artifact '{filename}' on Oz run {run_id}"
@@ -67,6 +105,16 @@ def _find_file_artifact(run: RunItem, filename: str) -> str | None:
 
 def _download_artifact_json(client: OzAPI, artifact_uid: str) -> dict[str, Any]:
     """Fetch a FILE artifact's signed URL and download its JSON content."""
+    payload = json.loads(_download_artifact_text(client, artifact_uid))
+    if not isinstance(payload, dict):
+        raise RuntimeError(
+            f"Artifact {artifact_uid} must decode to a JSON object"
+        )
+    return payload
+
+
+def _download_artifact_text(client: OzAPI, artifact_uid: str) -> str:
+    """Fetch a FILE artifact's signed URL and download its text content."""
     response: AgentGetArtifactResponse = client.agent.get_artifact(artifact_uid)
     download_url = response.data.download_url
     if not download_url:
@@ -81,9 +129,20 @@ def _download_artifact_json(client: OzAPI, artifact_uid: str) -> dict[str, Any]:
                 continue
             download_response.raise_for_status()
             break
-    payload = json.loads(download_response.text)
-    if not isinstance(payload, dict):
+    return download_response.text
+
+
+PR_DESCRIPTION_FILENAME = "pr_description.md"
+
+
+def load_pr_description_artifact(run_id: str) -> str:
+    """Load and validate the pr_description.md artifact from a completed Oz run."""
+    pr_description = poll_for_text_artifact(
+        run_id,
+        filename=PR_DESCRIPTION_FILENAME,
+    ).strip()
+    if not pr_description:
         raise RuntimeError(
-            f"Artifact {artifact_uid} must decode to a JSON object"
+            f"Oz run {run_id} produced an empty {PR_DESCRIPTION_FILENAME} artifact"
         )
-    return payload
+    return pr_description

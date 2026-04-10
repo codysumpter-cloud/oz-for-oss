@@ -20,6 +20,7 @@ The Oz-specific differences are:
 - the primary input is a GitHub issue, not a Linear issue
 - the output path is `specs/GH<issue-number>/tech.md`
 - `issue_comments.txt` and triggering-comment context are additional design inputs
+- a workflow may also request a reusable PR body in `pr_description.md`
 - do not create or edit Linear issues as part of this workflow
 
 ## Inputs
@@ -46,10 +47,12 @@ When available, the product spec at `specs/GH<issue-number>/product.md` should b
 6. Keep the tech spec concise, actionable, and grounded in actual code paths and ownership boundaries in this repository.
 7. Do not implement the feature or modify production code as part of this task. Limit changes to the tech spec artifact and any minimal repository metadata needed to support it. Treat temporary context files such as `issue_comments.txt` as scratch input only and do not commit them.
 8. Do not include issue number references (e.g. `(#N)`, `Refs #N`) in commit messages. The issue is already linked in the PR.
-9. Default behavior: do not stage files, create commits, push branches, open pull requests, or use the GitHub CLI. If the prompt explicitly says you are running in a cloud-environment workflow where the caller cannot read your local diff and instructs you to publish a named branch, you may commit and push exactly the requested spec changes to that branch, but still do not open or update the pull request yourself unless the prompt explicitly asks for it.
-9. In your final response, provide a brief summary of the tech spec and call out any assumptions or open questions so the workflow can reuse that summary when creating the PR.
+9. If the prompt asks for it, write `pr_description.md` at the repository root containing the full markdown body to use for the spec pull request. Summarize the resulting spec changes, validation, and any reviewer-relevant assumptions or open questions.
+10. Default behavior: do not stage files, create commits, push branches, open pull requests, or use the GitHub CLI. If the prompt explicitly says you are running in a cloud-environment workflow where the caller cannot read your local diff and instructs you to publish a named branch, you may commit and push exactly the requested spec changes to that branch, but still do not open or update the pull request yourself unless the prompt explicitly asks for it.
+11. In your final response, provide a brief summary of the tech spec and call out any assumptions or open questions so the workflow can reuse that summary when creating the PR.
 
 ## Output expectations
 
 - Leave the repository with the new or updated tech spec file ready to be committed by the workflow.
+- When requested by the prompt, leave a ready-to-use PR body in `pr_description.md`.
 - If the issue is underspecified, still produce the best possible tech spec and clearly capture assumptions or open questions in the spec file and final response.

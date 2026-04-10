@@ -6,11 +6,11 @@ from textwrap import dedent
 from github import Auth, Github
 
 from oz_workflows.actions import append_summary
+from oz_workflows.artifacts import load_pr_description_artifact
 from oz_workflows.env import load_event, repo_parts, repo_slug, workspace, require_env
 from oz_workflows.helpers import (
     branch_updated_since,
     build_next_steps_section,
-    build_pr_body,
     coauthor_prompt_lines,
     conventional_commit_prefix,
     is_automation_user,
@@ -129,12 +129,14 @@ def main() -> None:
 
             Cloud Workflow Requirements:
             - Use the shared implementation skills `{implement_specs_skill_path}` and `{spec_driven_implementation_skill_path}` as the base workflow for this run. Prefer the consuming repository's versions when present; otherwise use the checked-in oz-for-oss copies.
-            - Read the Oz wrapper skill `{implement_issue_skill_path}` and apply its instructions for `spec_context.md`, `issue_comments.txt`, and `implementation_summary.md`.
+            - Read the Oz wrapper skill `{implement_issue_skill_path}` and apply its instructions for `spec_context.md`, `issue_comments.txt`, `implementation_summary.md`, and `pr_description.md`.
             - You are running in a cloud environment, so the caller cannot read your local diff.
             - Work on branch `{target_branch}`.
             - If that branch already exists, fetch it and continue from it. Otherwise create it from `{default_branch}`.
             - Align the implementation with the plan context above when present.
             - Run the most relevant validation available in the repository.
+            - If you produce changes, write `pr_description.md` at the repository root containing the full markdown PR body the workflow should use when opening or updating the PR.
+            - After validating `pr_description.md`, upload it as an artifact via `oz-dev artifacts upload pr_description.md`.
             - If you produce changes, commit them to `{target_branch}` and push that branch to origin.
             - Do not open or update the pull request yourself.
             - If no implementation diff is warranted, do not push the branch.
@@ -167,9 +169,13 @@ def main() -> None:
                 return
 
             commit_type = conventional_commit_prefix(issue.get("labels", []))
+            pr_body = load_pr_description_artifact(run.run_id)
 
             if selected_spec_pr:
-                github.get_pull(int(selected_spec_pr["number"])).edit(title=f"{commit_type}: {issue_title}")
+                github.get_pull(int(selected_spec_pr["number"])).edit(
+                    title=f"{commit_type}: {issue_title}",
+                    body=pr_body,
+                )
                 progress.complete(
                     f"I pushed implementation updates to the linked approved spec PR: {selected_spec_pr['url']}\n\n"
                     f"{next_steps_section}"
@@ -177,16 +183,6 @@ def main() -> None:
                 return
 
             existing_prs = list(github.get_pulls(state="open", head=f"{owner}:{target_branch}"))
-            pr_body = build_pr_body(
-                github,
-                owner,
-                repo,
-                issue_number=issue_number,
-                head=target_branch,
-                base=default_branch,
-                session_link=getattr(run, "session_link", None) or "",
-                closing_keyword="Closes",
-            )
             if existing_prs:
                 pr = existing_prs[0]
                 pr.edit(body=pr_body)
