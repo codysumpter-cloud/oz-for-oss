@@ -118,4 +118,5 @@ If the prompt says you are in a cloud-environment workflow and the expected loca
 - Fetch the PR branch and base branch, then generate `pr_diff.txt` yourself in the annotated format above before reviewing.
 - If the prompt includes spec context to materialize, write it to `spec_context.md` before running the review.
 - Still produce `review.json` and validate it with `jq`.
-- After validation, upload the result via `oz-dev artifacts upload review.json`.
+- After validation, upload the result via `oz-dev artifact upload review.json`.
+- IMPORTANT: the upload command is `oz-dev artifact upload` (singular `artifact`). Do not use `artifacts` (plural) — that is not a valid subcommand and will fail.

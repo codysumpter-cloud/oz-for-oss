@@ -88,7 +88,7 @@ def main() -> None:
             - First, read the shared product-spec skill `{write_product_spec_skill_path}`, then read the Oz wrapper skill `{create_product_spec_skill_path}`, and create a product spec at `specs/GH{issue_number}/product.md`.
             - Then, read the shared tech-spec skill `{write_tech_spec_skill_path}`, then read the Oz wrapper skill `{create_tech_spec_skill_path}`, and create a tech spec at `specs/GH{issue_number}/tech.md`.
             - If you produce spec changes, write `pr_description.md` at the repository root containing the full markdown PR body the workflow should use when opening or updating the spec PR.
-            - After validating `pr_description.md`, upload it as an artifact via `oz-dev artifacts upload pr_description.md`.
+            - After validating `pr_description.md`, upload it as an artifact via `oz-dev artifact upload pr_description.md`. The subcommand is `artifact` (singular); do not use `artifacts`.
             - If you produce spec changes, commit only the spec changes to branch `{branch_name}` and push that branch to origin.
             - Do not open or update the pull request yourself.
             - If there is no worthwhile spec diff, do not push the branch.
