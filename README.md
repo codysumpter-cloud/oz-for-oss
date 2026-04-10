@@ -6,7 +6,7 @@
 
 - `.github/workflows/` contains the GitHub Actions workflows that trigger Oz automation.
 - `.github/scripts/` contains the Python entrypoints that those workflows execute.
-- `.github/scripts/oz_workflows/` contains shared helpers for GitHub Actions outputs, environment loading, GitHub API access, transport comments, and Oz client integration.
+- `.github/scripts/oz_workflows/` contains shared helpers for GitHub Actions outputs, environment loading, GitHub API access, artifact retrieval, and Oz client integration.
 - `.github/issue-triage/` contains triage label definitions used during issue triage.
 - `.github/STAKEHOLDERS` maps repository path patterns to subject-matter expert GitHub usernames, using CODEOWNERS-style syntax.
 - `specs/` stores committed product and technical spec artifacts associated with issues, organized as `specs/GH{number}/product.md` and `specs/GH{number}/tech.md`.

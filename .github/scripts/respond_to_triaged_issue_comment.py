@@ -14,13 +14,8 @@ from oz_workflows.helpers import (
     record_run_session_link,
     triggering_comment_prompt_text,
 )
+from oz_workflows.artifacts import poll_for_artifact
 from oz_workflows.oz_client import build_agent_config, run_agent
-from oz_workflows.transport import (
-    cleanup_transport_comments,
-    create_transport_placeholder_comment,
-    new_transport_token,
-    poll_for_transport_payload,
-)
 from oz_workflows.triage import extract_original_issue_report
 
 
@@ -42,7 +37,7 @@ def format_visible_issue_comments(
 
 
 def extract_analysis_comment(result: dict[str, Any]) -> str:
-    """Return the normalized inline analysis comment from a transport payload."""
+    """Return the normalized inline analysis comment from an artifact payload."""
     return str(result.get("analysis_comment") or "").strip()
 
 
@@ -79,15 +74,6 @@ def main() -> None:
         current_body = str(issue.body or "").strip()
         original_report = extract_original_issue_report(current_body)
         triggering_comment_text = triggering_comment_prompt_text(event)
-        transport_token = new_transport_token()
-        transport_comment_id = create_transport_placeholder_comment(
-            github,
-            owner,
-            repo,
-            issue_number,
-            token=transport_token,
-            kind="issue-comment-response",
-        )
         prompt = dedent(
             f"""
             Respond inline to a mention on GitHub issue #{issue_number} in repository {owner}/{repo}.
@@ -96,7 +82,7 @@ def main() -> None:
             - This issue is already triaged.
             - It does not currently have `ready-to-spec` or `ready-to-implement`.
             - Do not rewrite the issue body.
-            - Do not change labels, assignees, or any GitHub state beyond the transport comment below.
+            - Do not change labels, assignees, or any other GitHub state.
 
             Issue Details:
             - Title: {issue.title}
@@ -134,13 +120,10 @@ def main() -> None:
                 "analysis_comment": "markdown reply for the issue thread"
               }}
             - `analysis_comment` must be a direct reply suitable for posting as Oz's inline response.
-            - Do not include HTML metadata or transport markup inside `analysis_comment`.
+            - Do not include HTML metadata inside `analysis_comment`.
             - Validate `issue_response.json` with `jq`.
-            - A reserved transport comment already exists on issue #{issue_number} as issue comment ID {transport_comment_id}. Do not create another transport comment.
-            - After validating the JSON, gzip the UTF-8 contents of `issue_response.json` and then base64 encode the compressed bytes.
-            - After validating the JSON, replace the entire body of issue comment ID {transport_comment_id} with a single HTML comment in this exact format:
-              <!-- oz-workflow-transport {{"token":"{transport_token}","kind":"issue-comment-response","encoding":"gzip+base64","payload":"<BASE64_OF_GZIPPED_RESPONSE_JSON>"}} -->
-            - After editing issue comment ID {transport_comment_id}, fetch that same issue comment and verify its body exactly matches what you wrote before exiting.
+            - Do not create issue comments or make other GitHub changes.
+            - After validating the JSON, upload it as an artifact via `oz-dev artifacts upload issue_response.json`.
             """
         ).strip()
 
@@ -149,27 +132,14 @@ def main() -> None:
             workspace=workspace(),
         )
         try:
-            run_agent(
+            run = run_agent(
                 prompt=prompt,
                 skill_name="triage-issue",
                 title=f"Respond to triaged issue comment #{issue_number}",
                 config=config,
                 on_poll=lambda current_run: record_run_session_link(progress, current_run),
             )
-            payload, transport_comment_id = poll_for_transport_payload(
-                github,
-                owner,
-                repo,
-                issue_number,
-                comment_id=transport_comment_id,
-                token=transport_token,
-                kind="issue-comment-response",
-                timeout_seconds=600,
-            )
-            issue.get_comment(transport_comment_id).delete()
-            result = json.loads(payload["decoded_payload"])
-            if not isinstance(result, dict):
-                raise RuntimeError("Issue response must decode to a JSON object")
+            result = poll_for_artifact(run.run_id, filename="issue_response.json")
             analysis_comment = extract_analysis_comment(result)
             if not analysis_comment:
                 analysis_comment = (
@@ -179,7 +149,6 @@ def main() -> None:
             progress.complete(analysis_comment)
         except Exception:
             progress.report_error()
-            cleanup_transport_comments(github, owner, repo, issue_number)
             raise
 
 if __name__ == "__main__":

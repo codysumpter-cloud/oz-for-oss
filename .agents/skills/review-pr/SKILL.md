@@ -14,7 +14,7 @@ Review the current pull request and write the output to `review.json`.
 - The workflow usually provides the PR description in `pr_description.txt`.
 - If `spec_context.md` exists, it contains spec context for implementation-vs-spec validation.
 - Focus on files and lines changed by this PR.
-- Default behavior: do not post comments or reviews to GitHub directly. If the prompt explicitly says you are running in a cloud-environment workflow and asks you to return `review.json` through a temporary machine-readable transport comment, you may create that temporary transport comment only.
+- Default behavior: do not post comments or reviews to GitHub directly.
 
 ## Review Scope
 
@@ -106,7 +106,7 @@ Before finishing:
 - Validate `review.json` with `jq`.
 - Fix invalid JSON if validation fails.
 - Confirm line numbers match the annotated diff.
-- Do not run `gh pr review`, `gh pr comment`, `gh api`, or any other command that posts to GitHub, unless the prompt explicitly instructs you to create a temporary machine-readable transport comment in cloud mode.
+- Do not run `gh pr review`, `gh pr comment`, `gh api`, or any other command that posts to GitHub.
 
 Your only output is the final `review.json`.
 
@@ -117,4 +117,5 @@ If the prompt says you are in a cloud-environment workflow and the expected loca
 - Create `pr_description.txt` yourself from the PR body or GitHub metadata provided in the prompt.
 - Fetch the PR branch and base branch, then generate `pr_diff.txt` yourself in the annotated format above before reviewing.
 - If the prompt includes spec context to materialize, write it to `spec_context.md` before running the review.
-- Still produce `review.json`, validate it, and then return it exactly as the prompt requests.
+- Still produce `review.json` and validate it with `jq`.
+- After validation, upload the result via `oz-dev artifacts upload review.json`.

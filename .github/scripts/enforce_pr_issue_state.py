@@ -8,12 +8,8 @@ from github import Auth, Github
 from oz_workflows.actions import set_output
 from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.helpers import extract_issue_numbers_from_text, ORG_MEMBER_ASSOCIATIONS, WorkflowProgressComment
+from oz_workflows.artifacts import poll_for_artifact
 from oz_workflows.oz_client import build_agent_config, run_agent
-from oz_workflows.transport import (
-    create_transport_placeholder_comment,
-    new_transport_token,
-    poll_for_transport_payload,
-)
 
 
 def _is_pr_author_org_member(pr: dict) -> bool:
@@ -98,15 +94,6 @@ def main() -> None:
             for issue in ready_issues
         ]
 
-        transport_token = new_transport_token()
-        transport_comment_id = create_transport_placeholder_comment(
-            github,
-            owner,
-            repo,
-            pr_number,
-            token=transport_token,
-            kind="issue-association",
-        )
         prompt = dedent(
             f"""
             Determine whether pull request #{pr_number} in repository {owner}/{repo} is clearly associated with one of the ready issues below.
@@ -129,11 +116,8 @@ def main() -> None:
               {{"matched": boolean, "issue_number": number | null, "rationale": string, "close_comment": string}}
             - If there is no clear match, set `close_comment` to a concise PR comment explaining that this {change_kind} PR could not be matched to an issue marked `{required_label}` and include this contribution docs link: {contribution_docs_url}
             - Do not close the PR yourself.
-            - A reserved transport comment already exists on PR #{pr_number} as issue comment ID {transport_comment_id}. Do not create another transport comment.
-            - Gzip the UTF-8 JSON payload before base64 encoding it for the transport comment.
-            - Replace the entire body of issue comment ID {transport_comment_id} with a single HTML comment in this exact format:
-              <!-- oz-workflow-transport {{"token":"{transport_token}","kind":"issue-association","encoding":"gzip+base64","payload":"<BASE64_OF_GZIPPED_JSON>"}} -->
-            - After editing issue comment ID {transport_comment_id}, fetch that same issue comment and verify its body exactly matches what you wrote before exiting.
+            - Validate the JSON with `jq`.
+            - After validating the JSON, upload it as an artifact via `oz-dev artifacts upload issue_association.json`.
             """
         ).strip()
 
@@ -142,24 +126,14 @@ def main() -> None:
             config_name="enforce-pr-issue-state",
             workspace=workspace(),
         )
-        run_agent(
+        run = run_agent(
             prompt=prompt,
             skill_name=None,
             title=f"Associate PR #{pr_number} with ready issue",
             config=config,
             on_poll=lambda current_run: _capture_session_link(session_links, current_run),
         )
-        payload, comment_id = poll_for_transport_payload(
-            github,
-            owner,
-            repo,
-            pr_number,
-            comment_id=transport_comment_id,
-            token=transport_token,
-            kind="issue-association",
-        )
-        pr.get_issue_comment(comment_id).delete()
-        result = json.loads(payload["decoded_payload"])
+        result = poll_for_artifact(run.run_id, filename="issue_association.json")
         if result.get("matched") is True and isinstance(result.get("issue_number"), int):
             progress.cleanup()
             set_output("allow_review", "true")
