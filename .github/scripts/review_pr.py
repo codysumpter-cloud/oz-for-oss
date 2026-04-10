@@ -14,13 +14,8 @@ from oz_workflows.helpers import (
     resolve_spec_context_for_pr,
     WorkflowProgressComment,
 )
+from oz_workflows.artifacts import poll_for_artifact
 from oz_workflows.oz_client import build_agent_config, run_agent
-from oz_workflows.transport import (
-    cleanup_transport_comments,
-    create_transport_placeholder_comment,
-    new_transport_token,
-    poll_for_transport_payload,
-)
 
 HUNK_HEADER_PATTERN = re.compile(
     r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))? \+(?P<new_start>\d+)(?:,(?P<new_count>\d+))? @@"
@@ -207,15 +202,6 @@ def main() -> None:
         spec_only = is_spec_only_pr(changed_files)
         skill_name = "review-spec" if spec_only else "review-pr"
 
-        transport_token = new_transport_token()
-        transport_comment_id = create_transport_placeholder_comment(
-            github,
-            owner,
-            repo,
-            pr_number,
-            token=transport_token,
-            kind="review-json",
-        )
         focus_line = (
             f"Additional focus from @{requester}: {focus}"
             if focus
@@ -249,11 +235,7 @@ def main() -> None:
             - Only include comments for files and lines that exist in the generated PR diff. If feedback does not map to a diff file or commentable diff line, put it in `summary` instead of `comments`.
             - If spec context is present above, write it to `spec_context.md` before reviewing so the repository's `check-impl-against-spec` skill can be used.
             - Do not post the final review directly.
-            - A reserved transport comment already exists on PR #{pr_number} as issue comment ID {transport_comment_id}. Do not create another transport comment.
-            - After you create and validate `review.json`, gzip the UTF-8 contents of that file and then base64 encode the compressed bytes.
-            - After you create and validate `review.json`, replace the entire body of issue comment ID {transport_comment_id} with a single HTML comment in this exact format:
-              <!-- oz-workflow-transport {{"token":"{transport_token}","kind":"review-json","encoding":"gzip+base64","payload":"<BASE64_OF_GZIPPED_REVIEW_JSON>"}} -->
-            - After editing issue comment ID {transport_comment_id}, fetch that same issue comment and verify its body exactly matches what you wrote before exiting.
+            - After you create and validate `review.json`, upload it as an artifact via `oz-dev artifacts upload review.json`.
             """
         ).strip()
 
@@ -262,24 +244,14 @@ def main() -> None:
             workspace=workspace(),
         )
         try:
-            run_agent(
+            run = run_agent(
                 prompt=prompt,
                 skill_name=skill_name,
                 title=f"PR review #{pr_number}",
                 config=config,
                 on_poll=lambda current_run: record_run_session_link(progress, current_run),
             )
-            payload, transport_comment_id = poll_for_transport_payload(
-                github,
-                owner,
-                repo,
-                pr_number,
-                comment_id=transport_comment_id,
-                token=transport_token,
-                kind="review-json",
-            )
-            pr.get_issue_comment(transport_comment_id).delete()
-            review = json.loads(payload["decoded_payload"])
+            review = poll_for_artifact(run.run_id, filename="review.json")
             diff_line_map = _build_diff_line_map(pr)
             summary, comments = _normalize_review_payload(review, diff_line_map)
             if not summary and not comments:
@@ -292,7 +264,6 @@ def main() -> None:
             progress.complete("I completed the review and posted feedback on this pull request.")
         except Exception:
             progress.report_error()
-            cleanup_transport_comments(github, owner, repo, pr_number)
             raise
 
 if __name__ == "__main__":

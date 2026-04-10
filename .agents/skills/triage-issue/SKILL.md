@@ -1,6 +1,6 @@
 ---
 name: triage-issue
-description: Triage a newly filed GitHub issue in this repository by analyzing the report, inspecting relevant code, estimating reproducibility, suggesting likely root cause and subject-matter experts, and returning structured triage output without mutating GitHub directly unless a cloud workflow explicitly requests a transport comment.
+description: Triage a newly filed GitHub issue in this repository by analyzing the report, inspecting relevant code, estimating reproducibility, suggesting likely root cause and subject-matter experts, and returning structured triage output without mutating GitHub directly.
 ---
 
 # Triage a GitHub issue
@@ -78,4 +78,4 @@ If the prompt says you are running in a cloud workflow:
 
 - still perform the triage as above
 - do not apply labels or edit the issue directly yourself
-- after validating `triage_result.json`, return it exactly through the temporary transport comment format requested by the prompt
+- after validating `triage_result.json` with `jq`, upload it via `oz-dev artifacts upload triage_result.json`

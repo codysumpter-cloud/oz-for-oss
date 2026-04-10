@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable, cast
 
 from oz_agent_sdk import OzAPI
+from oz_agent_sdk.types import AgentRunParams, AmbientAgentConfigParam, McpServerConfigParam
+from oz_agent_sdk.types.agent import RunItem
 
 from .actions import notice, warning
 from .env import optional_env, parse_mcp_servers, repo_slug, require_env, workspace
@@ -44,13 +46,13 @@ def build_agent_config(
     *,
     config_name: str,
     workspace: Path,
-) -> dict[str, Any]:
+) -> AmbientAgentConfigParam:
     """Build the agent configuration payload sent to the Oz API."""
     environment_id = optional_env("WARP_ENVIRONMENT_ID")
     if not environment_id:
         raise RuntimeError("Missing Oz environment configuration. Set WARP_ENVIRONMENT_ID")
 
-    config: dict[str, Any] = {
+    config: AmbientAgentConfigParam = {
         "environment_id": environment_id,
         "name": config_name,
     }
@@ -60,7 +62,9 @@ def build_agent_config(
 
     mcp_raw = optional_env("WARP_AGENT_MCP")
     if mcp_raw:
-        config["mcp_servers"] = parse_mcp_servers(mcp_raw, workspace)
+        mcp_servers = parse_mcp_servers(mcp_raw, workspace)
+        if mcp_servers is not None:
+            config["mcp_servers"] = cast(dict[str, McpServerConfigParam], mcp_servers)
 
     profile = optional_env("WARP_AGENT_PROFILE")
     if profile:
@@ -141,14 +145,14 @@ def run_agent(
     prompt: str,
     skill_name: str | None,
     title: str,
-    config: dict[str, Any],
-    on_poll: Callable[[Any], None] | None = None,
+    config: AmbientAgentConfigParam,
+    on_poll: Callable[[RunItem], None] | None = None,
     poll_interval_seconds: int = 10,
     timeout_seconds: int = 60 * 60,
-) -> Any:
+) -> RunItem:
     """Run an Oz agent and poll until it reaches a terminal state."""
     client = build_oz_client()
-    request: dict[str, Any] = {
+    request: AgentRunParams = {
         "prompt": prompt,
         "title": title,
         "config": config,
@@ -172,8 +176,8 @@ def run_agent(
             on_poll(run)
         if state in TERMINAL_STATES:
             if state != "SUCCEEDED":
-                status = getattr(run, "status_message", None)
-                message = getattr(status, "message", None) if status else None
+                status = run.status_message
+                message = status.message if status else None
                 raise RuntimeError(message or f"Oz run {run_id} finished in state {state}")
             return run
         if time.monotonic() >= deadline:

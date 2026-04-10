@@ -22,13 +22,8 @@ from oz_workflows.helpers import (
     triggering_comment_prompt_text,
     WorkflowProgressComment,
 )
+from oz_workflows.artifacts import poll_for_artifact
 from oz_workflows.oz_client import build_agent_config, run_agent
-from oz_workflows.transport import (
-    cleanup_transport_comments,
-    create_transport_placeholder_comment,
-    new_transport_token,
-    poll_for_transport_payload,
-)
 from oz_workflows.triage import (
     dedupe_strings,
     discover_issue_templates,
@@ -206,15 +201,6 @@ def process_issue(
     current_body = str(issue.body or "").strip()
     original_report = extract_original_issue_report(current_body)
     recent_issues_text = format_recent_issues_for_dedupe(recent_open_issues, issue_number)
-    transport_token = new_transport_token()
-    transport_comment_id = create_transport_placeholder_comment(
-        github,
-        owner,
-        repo,
-        issue_number,
-        token=transport_token,
-        kind="issue-triage",
-    )
     prompt = dedent(
         f"""
         Triage GitHub issue #{issue_number} in repository {owner}/{repo}.
@@ -287,11 +273,8 @@ def process_issue(
           }}
         - Populate `issue_body` with the markdown triage summary that should be posted as a separate issue comment. Do not rewrite the original issue description, and do not include HTML metadata in `issue_body`.
         - Validate `triage_result.json` with `jq`.
-        - A reserved transport comment already exists on issue #{issue_number} as issue comment ID {transport_comment_id}. Do not create another transport comment or make other GitHub changes.
-        - After validating the JSON, gzip the UTF-8 contents of `triage_result.json` and then base64 encode the compressed bytes.
-        - After validating the JSON, replace the entire body of issue comment ID {transport_comment_id} with a single HTML comment in this exact format:
-          <!-- oz-workflow-transport {{"token":"{transport_token}","kind":"issue-triage","encoding":"gzip+base64","payload":"<BASE64_OF_GZIPPED_TRIAGE_JSON>"}} -->
-        - After editing issue comment ID {transport_comment_id}, fetch that same issue comment and verify its body exactly matches what you wrote before exiting.
+        - Do not create issue comments or make other GitHub changes.
+        - After validating the JSON, upload it as an artifact via `oz-dev artifacts upload triage_result.json`.
         """
     ).strip()
 
@@ -304,21 +287,7 @@ def process_issue(
             on_poll=lambda current_run: _record_triage_session_link(progress, current_run),
         )
         _record_triage_session_link(progress, run)
-        payload, transport_comment_id = poll_for_transport_payload(
-            github,
-            owner,
-            repo,
-            issue_number,
-            comment_id=transport_comment_id,
-            token=transport_token,
-            kind="issue-triage",
-            timeout_seconds=600,
-        )
-        issue.get_comment(transport_comment_id).delete()
-
-        result = json.loads(payload["decoded_payload"])
-        if not isinstance(result, dict):
-            raise RuntimeError("Triage result must decode to a JSON object")
+        result = poll_for_artifact(run.run_id, filename="triage_result.json")
         apply_triage_result(
             github,
             owner,
@@ -363,7 +332,6 @@ def process_issue(
         append_summary(f"- Issue #{issue_number}: {summary} Labels: {labels_text}.\n")
     except Exception:
         progress.report_error()
-        cleanup_transport_comments(github, owner, repo, issue_number)
         raise
 
 
