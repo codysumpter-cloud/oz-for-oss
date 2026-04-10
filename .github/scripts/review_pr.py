@@ -235,7 +235,7 @@ def main() -> None:
             - Only include comments for files and lines that exist in the generated PR diff. If feedback does not map to a diff file or commentable diff line, put it in `summary` instead of `comments`.
             - If spec context is present above, write it to `spec_context.md` before reviewing so the repository's `check-impl-against-spec` skill can be used.
             - Do not post the final review directly.
-            - After you create and validate `review.json`, upload it as an artifact via `oz-dev artifacts upload review.json`.
+            - After you create and validate `review.json`, upload it as an artifact via `oz-dev artifact upload review.json`. The subcommand is `artifact` (singular); do not use `artifacts`.
             """
         ).strip()
 

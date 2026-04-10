@@ -136,7 +136,7 @@ def main() -> None:
             - Align the implementation with the plan context above when present.
             - Run the most relevant validation available in the repository.
             - If you produce changes, write `pr_description.md` at the repository root containing the full markdown PR body the workflow should use when opening or updating the PR.
-            - After validating `pr_description.md`, upload it as an artifact via `oz-dev artifacts upload pr_description.md`.
+            - After validating `pr_description.md`, upload it as an artifact via `oz-dev artifact upload pr_description.md`. The subcommand is `artifact` (singular); do not use `artifacts`.
             - If you produce changes, commit them to `{target_branch}` and push that branch to origin.
             - Do not open or update the pull request yourself.
             - If no implementation diff is warranted, do not push the branch.
