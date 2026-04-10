@@ -422,11 +422,9 @@ class ApplyTriageResultTest(unittest.TestCase):
         self.assertEqual(github.removed_labels, ["bug", "repro:unknown"])
         self.assertEqual(github.added_labels, ["enhancement", "repro:high", "area:workflow", "triaged"])
         self.assertEqual(github.updated_issue_body, "")
-        self.assertEqual(len(github.comments), 1)
-        self.assertEqual(
-            github.comments[0]["body"],
-            build_triage_summary_comment(issue, "## Updated"),
-        )
+        # Triage summary is no longer posted as a separate comment;
+        # it is embedded in the progress comment by process_issue.
+        self.assertEqual(len(github.comments), 0)
 
 
     def test_skips_triaged_label_when_needs_info_present(self) -> None:
@@ -492,7 +490,7 @@ class ApplyTriageResultTest(unittest.TestCase):
         self.assertIn("needs-info", github.added_labels)
         self.assertNotIn("triaged", github.added_labels)
 
-    def test_posts_issue_body_as_comment_without_rewriting_issue(self) -> None:
+    def test_does_not_post_separate_summary_comment(self) -> None:
         github = FakeTriageGitHubClient()
         issue = {
             "number": 58,
@@ -506,7 +504,7 @@ class ApplyTriageResultTest(unittest.TestCase):
             issue,
             result={
                 "labels": ["bug", "repro:low"],
-                "issue_body": "## Rewritten body that should be ignored",
+                "issue_body": "## Triage summary content",
             },
             configured_labels={
                 "triaged": {"color": "0E8A16", "description": "done"},
@@ -520,8 +518,9 @@ class ApplyTriageResultTest(unittest.TestCase):
             },
         )
         self.assertEqual(github.updated_issue_body, "")
-        self.assertEqual(len(github.comments), 1)
-        self.assertIn("## Rewritten body that should be ignored", str(github.comments[0]["body"]))
+        # Triage summary is no longer posted as a separate comment;
+        # it is embedded in the progress comment by process_issue.
+        self.assertEqual(len(github.comments), 0)
 
     def test_removes_triaged_on_retriage_with_needs_info(self) -> None:
         github = FakeTriageGitHubClient()
@@ -827,7 +826,7 @@ class BuildDuplicateSectionTest(unittest.TestCase):
 
 
 class CleanupLegacyTriageCommentsTest(unittest.TestCase):
-    def test_deletes_follow_up_and_duplicate_comments(self) -> None:
+    def test_deletes_follow_up_duplicate_and_summary_comments(self) -> None:
         github = FakeTriageGitHubClient()
         issue_number = 42
         follow_up_body = build_comment_body(
@@ -838,10 +837,15 @@ class CleanupLegacyTriageCommentsTest(unittest.TestCase):
             "duplicate content",
             duplicate_comment_metadata(issue_number),
         )
+        summary_body = build_triage_summary_comment(
+            {"number": issue_number},
+            "## Triage summary",
+        )
         github.create_comment("acme", "widgets", issue_number, follow_up_body)
         github.create_comment("acme", "widgets", issue_number, dup_body)
+        github.create_comment("acme", "widgets", issue_number, summary_body)
         github.create_comment("acme", "widgets", issue_number, "unrelated comment")
-        self.assertEqual(len(github.comments), 3)
+        self.assertEqual(len(github.comments), 4)
         issue = {"number": issue_number}
         _cleanup_legacy_triage_comments(github, "acme", "widgets", issue)
         self.assertEqual(len(github.comments), 1)
@@ -897,16 +901,20 @@ class MutualExclusivityTest(unittest.TestCase):
         issue = {"number": 42, "user": {"login": "alice"}}
         result = {
             "summary": "looks like a dupe",
+            "issue_body": "## Triage summary",
             "follow_up_questions": ["What OS?"],
             "duplicate_of": [
                 {"issue_number": 10, "title": "Original", "similarity_reason": "Same"},
             ],
         }
+        issue_body = str(result.get("issue_body") or "").strip()
         follow_up_questions = extract_follow_up_questions(result)
         duplicates = extract_duplicate_of(result, current_issue_number=42)
 
         # Simulate the logic from process_issue
         parts: list[str] = ["Oz has completed the triage of this issue. The triage concluded that looks like a dupe."]
+        if issue_body:
+            parts.append(issue_body)
         if duplicates:
             parts.append(build_duplicate_section(issue, duplicates))
         elif follow_up_questions:
@@ -914,6 +922,7 @@ class MutualExclusivityTest(unittest.TestCase):
         parts.append(TRIAGE_DISCLAIMER)
         body = "\n\n".join(parts)
 
+        self.assertIn("## Triage summary", body)
         self.assertIn("### Potential duplicates", body)
         self.assertNotIn("### Follow-up questions", body)
         self.assertIn(TRIAGE_DISCLAIMER, body)
@@ -922,13 +931,17 @@ class MutualExclusivityTest(unittest.TestCase):
         issue = {"number": 42, "user": {"login": "alice"}}
         result = {
             "summary": "needs more info",
+            "issue_body": "## Triage summary",
             "follow_up_questions": ["What version?"],
             "duplicate_of": [],
         }
+        issue_body = str(result.get("issue_body") or "").strip()
         follow_up_questions = extract_follow_up_questions(result)
         duplicates = extract_duplicate_of(result, current_issue_number=42)
 
         parts: list[str] = ["Oz has completed the triage of this issue. The triage concluded that needs more info."]
+        if issue_body:
+            parts.append(issue_body)
         if duplicates:
             parts.append(build_duplicate_section(issue, duplicates))
         elif follow_up_questions:
@@ -936,6 +949,7 @@ class MutualExclusivityTest(unittest.TestCase):
         parts.append(TRIAGE_DISCLAIMER)
         body = "\n\n".join(parts)
 
+        self.assertIn("## Triage summary", body)
         self.assertIn("### Follow-up questions", body)
         self.assertNotIn("### Potential duplicates", body)
         self.assertIn(TRIAGE_DISCLAIMER, body)
@@ -944,13 +958,17 @@ class MutualExclusivityTest(unittest.TestCase):
         issue = {"number": 42, "user": {"login": "alice"}}
         result = {
             "summary": "all good",
+            "issue_body": "## Triage summary",
             "follow_up_questions": [],
             "duplicate_of": [],
         }
+        issue_body = str(result.get("issue_body") or "").strip()
         follow_up_questions = extract_follow_up_questions(result)
         duplicates = extract_duplicate_of(result, current_issue_number=42)
 
         parts: list[str] = ["Oz has completed the triage of this issue. The triage concluded that all good."]
+        if issue_body:
+            parts.append(issue_body)
         if duplicates:
             parts.append(build_duplicate_section(issue, duplicates))
         elif follow_up_questions:
@@ -958,6 +976,7 @@ class MutualExclusivityTest(unittest.TestCase):
         parts.append(TRIAGE_DISCLAIMER)
         body = "\n\n".join(parts)
 
+        self.assertIn("## Triage summary", body)
         self.assertNotIn("### Follow-up questions", body)
         self.assertNotIn("### Potential duplicates", body)
         self.assertIn(TRIAGE_DISCLAIMER, body)

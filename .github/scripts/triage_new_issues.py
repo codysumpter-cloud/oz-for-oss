@@ -300,6 +300,7 @@ def process_issue(
 
         labels_text = ", ".join(extract_requested_labels(result)) or "no labels"
         summary = _lowercase_first(str(result.get("summary") or "triage completed").strip())
+        issue_body = str(result.get("issue_body") or "").strip()
         session_link = progress.session_link
 
         # Build the consolidated Stage 3 comment body.
@@ -316,6 +317,9 @@ def process_issue(
                 f"Oz has completed the triage of this issue. "
                 f"The triage concluded that {summary}."
             )
+
+        if issue_body:
+            parts.append(issue_body)
 
         follow_up_questions = extract_follow_up_questions(result)
         duplicates = extract_duplicate_of(result, current_issue_number=issue_number)
@@ -384,13 +388,6 @@ def apply_triage_result(
             issue.add_to_labels(*managed_labels)
         else:
             github.add_labels(owner, repo, issue_number, managed_labels)
-    sync_triage_summary_comment(
-        github,
-        owner,
-        repo,
-        issue,
-        issue_body=str(result.get("issue_body") or "").strip(),
-    )
 
 
 def ensure_label_exists(
@@ -470,10 +467,11 @@ def _cleanup_legacy_triage_comments(
     repo: str,
     issue: Any,
 ) -> None:
-    """Delete orphaned standalone follow-up and duplicate comments from prior triage runs."""
+    """Delete orphaned standalone follow-up, duplicate, and summary comments from prior triage runs."""
     issue_number = int(_field(issue, "number"))
     follow_up_marker = follow_up_comment_metadata(issue_number)
     duplicate_marker = duplicate_comment_metadata(issue_number)
+    summary_marker = triage_summary_comment_metadata(issue_number)
     comments = (
         list(issue.get_comments())
         if hasattr(issue, "get_comments")
@@ -481,7 +479,7 @@ def _cleanup_legacy_triage_comments(
     )
     for comment in comments:
         body = str(_field(comment, "body") or "")
-        if follow_up_marker in body or duplicate_marker in body:
+        if follow_up_marker in body or duplicate_marker in body or summary_marker in body:
             try:
                 if hasattr(comment, "delete"):
                     comment.delete()
@@ -559,6 +557,8 @@ def sync_triage_summary_comment(
     *,
     issue_body: str,
 ) -> None:
+    # Deprecated: triage summary content is now embedded in the progress comment
+    # via process_issue(). Retained for backward compatibility.
     issue_number = int(_field(issue, "number"))
     metadata = triage_summary_comment_metadata(issue_number)
     if not issue_body.strip():
