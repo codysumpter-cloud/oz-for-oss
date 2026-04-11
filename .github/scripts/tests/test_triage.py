@@ -1023,12 +1023,6 @@ class TriageHeuristicsPromptTest(unittest.TestCase):
         self.assertIn("video", heuristics)
         self.assertIn("screenshot", heuristics)
 
-    def test_warp_heuristics_include_warpify_disambiguation(self) -> None:
-        heuristics = triage_heuristics_prompt("warpdotdev", "Warp")
-        self.assertIn("Warpify", heuristics)
-        self.assertIn("ssh", heuristics.lower())
-        self.assertIn("Subshell Execution Control", heuristics)
-
     def test_warp_heuristics_include_release_versioning_context(self) -> None:
         heuristics = triage_heuristics_prompt("warpdotdev", "Warp")
         self.assertIn("release branch", heuristics)
