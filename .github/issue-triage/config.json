@@ -40,6 +40,10 @@
       "color": "7057FF",
       "description": "GitHub workflows, Python automation, or Oz integration"
     },
+    "area:keyboard-layout": {
+      "color": "D4C5F9",
+      "description": "International keyboard layouts, non-US input sources, or IME/input method issues"
+    },
     "duplicate": {
       "color": "CFD3D7",
       "description": "This issue has been identified as a duplicate of one or more existing issues"
