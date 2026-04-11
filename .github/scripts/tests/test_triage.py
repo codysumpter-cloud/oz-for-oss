@@ -956,6 +956,8 @@ class MutualExclusivityTest(unittest.TestCase):
         duplicates = extract_duplicate_of(result, current_issue_number=int(issue["number"]))
 
         parts: list[str] = []
+        if not follow_up_questions and not duplicates:
+            parts.append("Oz has completed the triage of this issue.")
         if duplicates:
             parts.append(build_duplicate_section(issue, duplicates))
         elif follow_up_questions:
@@ -964,6 +966,20 @@ class MutualExclusivityTest(unittest.TestCase):
         maintainer_parts: list[str] = [f"Oz concluded that {summary}."]
         if not duplicates and issue_body:
             maintainer_parts.append(issue_body)
+        if duplicates:
+            dup_reasoning_lines: list[str] = []
+            for dup in duplicates:
+                reason = dup.get("similarity_reason") or ""
+                if reason:
+                    dup_reasoning_lines.append(f"- #{dup['issue_number']}: {reason}")
+            if dup_reasoning_lines:
+                maintainer_parts.append(
+                    "**Duplicate reasoning**\n" + "\n".join(dup_reasoning_lines)
+                )
+        if follow_up_questions:
+            reasoning_section = build_question_reasoning_section(follow_up_questions)
+            if reasoning_section:
+                maintainer_parts.append(reasoning_section)
         details_body = "\n\n".join(maintainer_parts)
         parts.append(
             "<details>\n<summary>Maintainer details</summary>\n\n"
@@ -993,6 +1009,11 @@ class MutualExclusivityTest(unittest.TestCase):
         # Maintainer details are in the <details> section
         self.assertIn("<details>", body)
         self.assertIn(TRIAGE_DISCLAIMER, body)
+        # Duplicate similarity reasoning appears in the maintainer section
+        self.assertIn("**Duplicate reasoning**", body)
+        self.assertIn("- #10: Same", body)
+        # No fallback text when duplicates are present
+        self.assertNotIn("Oz has completed the triage of this issue", body)
 
     def test_follow_up_when_no_duplicates(self) -> None:
         issue = {"number": 42, "user": {"login": "alice"}}
@@ -1010,6 +1031,26 @@ class MutualExclusivityTest(unittest.TestCase):
         self.assertIn("## Triage summary", body)
         self.assertIn("<details>", body)
         self.assertIn(TRIAGE_DISCLAIMER, body)
+        # No fallback text when follow-up questions are present
+        self.assertNotIn("Oz has completed the triage of this issue", body)
+
+    def test_follow_up_reasoning_in_maintainer_section(self) -> None:
+        issue = {"number": 42, "user": {"login": "alice"}}
+        result = {
+            "summary": "needs more info",
+            "issue_body": "## Triage summary",
+            "follow_up_questions": [
+                {"question": "What OS?", "reasoning": "Platform-sensitive"},
+                {"question": "What version?", "reasoning": ""},
+            ],
+            "duplicate_of": [],
+        }
+        body = self._build_comment_parts(result, issue)
+
+        # Question reasoning appears inside the maintainer <details> section
+        self.assertIn("**Question reasoning**", body)
+        self.assertIn("**What OS?**", body)
+        self.assertIn("Platform-sensitive", body)
 
     def test_neither_section_when_both_empty(self) -> None:
         issue = {"number": 42, "user": {"login": "alice"}}
@@ -1027,6 +1068,8 @@ class MutualExclusivityTest(unittest.TestCase):
         self.assertIn("## Triage summary", body)
         self.assertIn("<details>", body)
         self.assertIn(TRIAGE_DISCLAIMER, body)
+        # Fallback text present when no user-facing content
+        self.assertIn("Oz has completed the triage of this issue.", body)
 
 
 class LowercaseFirstTest(unittest.TestCase):

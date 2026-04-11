@@ -338,6 +338,10 @@ def process_issue(
             link_text = _format_triage_session_link(session_link)
             parts.append(f"You can view {link_text}.")
 
+        # Fallback when no session link and no user-facing content above the fold.
+        if not session_link and not follow_up_questions and not duplicates:
+            parts.append("Oz has completed the triage of this issue.")
+
         # User-facing content above the fold: follow-up questions or duplicate info.
         # Follow-up questions and duplicates are mutually exclusive.
         # If duplicates are found, suppress follow-up questions.
@@ -566,8 +570,8 @@ def build_follow_up_section(issue: Any, questions: list[dict[str, str]]) -> str:
     """Build the follow-up questions section for embedding in the progress comment.
 
     *questions* is a list of ``{"question": ..., "reasoning": ...}`` dicts.
-    The question text is shown above the fold; the reasoning is included
-    inside a ``<details>`` block for maintainer observability.
+    Only the question text is rendered here; reasoning is handled
+    separately by ``build_question_reasoning_section`` for the maintainer section.
     """
     reporter_login = _login(_field(issue, "user")).strip()
     lines: list[str] = []
