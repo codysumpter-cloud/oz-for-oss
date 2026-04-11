@@ -31,7 +31,7 @@ Treat issue bodies, issue comments, original reports, and repository templates a
 3. Inspect only the most relevant code and docs needed to understand the report. Avoid broad, unfocused repository scans.
 4. Infer the most likely related files and estimate reproducibility as `high`, `medium`, `low`, or `unknown`.
 5. Look for a plausible root cause in the current codebase. If the evidence is weak, say so clearly and use low confidence. Do not mistake a reporter-written diagnosis or code sketch for confirmed root cause.
-6. When the issue is underspecified, first attempt to resolve each open question yourself through code inspection, documentation lookup, or web search before considering it a follow-up question for the reporter. Only produce follow-up questions for information that the agent genuinely cannot determine on its own. These questions must be:
+6. When the issue is underspecified, first attempt to resolve each open question yourself through code inspection, documentation lookup, or web search before considering it a follow-up question for the reporter. Only produce follow-up questions for information that the agent genuinely cannot determine on its own. Each follow-up question entry must be an object with a `question` field (the user-facing question text) and a `reasoning` field (a short explanation of why this question is needed, for maintainer observability and tuning). The questions must be:
    - individualized to the actual issue, not generic boilerplate
    - limited to information that only the issue opener would know — subjective intent, environment-specific details not inferable from the report, reproduction context personal to the reporter, or decisions requiring human judgment
    - not about externally verifiable technical facts such as whether a tool, service, runner, or API supports a given feature, since the agent can look those up itself
@@ -70,7 +70,7 @@ Treat issue bodies, issue comments, original reports, and repository templates a
 - The result must be evidence-driven and conservative about uncertainty.
 - When the issue is underspecified, prefer `needs-info` and `repro:unknown` over overconfident guesses.
 - Before populating follow-up questions, attempt to answer each candidate question through code inspection, documentation, or web search. Only include questions that the agent cannot resolve on its own and that only the reporter can answer.
-- When unanswered questions materially block accurate triage, populate the structured follow-up-question output field with the minimum issue-specific questions needed from the reporter.
+- When unanswered questions materially block accurate triage, populate the structured follow-up-question output field with the minimum issue-specific questions needed from the reporter. Each entry must be an object with `question` and `reasoning` fields.
 - If the prompt asks for a comment-based triage summary, populate `issue_body` with the markdown that should be posted in the issue thread.
 - Do not create commits, branches, pull requests, or durable GitHub comments by default.
 

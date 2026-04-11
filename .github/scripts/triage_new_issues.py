@@ -291,7 +291,7 @@ def process_issue(
             "sme_candidates": [{{"login": "github-login", "reason": "string"}}],
             "selected_template_path": "path or empty string",
             "issue_body": "markdown triage summary to post as a standalone issue comment",
-            "follow_up_questions": ["question for the reporter"],
+            "follow_up_questions": [{{"question": "question for the reporter", "reasoning": "why this question is needed"}}],
             "duplicate_of": [{{"issue_number": 123, "title": "existing issue title", "similarity_reason": "why it matches"}}]
           }}
         - Populate `issue_body` with the markdown triage summary that should be posted as a separate issue comment. Do not rewrite the original issue description, and do not include HTML metadata in `issue_body`.
@@ -326,33 +326,54 @@ def process_issue(
         issue_body = str(result.get("issue_body") or "").strip()
         session_link = progress.session_link
 
-        # Build the consolidated Stage 3 comment body.
-        parts: list[str] = []
-        if session_link:
-            link_text = _format_triage_session_link(session_link)
-            parts.append(
-                f"Oz has completed the triage of this issue. "
-                f"You can view {link_text}.\n\n"
-                f"The triage concluded that {summary}."
-            )
-        else:
-            parts.append(
-                f"Oz has completed the triage of this issue. "
-                f"The triage concluded that {summary}."
-            )
-
-        if issue_body:
-            parts.append(issue_body)
-
         follow_up_questions = extract_follow_up_questions(result)
         duplicates = extract_duplicate_of(result, current_issue_number=issue_number)
 
+        # Build the consolidated Stage 3 comment body.
+        # Layout: session link → user-facing content → maintainer details (collapsed).
+        parts: list[str] = []
+
+        # Session link is always visible at the very top.
+        if session_link:
+            link_text = _format_triage_session_link(session_link)
+            parts.append(f"You can view {link_text}.")
+
+        # User-facing content above the fold: follow-up questions or duplicate info.
         # Follow-up questions and duplicates are mutually exclusive.
         # If duplicates are found, suppress follow-up questions.
         if duplicates:
             parts.append(build_duplicate_section(issue, duplicates))
         elif follow_up_questions:
             parts.append(build_follow_up_section(issue, follow_up_questions))
+
+        # Maintainer-facing content collapsed behind <details>.
+        maintainer_parts: list[str] = []
+        maintainer_parts.append(f"Oz concluded that {summary}.")
+        if not duplicates and issue_body:
+            maintainer_parts.append(issue_body)
+        if duplicates:
+            # Include similarity reasons in maintainer section.
+            dup_reasoning_lines: list[str] = []
+            for dup in duplicates:
+                reason = dup.get("similarity_reason") or ""
+                if reason:
+                    dup_reasoning_lines.append(f"- #{dup['issue_number']}: {reason}")
+            if dup_reasoning_lines:
+                maintainer_parts.append(
+                    "**Duplicate reasoning**\n" + "\n".join(dup_reasoning_lines)
+                )
+        if follow_up_questions:
+            reasoning_lines = build_question_reasoning_section(follow_up_questions)
+            if reasoning_lines:
+                maintainer_parts.append(reasoning_lines)
+
+        details_body = "\n\n".join(maintainer_parts)
+        parts.append(
+            "<details>\n"
+            "<summary>Maintainer details</summary>\n\n"
+            f"{details_body}\n\n"
+            "</details>"
+        )
 
         parts.append(TRIAGE_DISCLAIMER)
         progress.replace_body("\n\n".join(parts))
@@ -454,18 +475,30 @@ def extract_requested_labels(result: dict[str, Any]) -> list[str]:
     ]
 
 
-def extract_follow_up_questions(result: dict[str, Any]) -> list[str]:
-    """Normalize follow-up questions from a triage result payload."""
+def extract_follow_up_questions(result: dict[str, Any]) -> list[dict[str, str]]:
+    """Normalize follow-up questions from a triage result payload.
+
+    Returns a list of ``{"question": ..., "reasoning": ...}`` dicts.
+    Plain-string entries are accepted for backward compatibility and
+    converted to objects with empty reasoning.
+    """
     raw_questions = result.get("follow_up_questions")
     if not isinstance(raw_questions, list):
         return []
-    normalized: list[str] = []
+    normalized: list[dict[str, str]] = []
+    seen: set[str] = set()
     for raw_question in raw_questions:
         if isinstance(raw_question, dict):
-            normalized.append(str(raw_question.get("question") or "").strip())
+            question = str(raw_question.get("question") or "").strip()
+            reasoning = str(raw_question.get("reasoning") or "").strip()
+        else:
+            question = str(raw_question or "").strip()
+            reasoning = ""
+        if not question or question in seen:
             continue
-        normalized.append(str(raw_question or "").strip())
-    return dedupe_strings(normalized)
+        seen.add(question)
+        normalized.append({"question": question, "reasoning": reasoning})
+    return normalized
 
 
 def should_replace_triage_label(label_name: str) -> bool:
@@ -512,19 +545,38 @@ def _cleanup_legacy_triage_comments(
                 pass
 
 
-def build_follow_up_section(issue: Any, questions: list[str]) -> str:
-    """Build the follow-up questions section for embedding in the progress comment."""
+def build_question_reasoning_section(questions: list[dict[str, str]]) -> str:
+    """Build the reasoning section for follow-up questions (maintainer-only).
+
+    Returns a markdown block showing why each question was asked,
+    intended for inclusion inside a ``<details>`` expando.
+    Returns an empty string when no question has reasoning.
+    """
+    lines: list[str] = []
+    for i, q in enumerate(questions, start=1):
+        reasoning = q.get("reasoning") or ""
+        if reasoning:
+            lines.append(f"{i}. **{q['question']}** — {reasoning}")
+    if not lines:
+        return ""
+    return "**Question reasoning**\n" + "\n".join(lines)
+
+
+def build_follow_up_section(issue: Any, questions: list[dict[str, str]]) -> str:
+    """Build the follow-up questions section for embedding in the progress comment.
+
+    *questions* is a list of ``{"question": ..., "reasoning": ...}`` dicts.
+    The question text is shown above the fold; the reasoning is included
+    inside a ``<details>`` block for maintainer observability.
+    """
     reporter_login = _login(_field(issue, "user")).strip()
-    lines: list[str] = ["### Follow-up questions", ""]
+    lines: list[str] = []
     if reporter_login:
-        lines.append(f"@{reporter_login}")
-        lines.append("")
-    lines.append(
-        "Thanks for the report. I'm missing a few issue-specific details "
-        "before I can narrow this down confidently:"
-    )
+        lines.append(f"@{reporter_login} — I have a few follow-up questions before I can narrow this down:")
+    else:
+        lines.append("I have a few follow-up questions before I can narrow this down:")
     lines.append("")
-    lines.extend(f"{i}. {q}" for i, q in enumerate(questions, start=1))
+    lines.extend(f"{i}. {q['question']}" for i, q in enumerate(questions, start=1))
     lines.append("")
     lines.append(
         "Reply in-thread with those details and the triage workflow will "
@@ -536,19 +588,20 @@ def build_follow_up_section(issue: Any, questions: list[str]) -> str:
 
 def build_duplicate_section(issue: Any, duplicates: list[dict[str, Any]]) -> str:
     """Build the duplicate detection section for embedding in the progress comment."""
-    lines: list[str] = ["### Potential duplicates", ""]
-    lines.append("This issue appears likely to overlap with the following existing issues:")
+    reporter_login = _login(_field(issue, "user")).strip()
+    lines: list[str] = []
+    if reporter_login:
+        lines.append(f"@{reporter_login} — this issue appears to overlap with existing issues:")
+    else:
+        lines.append("This issue appears to overlap with existing issues:")
     lines.append("")
     for dup in duplicates:
         num = dup["issue_number"]
         title = dup.get("title") or ""
-        reason = dup.get("similarity_reason") or ""
         line = f"- #{num}"
         if title:
             line += f" — {title}"
         lines.append(line)
-        if reason:
-            lines.append(f"  Why it looks similar: {reason}")
     lines.append("")
     lines.append(
         "If this report is meaningfully different, please comment with the "
