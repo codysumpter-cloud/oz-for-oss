@@ -12,6 +12,7 @@ from triage_new_issues import (
     build_duplicate_section,
     build_follow_up_comment,
     build_follow_up_section,
+    build_question_reasoning_section,
     build_triage_summary_comment,
     extract_duplicate_of,
     extract_follow_up_questions,
@@ -371,8 +372,8 @@ class ExtractFollowUpQuestionsTest(unittest.TestCase):
             {
                 "follow_up_questions": [
                     "What Warp version is affected?",
-                    {"question": "What Warp version is affected?"},
-                    {"question": "Does this reproduce in another shell?"},
+                    {"question": "What Warp version is affected?", "reasoning": "dup"},
+                    {"question": "Does this reproduce in another shell?", "reasoning": "env check"},
                     "",
                 ]
             }
@@ -380,9 +381,28 @@ class ExtractFollowUpQuestionsTest(unittest.TestCase):
         self.assertEqual(
             questions,
             [
-                "What Warp version is affected?",
-                "Does this reproduce in another shell?",
+                {"question": "What Warp version is affected?", "reasoning": ""},
+                {"question": "Does this reproduce in another shell?", "reasoning": "env check"},
             ],
+        )
+
+    def test_returns_empty_for_non_list(self) -> None:
+        self.assertEqual(extract_follow_up_questions({"follow_up_questions": "not a list"}), [])
+
+    def test_returns_empty_for_missing_key(self) -> None:
+        self.assertEqual(extract_follow_up_questions({}), [])
+
+    def test_preserves_reasoning_from_object_entries(self) -> None:
+        questions = extract_follow_up_questions(
+            {
+                "follow_up_questions": [
+                    {"question": "What OS?", "reasoning": "Platform-sensitive issue"},
+                ]
+            }
+        )
+        self.assertEqual(
+            questions,
+            [{"question": "What OS?", "reasoning": "Platform-sensitive issue"}],
         )
 
 
@@ -787,46 +807,52 @@ class FormatTriageSessionLinkTest(unittest.TestCase):
 class BuildFollowUpSectionTest(unittest.TestCase):
     def test_includes_reporter_mention_and_questions(self) -> None:
         issue = {"number": 42, "user": {"login": "alice"}}
-        section = build_follow_up_section(issue, ["What OS?", "What version?"])
-        self.assertIn("### Follow-up questions", section)
+        questions = [
+            {"question": "What OS?", "reasoning": "Platform-sensitive"},
+            {"question": "What version?", "reasoning": ""},
+        ]
+        section = build_follow_up_section(issue, questions)
         self.assertIn("@alice", section)
         self.assertIn("1. What OS?", section)
         self.assertIn("2. What version?", section)
-        self.assertIn("Thanks for the report", section)
+        self.assertIn("follow-up questions", section)
         self.assertIn("Reply in-thread", section)
+        # Reasoning should NOT be in the above-the-fold section
+        self.assertNotIn("Platform-sensitive", section)
 
     def test_omits_reporter_when_missing(self) -> None:
         issue = {"number": 42, "user": {"login": ""}}
-        section = build_follow_up_section(issue, ["What OS?"])
-        self.assertIn("### Follow-up questions", section)
+        questions = [{"question": "What OS?", "reasoning": ""}]
+        section = build_follow_up_section(issue, questions)
         self.assertNotIn("@", section)
         self.assertIn("1. What OS?", section)
 
 
 class BuildDuplicateSectionTest(unittest.TestCase):
-    def test_includes_issue_links_and_reasons(self) -> None:
+    def test_includes_issue_links(self) -> None:
         issue = {"number": 42, "user": {"login": "alice"}}
         duplicates = [
             {"issue_number": 10, "title": "Original bug", "similarity_reason": "Same error"},
             {"issue_number": 20, "title": "Another", "similarity_reason": ""},
         ]
         section = build_duplicate_section(issue, duplicates)
-        self.assertIn("### Potential duplicates", section)
+        self.assertIn("@alice", section)
         self.assertIn("#10", section)
         self.assertIn("Original bug", section)
-        self.assertIn("Why it looks similar: Same error", section)
         self.assertIn("#20", section)
         self.assertIn("Another", section)
-        self.assertNotIn("Why it looks similar: \n", section)
+        # Similarity reasons are now in the maintainer details, not above the fold
+        self.assertNotIn("Why it looks similar", section)
         self.assertIn("close it as a duplicate after review", section)
 
-    def test_omits_reason_when_empty(self) -> None:
-        issue = {"number": 42, "user": {"login": "alice"}}
+    def test_omits_reporter_when_missing(self) -> None:
+        issue = {"number": 42, "user": {"login": ""}}
         duplicates = [
             {"issue_number": 5, "title": "Dupe", "similarity_reason": ""},
         ]
         section = build_duplicate_section(issue, duplicates)
-        self.assertNotIn("Why it looks similar", section)
+        self.assertNotIn("@", section)
+        self.assertIn("#5", section)
 
 
 class CleanupLegacyTriageCommentsTest(unittest.TestCase):
@@ -897,66 +923,134 @@ class ReplaceBodyTest(unittest.TestCase):
         self.assertIn(progress.metadata, str(github.comments[0]["body"]))
 
 
+class BuildQuestionReasoningSectionTest(unittest.TestCase):
+    def test_includes_reasoning_for_questions_that_have_it(self) -> None:
+        questions = [
+            {"question": "What OS?", "reasoning": "Platform-sensitive"},
+            {"question": "What version?", "reasoning": ""},
+        ]
+        section = build_question_reasoning_section(questions)
+        self.assertIn("**Question reasoning**", section)
+        self.assertIn("1. **What OS?**", section)
+        self.assertIn("Platform-sensitive", section)
+        # Question 2 has no reasoning, so it should not appear
+        self.assertNotIn("What version?", section)
+
+    def test_returns_empty_when_no_reasoning(self) -> None:
+        questions = [
+            {"question": "What OS?", "reasoning": ""},
+        ]
+        self.assertEqual(build_question_reasoning_section(questions), "")
+
+
 class MutualExclusivityTest(unittest.TestCase):
     """Verify that when both follow-up questions and duplicates are present,
-    only the duplicate section appears."""
+    only the duplicate section appears above the fold."""
+
+    def _build_comment_parts(self, result: dict, issue: dict) -> str:
+        """Simulate the comment assembly logic from process_issue."""
+        from triage_new_issues import _lowercase_first
+        summary = _lowercase_first(str(result.get("summary") or "triage completed").strip())
+        issue_body = str(result.get("issue_body") or "").strip()
+        follow_up_questions = extract_follow_up_questions(result)
+        duplicates = extract_duplicate_of(result, current_issue_number=int(issue["number"]))
+
+        parts: list[str] = []
+        if not follow_up_questions and not duplicates:
+            parts.append("Oz has completed the triage of this issue.")
+        if duplicates:
+            parts.append(build_duplicate_section(issue, duplicates))
+        elif follow_up_questions:
+            parts.append(build_follow_up_section(issue, follow_up_questions))
+
+        maintainer_parts: list[str] = [f"Oz concluded that {summary}."]
+        if not duplicates and issue_body:
+            maintainer_parts.append(issue_body)
+        if duplicates:
+            dup_reasoning_lines: list[str] = []
+            for dup in duplicates:
+                reason = dup.get("similarity_reason") or ""
+                if reason:
+                    dup_reasoning_lines.append(f"- #{dup['issue_number']}: {reason}")
+            if dup_reasoning_lines:
+                maintainer_parts.append(
+                    "**Duplicate reasoning**\n" + "\n".join(dup_reasoning_lines)
+                )
+        if follow_up_questions:
+            reasoning_section = build_question_reasoning_section(follow_up_questions)
+            if reasoning_section:
+                maintainer_parts.append(reasoning_section)
+        details_body = "\n\n".join(maintainer_parts)
+        parts.append(
+            "<details>\n<summary>Maintainer details</summary>\n\n"
+            f"{details_body}\n\n</details>"
+        )
+        parts.append(TRIAGE_DISCLAIMER)
+        return "\n\n".join(parts)
 
     def test_duplicates_suppress_follow_up_questions(self) -> None:
         issue = {"number": 42, "user": {"login": "alice"}}
         result = {
             "summary": "looks like a dupe",
             "issue_body": "## Triage summary",
-            "follow_up_questions": ["What OS?"],
+            "follow_up_questions": [{"question": "What OS?", "reasoning": ""}],
             "duplicate_of": [
                 {"issue_number": 10, "title": "Original", "similarity_reason": "Same"},
             ],
         }
-        issue_body = str(result.get("issue_body") or "").strip()
-        follow_up_questions = extract_follow_up_questions(result)
-        duplicates = extract_duplicate_of(result, current_issue_number=42)
+        body = self._build_comment_parts(result, issue)
 
-        # Simulate the logic from process_issue
-        parts: list[str] = ["Oz has completed the triage of this issue. The triage concluded that looks like a dupe."]
-        if issue_body:
-            parts.append(issue_body)
-        if duplicates:
-            parts.append(build_duplicate_section(issue, duplicates))
-        elif follow_up_questions:
-            parts.append(build_follow_up_section(issue, follow_up_questions))
-        parts.append(TRIAGE_DISCLAIMER)
-        body = "\n\n".join(parts)
-
-        self.assertIn("## Triage summary", body)
-        self.assertIn("### Potential duplicates", body)
-        self.assertNotIn("### Follow-up questions", body)
+        # Duplicate info is above the fold
+        self.assertIn("overlap with existing issues", body)
+        # Follow-up questions should not appear
+        self.assertNotIn("follow-up questions", body)
+        # issue_body suppressed for duplicates
+        self.assertNotIn("## Triage summary", body)
+        # Maintainer details are in the <details> section
+        self.assertIn("<details>", body)
         self.assertIn(TRIAGE_DISCLAIMER, body)
+        # Duplicate similarity reasoning appears in the maintainer section
+        self.assertIn("**Duplicate reasoning**", body)
+        self.assertIn("- #10: Same", body)
+        # No fallback text when duplicates are present
+        self.assertNotIn("Oz has completed the triage of this issue", body)
 
     def test_follow_up_when_no_duplicates(self) -> None:
         issue = {"number": 42, "user": {"login": "alice"}}
         result = {
             "summary": "needs more info",
             "issue_body": "## Triage summary",
-            "follow_up_questions": ["What version?"],
+            "follow_up_questions": [{"question": "What version?", "reasoning": ""}],
             "duplicate_of": [],
         }
-        issue_body = str(result.get("issue_body") or "").strip()
-        follow_up_questions = extract_follow_up_questions(result)
-        duplicates = extract_duplicate_of(result, current_issue_number=42)
+        body = self._build_comment_parts(result, issue)
 
-        parts: list[str] = ["Oz has completed the triage of this issue. The triage concluded that needs more info."]
-        if issue_body:
-            parts.append(issue_body)
-        if duplicates:
-            parts.append(build_duplicate_section(issue, duplicates))
-        elif follow_up_questions:
-            parts.append(build_follow_up_section(issue, follow_up_questions))
-        parts.append(TRIAGE_DISCLAIMER)
-        body = "\n\n".join(parts)
-
+        self.assertIn("follow-up questions", body)
+        self.assertNotIn("overlap with existing issues", body)
+        # issue_body should be inside the details section
         self.assertIn("## Triage summary", body)
-        self.assertIn("### Follow-up questions", body)
-        self.assertNotIn("### Potential duplicates", body)
+        self.assertIn("<details>", body)
         self.assertIn(TRIAGE_DISCLAIMER, body)
+        # No fallback text when follow-up questions are present
+        self.assertNotIn("Oz has completed the triage of this issue", body)
+
+    def test_follow_up_reasoning_in_maintainer_section(self) -> None:
+        issue = {"number": 42, "user": {"login": "alice"}}
+        result = {
+            "summary": "needs more info",
+            "issue_body": "## Triage summary",
+            "follow_up_questions": [
+                {"question": "What OS?", "reasoning": "Platform-sensitive"},
+                {"question": "What version?", "reasoning": ""},
+            ],
+            "duplicate_of": [],
+        }
+        body = self._build_comment_parts(result, issue)
+
+        # Question reasoning appears inside the maintainer <details> section
+        self.assertIn("**Question reasoning**", body)
+        self.assertIn("**What OS?**", body)
+        self.assertIn("Platform-sensitive", body)
 
     def test_neither_section_when_both_empty(self) -> None:
         issue = {"number": 42, "user": {"login": "alice"}}
@@ -966,24 +1060,16 @@ class MutualExclusivityTest(unittest.TestCase):
             "follow_up_questions": [],
             "duplicate_of": [],
         }
-        issue_body = str(result.get("issue_body") or "").strip()
-        follow_up_questions = extract_follow_up_questions(result)
-        duplicates = extract_duplicate_of(result, current_issue_number=42)
+        body = self._build_comment_parts(result, issue)
 
-        parts: list[str] = ["Oz has completed the triage of this issue. The triage concluded that all good."]
-        if issue_body:
-            parts.append(issue_body)
-        if duplicates:
-            parts.append(build_duplicate_section(issue, duplicates))
-        elif follow_up_questions:
-            parts.append(build_follow_up_section(issue, follow_up_questions))
-        parts.append(TRIAGE_DISCLAIMER)
-        body = "\n\n".join(parts)
-
+        self.assertNotIn("follow-up questions", body)
+        self.assertNotIn("overlap with existing issues", body)
+        # issue_body should be in the maintainer details
         self.assertIn("## Triage summary", body)
-        self.assertNotIn("### Follow-up questions", body)
-        self.assertNotIn("### Potential duplicates", body)
+        self.assertIn("<details>", body)
         self.assertIn(TRIAGE_DISCLAIMER, body)
+        # Fallback text present when no user-facing content
+        self.assertIn("Oz has completed the triage of this issue.", body)
 
 
 class LowercaseFirstTest(unittest.TestCase):
