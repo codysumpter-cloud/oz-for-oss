@@ -83,7 +83,7 @@ def main() -> None:
 
             ready_issues = [
                 issue
-                for issue in github.get_issues(state="open", labels=required_label)
+                for issue in github.get_issues(state="open", labels=[required_label])
                 if not issue.pull_request
             ]
             candidate_issues = [
@@ -150,7 +150,7 @@ def main() -> None:
             progress.complete("\n\n".join(final_sections))
             pr.edit(state="closed")
             set_output("allow_review", "false")
-        except BaseException:
+        except (Exception, SystemExit):
             progress.report_error()
             raise
 

@@ -200,7 +200,7 @@ def main() -> None:
                 f"I created or updated a draft implementation PR for this issue: {pr.html_url}\n\n"
                 f"{next_steps_section}"
             )
-        except BaseException:
+        except (Exception, SystemExit):
             progress.report_error()
             raise
 

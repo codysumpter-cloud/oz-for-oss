@@ -57,7 +57,7 @@ If a session link was recorded before the failure, it is preserved regardless of
 >
 > Oz ran into an unexpected error while working on this. You can view the [workflow run]({workflow_run_url}) for more details.
 >
-> View the Oz converation: {session_link}
+> View the Oz conversation: {session_link}
 
 The workflow run URL `{workflow_run_url}` is resolved deterministically from the standard GitHub Actions environment variables: `$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID`. If `GITHUB_REPOSITORY` or `GITHUB_RUN_ID` is absent, the link is omitted rather than producing an empty or broken link.
 

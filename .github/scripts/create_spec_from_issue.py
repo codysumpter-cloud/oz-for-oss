@@ -146,7 +146,7 @@ def main() -> None:
                 f"{spec_preview_section}\n\n"
                 f"{next_steps_section}"
             )
-        except BaseException:
+        except (Exception, SystemExit):
             progress.report_error()
             raise
 

@@ -264,7 +264,7 @@ def main() -> None:
             else:
                 pr.create_review(body=summary or "Automated review by Oz", event="COMMENT")
             progress.complete("I completed the review and posted feedback on this pull request.")
-        except BaseException:
+        except (Exception, SystemExit):
             progress.report_error()
             raise
 

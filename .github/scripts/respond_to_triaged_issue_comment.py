@@ -149,7 +149,7 @@ def main() -> None:
                     "but I don't have additional analysis to add yet."
                 )
             progress.complete(analysis_comment)
-        except BaseException:
+        except (Exception, SystemExit):
             progress.report_error()
             raise
 

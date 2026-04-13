@@ -23,6 +23,21 @@ Review the current pull request and write the output to `review.json`.
 - Include style or nit comments only when you can provide a concrete suggestion block.
 - If a concern involves untouched code, mention it in the summary instead of an inline comment.
 
+### User-facing strings
+
+- Flag interpolated text that would read unnaturally at runtime (e.g. wrong casing after a sentence fragment like "The triage concluded that {summary}").
+- Link text should be descriptive (e.g. "triage session on Warp"), not bare URLs or generic "click here" labels.
+- Verify that terminology is consistent across related messages in the same PR.
+
+### Graceful degradation
+
+- When code renders optional dynamic data (URLs, session links, metadata), flag cases where a missing value would produce empty or broken output. The fix is usually to omit the element entirely and show a short fallback message.
+- Prefer starting with generic, user-safe error messages over exposing internal details.
+
+### Debugging and observability
+
+- Do not suggest removing session links, workflow URLs, or other debugging context from error paths. These are valuable for post-incident investigation even when the operation failed.
+
 ## Diff Line Annotations
 
 The diff file uses these prefixes:

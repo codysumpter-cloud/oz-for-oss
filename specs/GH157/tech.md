@@ -30,7 +30,7 @@ The triage workflow in `process_issue()` creates three independent comment strea
 
 3. **Duplicate comment** (`sync_duplicate_comment()`): Created as a separate comment with `issue-triage-duplicate` metadata type. Contains `@reporter` mention, list of duplicate issues with similarity reasons, and disclaimer.
 
-Session links are formatted by `_format_progress_link_section()` which produces either `"View the Oz converation: {url}"` or `"Sharing session at: {url}"` depending on whether the URL contains `/conversation/`. These are raw URLs, not markdown links.
+Session links are formatted by `_format_progress_link_section()` which produces either `"View the Oz conversation: {url}"` or `"Sharing session at: {url}"` depending on whether the URL contains `/conversation/`. These are raw URLs, not markdown links.
 
 The `WorkflowProgressComment` class uses `append_comment_sections()` to update its comment body. This function splits the body on `\n\n`, deduplicates link-prefix sections, and appends new sections. The `complete()` method calls `_append_sections()` which uses the same logic.
 

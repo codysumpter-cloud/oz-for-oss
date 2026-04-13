@@ -30,7 +30,7 @@ def main() -> None:
                 "This issue is assigned to Oz, but it is not labeled `ready-to-spec` or `ready-to-implement`, so there is no work to do yet.",
             )
             issue.remove_from_assignees(assignee_login)
-        except BaseException:
+        except (Exception, SystemExit):
             progress.report_error()
             raise
 

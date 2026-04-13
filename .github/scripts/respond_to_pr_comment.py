@@ -239,7 +239,7 @@ def _run_implementation(
         progress.complete(
             f"I pushed changes to this PR based on the comment.\n\n{next_steps_section}"
         )
-    except BaseException:
+    except (Exception, SystemExit):
         progress.report_error()
         raise
 

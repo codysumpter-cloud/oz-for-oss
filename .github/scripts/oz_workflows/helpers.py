@@ -216,7 +216,7 @@ def build_comment_body(content: str, metadata: str) -> str:
 
 _PROGRESS_LINK_PREFIXES = (
     "Sharing session at: ",
-    "View the Oz converation: ",
+    "View the Oz conversation: ",
 )
 
 
@@ -233,7 +233,7 @@ def _workflow_run_url() -> str:
 def _format_progress_link_section(session_link: str) -> str:
     normalized_link = session_link.strip()
     if "/conversation/" in normalized_link:
-        return f"View the Oz converation: {normalized_link}"
+        return f"View the Oz conversation: {normalized_link}"
     return f"Sharing session at: {normalized_link}"
 
 

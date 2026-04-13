@@ -2,8 +2,6 @@ name: Triage New Issues (Local)
 on:
   issues:
     types: [opened]
-  schedule:
-    - cron: '0 * * * *'
   issue_comment:
     types: [created]
   workflow_dispatch:
