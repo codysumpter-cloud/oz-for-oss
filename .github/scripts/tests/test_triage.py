@@ -958,7 +958,7 @@ class MutualExclusivityTest(unittest.TestCase):
         parts: list[str] = []
         if not follow_up_questions and not duplicates:
             parts.append("Oz has completed the triage of this issue.")
-        if duplicates:
+        elif duplicates:
             parts.append(build_duplicate_section(issue, duplicates))
         elif follow_up_questions:
             parts.append(build_follow_up_section(issue, follow_up_questions))
@@ -1014,6 +1014,7 @@ class MutualExclusivityTest(unittest.TestCase):
         self.assertIn("- #10: Same", body)
         # No fallback text when duplicates are present
         self.assertNotIn("Oz has completed the triage of this issue", body)
+        self.assertNotIn("Oz has finished triaging this issue", body)
 
     def test_follow_up_when_no_duplicates(self) -> None:
         issue = {"number": 42, "user": {"login": "alice"}}
@@ -1033,6 +1034,7 @@ class MutualExclusivityTest(unittest.TestCase):
         self.assertIn(TRIAGE_DISCLAIMER, body)
         # No fallback text when follow-up questions are present
         self.assertNotIn("Oz has completed the triage of this issue", body)
+        self.assertNotIn("Oz has finished triaging this issue", body)
 
     def test_follow_up_reasoning_in_maintainer_section(self) -> None:
         issue = {"number": 42, "user": {"login": "alice"}}
