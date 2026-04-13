@@ -22,9 +22,9 @@ class CommentUpdateTest(unittest.TestCase):
     def test_replaces_existing_session_link_when_url_changes(self) -> None:
         metadata = "<!-- meta -->"
         existing = build_comment_body("@alice\n\nOz is working on this issue.\n\nSharing session at: https://example.test/session/123", metadata)
-        updated = append_comment_sections(existing, metadata, ["View the Oz converation: https://example.test/conversation/456"])
+        updated = append_comment_sections(existing, metadata, ["View the Oz conversation: https://example.test/conversation/456"])
         self.assertNotIn("https://example.test/session/123", updated)
-        self.assertIn("View the Oz converation: https://example.test/conversation/456", updated)
+        self.assertIn("View the Oz conversation: https://example.test/conversation/456", updated)
         self.assertTrue(updated.endswith(metadata))
     def test_progress_comment_keeps_history_in_single_comment(self) -> None:
         github = FakeGitHubClient()
@@ -63,7 +63,7 @@ class CommentUpdateTest(unittest.TestCase):
         self.assertEqual(len(github.comments), 1)
         body = github.comments[0]["body"]
         self.assertNotIn("https://example.test/session/123", body)
-        self.assertIn("View the Oz converation: https://example.test/conversation/456", body)
+        self.assertIn("View the Oz conversation: https://example.test/conversation/456", body)
 
     def test_separate_runs_create_separate_comments(self) -> None:
         github = FakeGitHubClient()
@@ -221,7 +221,7 @@ class ReportErrorTest(unittest.TestCase):
             self.assertEqual(len(github.comments), 1)
             body = github.comments[0]["body"]
             self.assertIn("unexpected error", body)
-            self.assertIn("View the Oz converation: https://example.test/conversation/abc", body)
+            self.assertIn("View the Oz conversation: https://example.test/conversation/abc", body)
         finally:
             for key in env:
                 os.environ.pop(key, None)
