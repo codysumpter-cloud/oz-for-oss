@@ -330,17 +330,26 @@ def process_issue(
         duplicates = extract_duplicate_of(result, current_issue_number=issue_number)
 
         # Build the consolidated Stage 3 comment body.
-        # Layout: session link → user-facing content → maintainer details (collapsed).
+        # Layout: preamble + session link → user-facing content → maintainer details (collapsed).
         parts: list[str] = []
 
-        # Session link is always visible at the very top.
-        if session_link:
+        # When there are no user-facing follow-up questions or duplicates,
+        # add a preamble so the comment reads naturally as a standalone message.
+        if not follow_up_questions and not duplicates:
+            if session_link:
+                link_text = _format_triage_session_link(session_link)
+                parts.append(
+                    "Oz has finished triaging this issue. "
+                    "A maintainer will verify the details shortly. "
+                    f"You can view {link_text}."
+                )
+            else:
+                parts.append("Oz has completed the triage of this issue.")
+        elif session_link:
+            # Follow-up questions or duplicates are present; show session link
+            # on its own line before the user-facing content.
             link_text = _format_triage_session_link(session_link)
             parts.append(f"You can view {link_text}.")
-
-        # Fallback when no session link and no user-facing content above the fold.
-        if not session_link and not follow_up_questions and not duplicates:
-            parts.append("Oz has completed the triage of this issue.")
 
         # User-facing content above the fold: follow-up questions or duplicate info.
         # Follow-up questions and duplicates are mutually exclusive.
