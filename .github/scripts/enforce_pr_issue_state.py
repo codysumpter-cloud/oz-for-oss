@@ -80,7 +80,7 @@ def main() -> None:
 
         ready_issues = [
             issue
-            for issue in github.get_issues(state="open", labels=required_label)
+            for issue in github.get_issues(state="open", labels=[required_label])
             if not issue.pull_request
         ]
         candidate_issues = [
