@@ -32,14 +32,14 @@ def append_summary(text: str) -> None:
 
 def notice(message: str) -> None:
     """Emit a GitHub Actions notice annotation."""
-    print(f"::notice::{message}")
+    print(f"::notice::{message}", flush=True)
 
 
 def warning(message: str) -> None:
     """Emit a GitHub Actions warning annotation."""
-    print(f"::warning::{message}")
+    print(f"::warning::{message}", flush=True)
 
 
 def error(message: str) -> None:
     """Emit a GitHub Actions error annotation."""
-    print(f"::error::{message}")
+    print(f"::error::{message}", flush=True)

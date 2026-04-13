@@ -20,6 +20,7 @@ from oz_workflows.helpers import (
     WorkflowProgressComment,
 )
 from oz_workflows.oz_client import build_agent_config, run_agent, skill_file_path
+from oz_workflows.signals import install_signal_handlers
 
 SPEC_DRIVEN_IMPLEMENTATION_SKILL = "spec-driven-implementation"
 WRITE_PRODUCT_SPEC_SKILL = "write-product-spec"
@@ -29,6 +30,7 @@ CREATE_TECH_SPEC_SKILL = "create-tech-spec"
 
 
 def main() -> None:
+    install_signal_handlers()
     owner, repo = repo_parts()
     event = load_event()
     if is_automation_user((event.get("comment") or {}).get("user")):
@@ -54,54 +56,54 @@ def main() -> None:
             workflow="create-spec-from-issue",
             event_payload=event,
         )
-        progress.start("Oz is starting work on product and tech specs for this issue.")
-        coauthor_line = resolve_coauthor_line(client, event)
-        coauthor_directives = coauthor_prompt_lines(coauthor_line)
-        spec_driven_implementation_skill_path = skill_file_path(
-            SPEC_DRIVEN_IMPLEMENTATION_SKILL
-        )
-        write_product_spec_skill_path = skill_file_path(WRITE_PRODUCT_SPEC_SKILL)
-        write_tech_spec_skill_path = skill_file_path(WRITE_TECH_SPEC_SKILL)
-        create_product_spec_skill_path = skill_file_path(CREATE_PRODUCT_SPEC_SKILL)
-        create_tech_spec_skill_path = skill_file_path(CREATE_TECH_SPEC_SKILL)
-
-        prompt = dedent(
-            f"""
-            Create product and tech specs for GitHub issue #{issue_number} in repository {owner}/{repo}.
-
-            Issue Details:
-            - Title: {issue_title}
-            - Labels: {", ".join(label["name"] for label in issue.get("labels", [])) or "None"}
-            - Assignees: {", ".join(assignee["login"] for assignee in issue.get("assignees", [])) or "None"}
-            - Description: {issue.get("body") or "No description provided."}
-
-            Previous Issue Comments From Organization Members:
-            {comments_text or "- None"}
-
-            Explicit Triggering Comment:
-            {triggering_comment_text or "- None"}
-
-            Cloud Workflow Requirements:
-            - You are running in a cloud environment, so the caller cannot read your local diff.
-            - Start from the repository default branch `{default_branch}`.
-            - Use the shared spec-first skill `{spec_driven_implementation_skill_path}` as the base workflow for this run. Prefer the consuming repository's version when present; otherwise use the checked-in oz-for-oss copy.
-            - First, read the shared product-spec skill `{write_product_spec_skill_path}`, then read the Oz wrapper skill `{create_product_spec_skill_path}`, and create a product spec at `specs/GH{issue_number}/product.md`.
-            - Then, read the shared tech-spec skill `{write_tech_spec_skill_path}`, then read the Oz wrapper skill `{create_tech_spec_skill_path}`, and create a tech spec at `specs/GH{issue_number}/tech.md`.
-            - If you produce spec changes, write `pr_description.md` at the repository root containing the full markdown PR body the workflow should use when opening or updating the spec PR.
-            - After validating `pr_description.md`, upload it as an artifact via `oz-dev artifact upload pr_description.md`. The subcommand is `artifact` (singular); do not use `artifacts`.
-            - If you produce spec changes, commit only the spec changes to branch `{branch_name}` and push that branch to origin.
-            - Do not open or update the pull request yourself.
-            - If there is no worthwhile spec diff, do not push the branch.
-            {coauthor_directives}
-            """
-        ).strip()
-
-        config = build_agent_config(
-            config_name="create-spec-from-issue",
-            workspace=workspace(),
-        )
 
         try:
+            progress.start("Oz is starting work on product and tech specs for this issue.")
+            coauthor_line = resolve_coauthor_line(client, event)
+            coauthor_directives = coauthor_prompt_lines(coauthor_line)
+            spec_driven_implementation_skill_path = skill_file_path(
+                SPEC_DRIVEN_IMPLEMENTATION_SKILL
+            )
+            write_product_spec_skill_path = skill_file_path(WRITE_PRODUCT_SPEC_SKILL)
+            write_tech_spec_skill_path = skill_file_path(WRITE_TECH_SPEC_SKILL)
+            create_product_spec_skill_path = skill_file_path(CREATE_PRODUCT_SPEC_SKILL)
+            create_tech_spec_skill_path = skill_file_path(CREATE_TECH_SPEC_SKILL)
+
+            prompt = dedent(
+                f"""
+                Create product and tech specs for GitHub issue #{issue_number} in repository {owner}/{repo}.
+
+                Issue Details:
+                - Title: {issue_title}
+                - Labels: {", ".join(label["name"] for label in issue.get("labels", [])) or "None"}
+                - Assignees: {", ".join(assignee["login"] for assignee in issue.get("assignees", [])) or "None"}
+                - Description: {issue.get("body") or "No description provided."}
+
+                Previous Issue Comments From Organization Members:
+                {comments_text or "- None"}
+
+                Explicit Triggering Comment:
+                {triggering_comment_text or "- None"}
+
+                Cloud Workflow Requirements:
+                - You are running in a cloud environment, so the caller cannot read your local diff.
+                - Start from the repository default branch `{default_branch}`.
+                - Use the shared spec-first skill `{spec_driven_implementation_skill_path}` as the base workflow for this run. Prefer the consuming repository's version when present; otherwise use the checked-in oz-for-oss copy.
+                - First, read the shared product-spec skill `{write_product_spec_skill_path}`, then read the Oz wrapper skill `{create_product_spec_skill_path}`, and create a product spec at `specs/GH{issue_number}/product.md`.
+                - Then, read the shared tech-spec skill `{write_tech_spec_skill_path}`, then read the Oz wrapper skill `{create_tech_spec_skill_path}`, and create a tech spec at `specs/GH{issue_number}/tech.md`.
+                - If you produce spec changes, write `pr_description.md` at the repository root containing the full markdown PR body the workflow should use when opening or updating the spec PR.
+                - After validating `pr_description.md`, upload it as an artifact via `oz-dev artifact upload pr_description.md`. The subcommand is `artifact` (singular); do not use `artifacts`.
+                - If you produce spec changes, commit only the spec changes to branch `{branch_name}` and push that branch to origin.
+                - Do not open or update the pull request yourself.
+                - If there is no worthwhile spec diff, do not push the branch.
+                {coauthor_directives}
+                """
+            ).strip()
+
+            config = build_agent_config(
+                config_name="create-spec-from-issue",
+                workspace=workspace(),
+            )
             run = run_agent(
                 prompt=prompt,
                 skill_name=SPEC_DRIVEN_IMPLEMENTATION_SKILL,
@@ -144,7 +146,7 @@ def main() -> None:
                 f"{spec_preview_section}\n\n"
                 f"{next_steps_section}"
             )
-        except Exception:
+        except BaseException:
             progress.report_error()
             raise
 

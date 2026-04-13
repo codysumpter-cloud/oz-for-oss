@@ -21,9 +21,11 @@ from oz_workflows.helpers import (
     WorkflowProgressComment,
 )
 from oz_workflows.oz_client import build_agent_config, run_agent
+from oz_workflows.signals import install_signal_handlers
 
 
 def main() -> None:
+    install_signal_handlers()
     owner, repo = repo_parts()
     event = load_event()
     if is_automation_user((event.get("comment") or {}).get("user")):
@@ -146,69 +148,69 @@ def _run_implementation(
         event_payload=event,
         requester_login=requester,
     )
-    progress.start("Oz is working on changes requested in this PR.")
-
-    spec_context = resolve_spec_context_for_pr(
-        github,
-        owner,
-        repo,
-        pr,
-        workspace=workspace(),
-    )
-    spec_sections: list[str] = []
-    selected_spec_pr = spec_context.get("selected_spec_pr")
-    if spec_context.get("spec_context_source") == "approved-pr" and selected_spec_pr:
-        spec_sections.append(
-            f"Linked approved spec PR: #{selected_spec_pr['number']} ({selected_spec_pr['url']})"
-        )
-    elif spec_context.get("spec_context_source") == "directory":
-        spec_sections.append("Repository spec context was found in `specs/`.")
-    for entry in spec_context.get("spec_entries", []):
-        spec_sections.append(f"## {entry['path']}\n\n{entry['content']}")
-    spec_context_text = (
-        "\n\n".join(spec_sections).strip()
-        or "No approved or repository spec context was found."
-    )
-
-    prompt = dedent(
-        f"""\
-        Make changes on the branch `{head_branch}` for pull request #{pr_number} in repository {owner}/{repo}.
-
-        Pull Request Context:
-        - Title: {pr_title}
-        - Body: {pr_body or 'No description provided.'}
-        - Base branch: {base_branch}
-        - Head branch: {head_branch}
-
-        Triggering comment from @{requester}:
-        {triggering_body}
-
-        {context_label}:
-        {additional_context or '- None'}
-
-        Spec Context:
-        {spec_context_text}
-
-        Cloud Workflow Requirements:
-        - Use the repository's local `implement-issue` skill as the base workflow.
-        - You are running in a cloud environment, so the caller cannot read your local diff.
-        - Work on branch `{head_branch}`.
-        - Fetch the existing branch and continue from it.
-        - Align any implementation changes with the plan context above when present.
-        - Run the most relevant validation available in the repository.
-        - If you produce changes, commit them to `{head_branch}` and push that branch to origin.
-        - Do not open or update the pull request yourself.
-        - If no implementation diff is warranted, do not push the branch.
-        {coauthor_directives}
-        """
-    ).strip()
-
-    config = build_agent_config(
-        config_name="respond-to-pr-comment",
-        workspace=workspace(),
-    )
 
     try:
+        progress.start("Oz is working on changes requested in this PR.")
+
+        spec_context = resolve_spec_context_for_pr(
+            github,
+            owner,
+            repo,
+            pr,
+            workspace=workspace(),
+        )
+        spec_sections: list[str] = []
+        selected_spec_pr = spec_context.get("selected_spec_pr")
+        if spec_context.get("spec_context_source") == "approved-pr" and selected_spec_pr:
+            spec_sections.append(
+                f"Linked approved spec PR: #{selected_spec_pr['number']} ({selected_spec_pr['url']})"
+            )
+        elif spec_context.get("spec_context_source") == "directory":
+            spec_sections.append("Repository spec context was found in `specs/`.")
+        for entry in spec_context.get("spec_entries", []):
+            spec_sections.append(f"## {entry['path']}\n\n{entry['content']}")
+        spec_context_text = (
+            "\n\n".join(spec_sections).strip()
+            or "No approved or repository spec context was found."
+        )
+
+        prompt = dedent(
+            f"""\
+            Make changes on the branch `{head_branch}` for pull request #{pr_number} in repository {owner}/{repo}.
+
+            Pull Request Context:
+            - Title: {pr_title}
+            - Body: {pr_body or 'No description provided.'}
+            - Base branch: {base_branch}
+            - Head branch: {head_branch}
+
+            Triggering comment from @{requester}:
+            {triggering_body}
+
+            {context_label}:
+            {additional_context or '- None'}
+
+            Spec Context:
+            {spec_context_text}
+
+            Cloud Workflow Requirements:
+            - Use the repository's local `implement-issue` skill as the base workflow.
+            - You are running in a cloud environment, so the caller cannot read your local diff.
+            - Work on branch `{head_branch}`.
+            - Fetch the existing branch and continue from it.
+            - Align any implementation changes with the plan context above when present.
+            - Run the most relevant validation available in the repository.
+            - If you produce changes, commit them to `{head_branch}` and push that branch to origin.
+            - Do not open or update the pull request yourself.
+            - If no implementation diff is warranted, do not push the branch.
+            {coauthor_directives}
+            """
+        ).strip()
+
+        config = build_agent_config(
+            config_name="respond-to-pr-comment",
+            workspace=workspace(),
+        )
         run = run_agent(
             prompt=prompt,
             skill_name="implement-issue",
@@ -237,7 +239,7 @@ def _run_implementation(
         progress.complete(
             f"I pushed changes to this PR based on the comment.\n\n{next_steps_section}"
         )
-    except Exception:
+    except BaseException:
         progress.report_error()
         raise
 

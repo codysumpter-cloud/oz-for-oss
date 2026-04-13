@@ -16,6 +16,7 @@ from oz_workflows.helpers import (
 )
 from oz_workflows.artifacts import poll_for_artifact
 from oz_workflows.oz_client import build_agent_config, run_agent
+from oz_workflows.signals import install_signal_handlers
 
 HUNK_HEADER_PATTERN = re.compile(
     r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))? \+(?P<new_start>\d+)(?:,(?P<new_count>\d+))? @@"
@@ -151,6 +152,7 @@ def _normalize_review_payload(
 
 
 def main() -> None:
+    install_signal_handlers()
     owner, repo = repo_parts()
     pr_number = int(require_env("PR_NUMBER"))
     trigger_source = require_env("TRIGGER_SOURCE")
@@ -172,78 +174,78 @@ def main() -> None:
             workflow="review-pull-request",
             requester_login=requester,
         )
-        progress.start("Oz is reviewing this pull request.")
-
-        spec_context = resolve_spec_context_for_pr(
-            github,
-            owner,
-            repo,
-            pr,
-            workspace=workspace(),
-        )
-        spec_sections = []
-        selected_spec_pr = spec_context.get("selected_spec_pr")
-        if spec_context.get("spec_context_source") == "approved-pr" and selected_spec_pr:
-            spec_sections.append(
-                f"Linked approved spec PR: #{selected_spec_pr['number']} ({selected_spec_pr['url']})"
-            )
-        elif spec_context.get("spec_context_source") == "directory":
-            spec_sections.append("Repository spec context was found in `specs/`.")
-        for entry in spec_context.get("spec_entries", []):
-            spec_sections.append(f"## {entry['path']}\n\n{entry['content']}")
-        spec_context_text = "\n\n".join(spec_sections).strip() or "No approved or repository spec context was found for this PR."
-        issue_line = (
-            f"#{spec_context['issue_number']}"
-            if spec_context.get("issue_number")
-            else "No associated issue resolved for spec lookup."
-        )
-
-        changed_files: list[str] = spec_context.get("changed_files", [])
-        spec_only = is_spec_only_pr(changed_files)
-        skill_name = "review-spec" if spec_only else "review-pr"
-
-        focus_line = (
-            f"Additional focus from @{requester}: {focus}"
-            if focus
-            else (
-                f"The review was requested by @{requester} via a review command. Perform a general review if no extra guidance was provided."
-                if trigger_source == "issue_comment"
-                else "Perform a general review of the pull request."
-            )
-        )
-        prompt = dedent(
-            f"""
-            Review pull request #{pr_number} in repository {owner}/{repo}.
-
-            Pull Request Context:
-            - Title: {pr.title}
-            - Body: {pr.body or 'No description provided.'}
-            - Base branch: {pr.base.ref}
-            - Head branch: {pr.head.ref}
-            - Trigger: {trigger_source}
-            - {focus_line}
-            - Issue: {issue_line}
-
-            Spec Context:
-            {spec_context_text}
-
-            Cloud Workflow Requirements:
-            - Use the repository's local `{skill_name}` skill as the base workflow.
-            - You are running in a cloud environment rather than a local workflow checkout.
-            - Fetch the PR branch, generate `pr_description.txt`, and generate `pr_diff.txt` yourself before applying the review skill.
-            - The annotated diff must use the same prefixes as the old workflow: `[OLD:n]`, `[NEW:n]`, and `[OLD:n,NEW:m]`.
-            - Only include comments for files and lines that exist in the generated PR diff. If feedback does not map to a diff file or commentable diff line, put it in `summary` instead of `comments`.
-            - If spec context is present above, write it to `spec_context.md` before reviewing so the repository's `check-impl-against-spec` skill can be used.
-            - Do not post the final review directly.
-            - After you create and validate `review.json`, upload it as an artifact via `oz-dev artifact upload review.json`. The subcommand is `artifact` (singular); do not use `artifacts`.
-            """
-        ).strip()
-
-        config = build_agent_config(
-            config_name="review-pull-request",
-            workspace=workspace(),
-        )
         try:
+            progress.start("Oz is reviewing this pull request.")
+
+            spec_context = resolve_spec_context_for_pr(
+                github,
+                owner,
+                repo,
+                pr,
+                workspace=workspace(),
+            )
+            spec_sections = []
+            selected_spec_pr = spec_context.get("selected_spec_pr")
+            if spec_context.get("spec_context_source") == "approved-pr" and selected_spec_pr:
+                spec_sections.append(
+                    f"Linked approved spec PR: #{selected_spec_pr['number']} ({selected_spec_pr['url']})"
+                )
+            elif spec_context.get("spec_context_source") == "directory":
+                spec_sections.append("Repository spec context was found in `specs/`.")
+            for entry in spec_context.get("spec_entries", []):
+                spec_sections.append(f"## {entry['path']}\n\n{entry['content']}")
+            spec_context_text = "\n\n".join(spec_sections).strip() or "No approved or repository spec context was found for this PR."
+            issue_line = (
+                f"#{spec_context['issue_number']}"
+                if spec_context.get("issue_number")
+                else "No associated issue resolved for spec lookup."
+            )
+
+            changed_files: list[str] = spec_context.get("changed_files", [])
+            spec_only = is_spec_only_pr(changed_files)
+            skill_name = "review-spec" if spec_only else "review-pr"
+
+            focus_line = (
+                f"Additional focus from @{requester}: {focus}"
+                if focus
+                else (
+                    f"The review was requested by @{requester} via a review command. Perform a general review if no extra guidance was provided."
+                    if trigger_source == "issue_comment"
+                    else "Perform a general review of the pull request."
+                )
+            )
+            prompt = dedent(
+                f"""
+                Review pull request #{pr_number} in repository {owner}/{repo}.
+
+                Pull Request Context:
+                - Title: {pr.title}
+                - Body: {pr.body or 'No description provided.'}
+                - Base branch: {pr.base.ref}
+                - Head branch: {pr.head.ref}
+                - Trigger: {trigger_source}
+                - {focus_line}
+                - Issue: {issue_line}
+
+                Spec Context:
+                {spec_context_text}
+
+                Cloud Workflow Requirements:
+                - Use the repository's local `{skill_name}` skill as the base workflow.
+                - You are running in a cloud environment rather than a local workflow checkout.
+                - Fetch the PR branch, generate `pr_description.txt`, and generate `pr_diff.txt` yourself before applying the review skill.
+                - The annotated diff must use the same prefixes as the old workflow: `[OLD:n]`, `[NEW:n]`, and `[OLD:n,NEW:m]`.
+                - Only include comments for files and lines that exist in the generated PR diff. If feedback does not map to a diff file or commentable diff line, put it in `summary` instead of `comments`.
+                - If spec context is present above, write it to `spec_context.md` before reviewing so the repository's `check-impl-against-spec` skill can be used.
+                - Do not post the final review directly.
+                - After you create and validate `review.json`, upload it as an artifact via `oz-dev artifact upload review.json`. The subcommand is `artifact` (singular); do not use `artifacts`.
+                """
+            ).strip()
+
+            config = build_agent_config(
+                config_name="review-pull-request",
+                workspace=workspace(),
+            )
             run = run_agent(
                 prompt=prompt,
                 skill_name=skill_name,
@@ -262,7 +264,7 @@ def main() -> None:
             else:
                 pr.create_review(body=summary or "Automated review by Oz", event="COMMENT")
             progress.complete("I completed the review and posted feedback on this pull request.")
-        except Exception:
+        except BaseException:
             progress.report_error()
             raise
 

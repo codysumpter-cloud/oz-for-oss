@@ -22,6 +22,7 @@ from oz_workflows.helpers import (
     WorkflowProgressComment,
 )
 from oz_workflows.oz_client import build_agent_config, run_agent, skill_file_path
+from oz_workflows.signals import install_signal_handlers
 
 IMPLEMENT_SPECS_SKILL = "implement-specs"
 SPEC_DRIVEN_IMPLEMENTATION_SKILL = "spec-driven-implementation"
@@ -29,6 +30,7 @@ IMPLEMENT_ISSUE_SKILL = "implement-issue"
 
 
 def main() -> None:
+    install_signal_handlers()
     owner, repo = repo_parts()
     event = load_event()
     if is_automation_user((event.get("comment") or {}).get("user")):
@@ -66,90 +68,90 @@ def main() -> None:
             workflow="create-implementation-from-issue",
             event_payload=event,
         )
-        progress.start("Oz is working on an implementation for this issue.")
-        should_noop = (
-            not selected_spec_pr
-            and not spec_context["spec_entries"]
-            and len(spec_context["unapproved_spec_prs"]) > 0
-        )
-        if should_noop:
-            progress.complete(
-                "I did not start implementation because linked spec PR(s) exist for this issue but none are labeled `plan-approved`: "
-                + ", ".join(f"#{pr['number']}" for pr in spec_context["unapproved_spec_prs"])
-            )
-            append_summary(
-                "Linked spec PR(s) exist for this issue but none are labeled `plan-approved`: "
-                + ", ".join(f"#{pr['number']}" for pr in spec_context["unapproved_spec_prs"])
-            )
-            return
-        next_steps_section = build_next_steps_section(
-            [
-                "Review the implementation changes in the PR.",
-                "Complete any manual verification needed for this issue before merging.",
-            ]
-        )
-
-        spec_sections = []
-        if spec_context["spec_context_source"] == "approved-pr" and selected_spec_pr:
-            spec_sections.append(
-                f"Linked approved spec PR: #{selected_spec_pr['number']} ({selected_spec_pr['url']})"
-            )
-        elif spec_context["spec_context_source"] == "directory":
-            spec_sections.append("Repository spec file(s) associated with this issue were found in `specs/`.")
-        for entry in spec_context["spec_entries"]:
-            spec_sections.append(f"## {entry['path']}\n\n{entry['content']}")
-        spec_context_text = "\n\n".join(spec_sections).strip() or "No approved or repository spec context was found."
-
-        coauthor_line = resolve_coauthor_line(client, event)
-        coauthor_directives = coauthor_prompt_lines(coauthor_line)
-        implement_specs_skill_path = skill_file_path(IMPLEMENT_SPECS_SKILL)
-        spec_driven_implementation_skill_path = skill_file_path(
-            SPEC_DRIVEN_IMPLEMENTATION_SKILL
-        )
-        implement_issue_skill_path = skill_file_path(IMPLEMENT_ISSUE_SKILL)
-
-        prompt = dedent(
-            f"""
-            Create an implementation update for GitHub issue #{issue_number} in repository {owner}/{repo}.
-
-            Issue Details:
-            - Title: {issue_title}
-            - Labels: {", ".join(label["name"] for label in issue.get("labels", [])) or "None"}
-            - Assignees: {", ".join(assignee["login"] for assignee in issue.get("assignees", [])) or "None"}
-            - Description: {issue.get("body") or "No description provided."}
-
-            Previous Issue Comments From Organization Members:
-            {comments_text or "- None"}
-
-            Explicit Triggering Comment:
-            {triggering_comment_text or "- None"}
-
-            Plan Context:
-            {spec_context_text}
-
-            Cloud Workflow Requirements:
-            - Use the shared implementation skills `{implement_specs_skill_path}` and `{spec_driven_implementation_skill_path}` as the base workflow for this run. Prefer the consuming repository's versions when present; otherwise use the checked-in oz-for-oss copies.
-            - Read the Oz wrapper skill `{implement_issue_skill_path}` and apply its instructions for `spec_context.md`, `issue_comments.txt`, `implementation_summary.md`, and `pr_description.md`.
-            - You are running in a cloud environment, so the caller cannot read your local diff.
-            - Work on branch `{target_branch}`.
-            - If that branch already exists, fetch it and continue from it. Otherwise create it from `{default_branch}`.
-            - Align the implementation with the plan context above when present.
-            - Run the most relevant validation available in the repository.
-            - If you produce changes, write `pr_description.md` at the repository root containing the full markdown PR body the workflow should use when opening or updating the PR.
-            - After validating `pr_description.md`, upload it as an artifact via `oz-dev artifact upload pr_description.md`. The subcommand is `artifact` (singular); do not use `artifacts`.
-            - If you produce changes, commit them to `{target_branch}` and push that branch to origin.
-            - Do not open or update the pull request yourself.
-            - If no implementation diff is warranted, do not push the branch.
-            {coauthor_directives}
-            """
-        ).strip()
-
-        config = build_agent_config(
-            config_name="create-implementation-from-issue",
-            workspace=workspace(),
-        )
 
         try:
+            progress.start("Oz is working on an implementation for this issue.")
+            should_noop = (
+                not selected_spec_pr
+                and not spec_context["spec_entries"]
+                and len(spec_context["unapproved_spec_prs"]) > 0
+            )
+            if should_noop:
+                progress.complete(
+                    "I did not start implementation because linked spec PR(s) exist for this issue but none are labeled `plan-approved`: "
+                    + ", ".join(f"#{pr['number']}" for pr in spec_context["unapproved_spec_prs"])
+                )
+                append_summary(
+                    "Linked spec PR(s) exist for this issue but none are labeled `plan-approved`: "
+                    + ", ".join(f"#{pr['number']}" for pr in spec_context["unapproved_spec_prs"])
+                )
+                return
+            next_steps_section = build_next_steps_section(
+                [
+                    "Review the implementation changes in the PR.",
+                    "Complete any manual verification needed for this issue before merging.",
+                ]
+            )
+
+            spec_sections = []
+            if spec_context["spec_context_source"] == "approved-pr" and selected_spec_pr:
+                spec_sections.append(
+                    f"Linked approved spec PR: #{selected_spec_pr['number']} ({selected_spec_pr['url']})"
+                )
+            elif spec_context["spec_context_source"] == "directory":
+                spec_sections.append("Repository spec file(s) associated with this issue were found in `specs/`.")
+            for entry in spec_context["spec_entries"]:
+                spec_sections.append(f"## {entry['path']}\n\n{entry['content']}")
+            spec_context_text = "\n\n".join(spec_sections).strip() or "No approved or repository spec context was found."
+
+            coauthor_line = resolve_coauthor_line(client, event)
+            coauthor_directives = coauthor_prompt_lines(coauthor_line)
+            implement_specs_skill_path = skill_file_path(IMPLEMENT_SPECS_SKILL)
+            spec_driven_implementation_skill_path = skill_file_path(
+                SPEC_DRIVEN_IMPLEMENTATION_SKILL
+            )
+            implement_issue_skill_path = skill_file_path(IMPLEMENT_ISSUE_SKILL)
+
+            prompt = dedent(
+                f"""
+                Create an implementation update for GitHub issue #{issue_number} in repository {owner}/{repo}.
+
+                Issue Details:
+                - Title: {issue_title}
+                - Labels: {", ".join(label["name"] for label in issue.get("labels", [])) or "None"}
+                - Assignees: {", ".join(assignee["login"] for assignee in issue.get("assignees", [])) or "None"}
+                - Description: {issue.get("body") or "No description provided."}
+
+                Previous Issue Comments From Organization Members:
+                {comments_text or "- None"}
+
+                Explicit Triggering Comment:
+                {triggering_comment_text or "- None"}
+
+                Plan Context:
+                {spec_context_text}
+
+                Cloud Workflow Requirements:
+                - Use the shared implementation skills `{implement_specs_skill_path}` and `{spec_driven_implementation_skill_path}` as the base workflow for this run. Prefer the consuming repository's versions when present; otherwise use the checked-in oz-for-oss copies.
+                - Read the Oz wrapper skill `{implement_issue_skill_path}` and apply its instructions for `spec_context.md`, `issue_comments.txt`, `implementation_summary.md`, and `pr_description.md`.
+                - You are running in a cloud environment, so the caller cannot read your local diff.
+                - Work on branch `{target_branch}`.
+                - If that branch already exists, fetch it and continue from it. Otherwise create it from `{default_branch}`.
+                - Align the implementation with the plan context above when present.
+                - Run the most relevant validation available in the repository.
+                - If you produce changes, write `pr_description.md` at the repository root containing the full markdown PR body the workflow should use when opening or updating the PR.
+                - After validating `pr_description.md`, upload it as an artifact via `oz-dev artifact upload pr_description.md`. The subcommand is `artifact` (singular); do not use `artifacts`.
+                - If you produce changes, commit them to `{target_branch}` and push that branch to origin.
+                - Do not open or update the pull request yourself.
+                - If no implementation diff is warranted, do not push the branch.
+                {coauthor_directives}
+                """
+            ).strip()
+
+            config = build_agent_config(
+                config_name="create-implementation-from-issue",
+                workspace=workspace(),
+            )
             run = run_agent(
                 prompt=prompt,
                 skill_name=IMPLEMENT_SPECS_SKILL,
@@ -198,7 +200,7 @@ def main() -> None:
                 f"I created or updated a draft implementation PR for this issue: {pr.html_url}\n\n"
                 f"{next_steps_section}"
             )
-        except Exception:
+        except BaseException:
             progress.report_error()
             raise
 

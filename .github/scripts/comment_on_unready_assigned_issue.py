@@ -4,9 +4,11 @@ from github import Auth, Github
 
 from oz_workflows.env import load_event, repo_parts, repo_slug, require_env
 from oz_workflows.helpers import WorkflowProgressComment
+from oz_workflows.signals import install_signal_handlers
 
 
 def main() -> None:
+    install_signal_handlers()
     owner, repo = repo_parts()
     event = load_event()
     issue_number = int(event["issue"]["number"])
@@ -22,11 +24,15 @@ def main() -> None:
             workflow="comment-on-unready-assigned-issue",
             event_payload=event,
         )
-        progress.start("Oz is checking whether this assignment is ready for work.")
-        progress.complete(
-            "This issue is assigned to Oz, but it is not labeled `ready-to-spec` or `ready-to-implement`, so there is no work to do yet.",
-        )
-        issue.remove_from_assignees(assignee_login)
+        try:
+            progress.start("Oz is checking whether this assignment is ready for work.")
+            progress.complete(
+                "This issue is assigned to Oz, but it is not labeled `ready-to-spec` or `ready-to-implement`, so there is no work to do yet.",
+            )
+            issue.remove_from_assignees(assignee_login)
+        except BaseException:
+            progress.report_error()
+            raise
 
 
 if __name__ == "__main__":

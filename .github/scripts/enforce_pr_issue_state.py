@@ -10,6 +10,7 @@ from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, w
 from oz_workflows.helpers import extract_issue_numbers_from_text, ORG_MEMBER_ASSOCIATIONS, WorkflowProgressComment
 from oz_workflows.artifacts import poll_for_artifact
 from oz_workflows.oz_client import build_agent_config, run_agent
+from oz_workflows.signals import install_signal_handlers
 
 
 def _is_pr_author_org_member(pr: dict) -> bool:
@@ -19,6 +20,7 @@ def _is_pr_author_org_member(pr: dict) -> bool:
 
 
 def main() -> None:
+    install_signal_handlers()
     owner, repo = repo_parts()
     pr_number = int(require_env("PR_NUMBER"))
     requester = optional_env("REQUESTER")
@@ -40,113 +42,117 @@ def main() -> None:
             workflow="enforce-pr-issue-state",
             requester_login=requester,
         )
-        files = list(pr.get_files())
-        changed_files = [str(file.filename) for file in files]
-        has_code_changes = any(not filename.lower().endswith(".md") for filename in changed_files)
-        change_kind = "implementation" if has_code_changes else "spec"
-        required_label = "ready-to-implement" if has_code_changes else "ready-to-spec"
-        pr_labels = [label.name for label in pr_issue.labels]
-        has_plan_approved = "plan-approved" in pr_labels
-        contribution_docs_url = f"https://github.com/{owner}/{repo}/blob/main/CONTRIBUTING.md"
+        try:
+            files = list(pr.get_files())
+            changed_files = [str(file.filename) for file in files]
+            has_code_changes = any(not filename.lower().endswith(".md") for filename in changed_files)
+            change_kind = "implementation" if has_code_changes else "spec"
+            required_label = "ready-to-implement" if has_code_changes else "ready-to-spec"
+            pr_labels = [label.name for label in pr_issue.labels]
+            has_plan_approved = "plan-approved" in pr_labels
+            contribution_docs_url = f"https://github.com/{owner}/{repo}/blob/main/CONTRIBUTING.md"
 
-        explicit_issue = None
-        for issue_number in extract_issue_numbers_from_text(owner, repo, pr.body or ""):
-            issue = github.get_issue(issue_number)
-            if not issue.pull_request:
-                explicit_issue = issue
-                break
+            explicit_issue = None
+            for issue_number in extract_issue_numbers_from_text(owner, repo, pr.body or ""):
+                issue = github.get_issue(issue_number)
+                if not issue.pull_request:
+                    explicit_issue = issue
+                    break
 
-        if explicit_issue:
-            labels = [label.name for label in explicit_issue.labels]
-            if required_label in labels or (not has_code_changes and has_plan_approved):
+            if explicit_issue:
+                labels = [label.name for label in explicit_issue.labels]
+                if required_label in labels or (not has_code_changes and has_plan_approved):
+                    progress.cleanup()
+                    set_output("allow_review", "true")
+                    return
+                close_comment = (
+                    f"The PR that you've opened seems to contain {change_kind} changes and is associated with issue "
+                    f"#{explicit_issue.number}, which is not marked as `{required_label}`. This PR will be "
+                    f"automatically closed. Please see our [contribution docs]({contribution_docs_url}) for guidance "
+                    "on when changes are accepted for issues."
+                )
+                progress.complete(close_comment)
+                pr.edit(state="closed")
+                set_output("allow_review", "false")
+                return
+
+            if not has_code_changes and has_plan_approved:
                 progress.cleanup()
                 set_output("allow_review", "true")
                 return
-            close_comment = (
-                f"The PR that you've opened seems to contain {change_kind} changes and is associated with issue "
-                f"#{explicit_issue.number}, which is not marked as `{required_label}`. This PR will be "
-                f"automatically closed. Please see our [contribution docs]({contribution_docs_url}) for guidance "
-                "on when changes are accepted for issues."
+
+            ready_issues = [
+                issue
+                for issue in github.get_issues(state="open", labels=required_label)
+                if not issue.pull_request
+            ]
+            candidate_issues = [
+                {
+                    "number": issue.number,
+                    "title": issue.title,
+                    "body": issue.body or "",
+                    "url": issue.html_url,
+                    "labels": [label.name for label in issue.labels],
+                }
+                for issue in ready_issues
+            ]
+
+            prompt = dedent(
+                f"""
+                Determine whether pull request #{pr_number} in repository {owner}/{repo} is clearly associated with one of the ready issues below.
+
+                Pull Request Context:
+                - Title: {pr.title}
+                - Body: {pr.body or 'No description provided.'}
+                - Branch: {pr.head.ref}
+                - Change kind: {change_kind}
+                - Required issue label: {required_label}
+                - Changed files:
+                {chr(10).join(f"  - {filename}" for filename in changed_files) or "  - No changed files found."}
+
+                Candidate Ready Issues JSON:
+                {json.dumps(candidate_issues, indent=2)}
+
+                Output requirements:
+                - Decide whether there is a clear match.
+                - Produce JSON with exactly this shape:
+                  {{"matched": boolean, "issue_number": number | null, "rationale": string, "close_comment": string}}
+                - If there is no clear match, set `close_comment` to a concise PR comment explaining that this {change_kind} PR could not be matched to an issue marked `{required_label}` and include this contribution docs link: {contribution_docs_url}
+                - Do not close the PR yourself.
+                - Validate the JSON with `jq`.
+                - After validating the JSON, upload it as an artifact via `oz-dev artifact upload issue_association.json`. The subcommand is `artifact` (singular); do not use `artifacts`.
+                """
+            ).strip()
+
+            session_links: list[str] = []
+            config = build_agent_config(
+                config_name="enforce-pr-issue-state",
+                workspace=workspace(),
             )
-            progress.complete(close_comment)
+            run = run_agent(
+                prompt=prompt,
+                skill_name=None,
+                title=f"Associate PR #{pr_number} with ready issue",
+                config=config,
+                on_poll=lambda current_run: _capture_session_link(session_links, current_run),
+            )
+            result = poll_for_artifact(run.run_id, filename="issue_association.json")
+            if result.get("matched") is True and isinstance(result.get("issue_number"), int):
+                progress.cleanup()
+                set_output("allow_review", "true")
+                return
+            close_comment = str(result.get("close_comment") or "").strip()
+            if not close_comment:
+                raise RuntimeError("Oz returned no issue match without a close_comment")
+            final_sections = [close_comment]
+            if session_links:
+                final_sections.append(f"Session: {session_links[-1]}")
+            progress.complete("\n\n".join(final_sections))
             pr.edit(state="closed")
             set_output("allow_review", "false")
-            return
-
-        if not has_code_changes and has_plan_approved:
-            progress.cleanup()
-            set_output("allow_review", "true")
-            return
-
-        ready_issues = [
-            issue
-            for issue in github.get_issues(state="open", labels=required_label)
-            if not issue.pull_request
-        ]
-        candidate_issues = [
-            {
-                "number": issue.number,
-                "title": issue.title,
-                "body": issue.body or "",
-                "url": issue.html_url,
-                "labels": [label.name for label in issue.labels],
-            }
-            for issue in ready_issues
-        ]
-
-        prompt = dedent(
-            f"""
-            Determine whether pull request #{pr_number} in repository {owner}/{repo} is clearly associated with one of the ready issues below.
-
-            Pull Request Context:
-            - Title: {pr.title}
-            - Body: {pr.body or 'No description provided.'}
-            - Branch: {pr.head.ref}
-            - Change kind: {change_kind}
-            - Required issue label: {required_label}
-            - Changed files:
-            {chr(10).join(f"  - {filename}" for filename in changed_files) or "  - No changed files found."}
-
-            Candidate Ready Issues JSON:
-            {json.dumps(candidate_issues, indent=2)}
-
-            Output requirements:
-            - Decide whether there is a clear match.
-            - Produce JSON with exactly this shape:
-              {{"matched": boolean, "issue_number": number | null, "rationale": string, "close_comment": string}}
-            - If there is no clear match, set `close_comment` to a concise PR comment explaining that this {change_kind} PR could not be matched to an issue marked `{required_label}` and include this contribution docs link: {contribution_docs_url}
-            - Do not close the PR yourself.
-            - Validate the JSON with `jq`.
-            - After validating the JSON, upload it as an artifact via `oz-dev artifact upload issue_association.json`. The subcommand is `artifact` (singular); do not use `artifacts`.
-            """
-        ).strip()
-
-        session_links: list[str] = []
-        config = build_agent_config(
-            config_name="enforce-pr-issue-state",
-            workspace=workspace(),
-        )
-        run = run_agent(
-            prompt=prompt,
-            skill_name=None,
-            title=f"Associate PR #{pr_number} with ready issue",
-            config=config,
-            on_poll=lambda current_run: _capture_session_link(session_links, current_run),
-        )
-        result = poll_for_artifact(run.run_id, filename="issue_association.json")
-        if result.get("matched") is True and isinstance(result.get("issue_number"), int):
-            progress.cleanup()
-            set_output("allow_review", "true")
-            return
-        close_comment = str(result.get("close_comment") or "").strip()
-        if not close_comment:
-            raise RuntimeError("Oz returned no issue match without a close_comment")
-        final_sections = [close_comment]
-        if session_links:
-            final_sections.append(f"Session: {session_links[-1]}")
-        progress.complete("\n\n".join(final_sections))
-        pr.edit(state="closed")
-        set_output("allow_review", "false")
+        except BaseException:
+            progress.report_error()
+            raise
 
 
 def _capture_session_link(session_links: list[str], run: object) -> None:
