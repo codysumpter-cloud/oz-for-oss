@@ -22,6 +22,201 @@ This repository currently automates:
 - PR review orchestration
 - unready-assignment guidance for Oz
 
+## Setting up a target repository
+
+To use the `oz-for-oss` reusable workflows in another repository, you need a GitHub App installation, a set of GitHub Actions secrets and variables, and local adapter workflows that call the reusable layer.
+
+### 1. Create and install a GitHub App
+
+The workflows authenticate through a GitHub App rather than a personal access token. Create an app under your organization (or personal account) with these permissions:
+
+**Repository permissions**
+
+- **Contents** — Read & Write (checkout code, push branches)
+- **Issues** — Read & Write (apply labels, post comments, manage assignees)
+- **Pull requests** — Read & Write (open PRs, post reviews)
+
+**Organization permissions**
+
+- None required.
+
+After creating the app, install it on every repository that will use the workflows. Note the **App ID** and generate a **private key** — both are needed in the next step.
+
+### 2. Configure GitHub Actions secrets and variables
+
+Add the following **secrets** to each target repository (or at the organization level):
+
+| Secret | Description |
+|---|---|
+| `OZ_MGMT_GHA_APP_ID` | The numeric App ID of the GitHub App created above. |
+| `OZ_MGMT_GHA_PRIVATE_KEY` | The PEM-encoded private key for that App. |
+| `WARP_API_KEY` | Your Warp API key, used to invoke Oz agents. |
+
+Optionally, set the following **repository variables** (not secrets) to customize agent behavior:
+
+| Variable | Description |
+|---|---|
+| `WARP_AGENT_MODEL` | Override the default Oz model (e.g. a specific model identifier). |
+| `WARP_AGENT_MCP` | MCP configuration for the agent, if any. |
+| `WARP_ENVIRONMENT_ID` | Cloud environment UID for Oz agent runs. |
+
+### 3. Add local adapter workflows
+
+The reusable workflows in this repository are invoked via `workflow_call`. Your target repository needs thin local adapter workflows that map GitHub events to the reusable workflows.
+
+Below is a minimal set of adapters. Copy these into `.github/workflows/` in your target repository and adjust the `uses:` ref as needed.
+
+#### Issue triage
+
+```yaml
+# .github/workflows/triage-new-issues.yml
+name: Triage New Issues
+on:
+  issues:
+    types: [opened]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to triage
+        required: false
+        default: ''
+        type: string
+concurrency:
+  group: triage-${{ github.event.issue.number || inputs.issue_number || github.run_id }}
+  cancel-in-progress: false
+jobs:
+  triage:
+    uses: warpdotdev/oz-for-oss/.github/workflows/triage-new-issues.yml@main
+    with:
+      issue_number: ${{ inputs.issue_number || '' }}
+    secrets: inherit
+```
+
+#### Spec creation
+
+```yaml
+# .github/workflows/create-spec-from-issue.yml
+name: Create Spec from Issue
+on:
+  issues:
+    types: [assigned, labeled]
+  issue_comment:
+    types: [created]
+concurrency:
+  group: create-spec-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+jobs:
+  create_spec:
+    if: >-
+      (
+        github.event_name == 'issues' &&
+        github.event.action == 'assigned' &&
+        github.event.assignee.login == 'oz-agent' &&
+        contains(github.event.issue.labels.*.name, 'ready-to-spec')
+      ) || (
+        github.event_name == 'issues' &&
+        github.event.action == 'labeled' &&
+        github.event.label.name == 'ready-to-spec' &&
+        contains(github.event.issue.assignees.*.login, 'oz-agent')
+      ) || (
+        github.event_name == 'issue_comment' &&
+        !github.event.issue.pull_request &&
+        contains(github.event.issue.labels.*.name, 'ready-to-spec') &&
+        contains(github.event.comment.body, '@oz-agent') &&
+        contains(fromJSON('["COLLABORATOR","MEMBER","OWNER"]'), github.event.comment.author_association)
+      )
+    uses: warpdotdev/oz-for-oss/.github/workflows/create-spec-from-issue.yml@main
+    secrets: inherit
+```
+
+#### Implementation
+
+```yaml
+# .github/workflows/create-implementation-from-issue.yml
+name: Create Implementation from Issue
+on:
+  issues:
+    types: [assigned, labeled]
+  issue_comment:
+    types: [created]
+concurrency:
+  group: create-impl-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+jobs:
+  create_implementation:
+    if: >-
+      (
+        github.event_name == 'issues' &&
+        github.event.action == 'assigned' &&
+        github.event.assignee.login == 'oz-agent' &&
+        contains(github.event.issue.labels.*.name, 'ready-to-implement')
+      ) || (
+        github.event_name == 'issues' &&
+        github.event.action == 'labeled' &&
+        github.event.label.name == 'ready-to-implement' &&
+        contains(github.event.issue.assignees.*.login, 'oz-agent')
+      ) || (
+        github.event_name == 'issue_comment' &&
+        !github.event.issue.pull_request &&
+        contains(github.event.issue.labels.*.name, 'ready-to-implement') &&
+        contains(github.event.comment.body, '@oz-agent') &&
+        contains(fromJSON('["COLLABORATOR","MEMBER","OWNER"]'), github.event.comment.author_association)
+      )
+    uses: warpdotdev/oz-for-oss/.github/workflows/create-implementation-from-issue.yml@main
+    secrets: inherit
+```
+
+#### PR review and enforcement
+
+If you want automated PR reviews and issue-state enforcement, add a `pr-hooks.yml` adapter. See [`.github/workflows/pr-hooks.yml`](.github/workflows/pr-hooks.yml) in this repository for the full example, which orchestrates `enforce-pr-issue-state.yml`, `run-tests.yml`, and `review-pull-request.yml` together.
+
+For a simpler standalone review setup:
+
+```yaml
+# .github/workflows/review-pull-request.yml
+name: Review Pull Request
+on:
+  pull_request_target:
+    types: [opened, ready_for_review]
+jobs:
+  review:
+    if: >-
+      !github.event.pull_request.draft &&
+      !startsWith(github.event.pull_request.head.ref, 'cherrypick')
+    uses: warpdotdev/oz-for-oss/.github/workflows/review-pull-request.yml@main
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+      trigger_source: pull_request_target
+      requester: ${{ github.actor }}
+    secrets: inherit
+```
+
+#### Unready-assignment guard
+
+```yaml
+# .github/workflows/comment-on-unready-assigned-issue.yml
+name: Comment on Unready Assigned Issue
+on:
+  issues:
+    types: [assigned]
+jobs:
+  guard:
+    if: >-
+      github.event.assignee.login == 'oz-agent' &&
+      !contains(github.event.issue.labels.*.name, 'ready-to-spec') &&
+      !contains(github.event.issue.labels.*.name, 'ready-to-implement')
+    uses: warpdotdev/oz-for-oss/.github/workflows/comment-on-unready-assigned-issue.yml@main
+    secrets: inherit
+```
+
+Each adapter is deliberately thin — it defines the GitHub event triggers and conditions, then delegates to the reusable workflow. Refer to the local adapter workflows in this repository (the `*-local.yml` files) for the full set of trigger conditions used here.
+
+### 4. Bootstrap triage configuration (optional)
+
+If you want the triage agent to apply area and status labels, run the `bootstrap-issue-config` skill on your target repository. This generates `.github/issue-triage/config.json` and `.github/STAKEHOLDERS`. See the [Bootstrapping triage configuration](#bootstrapping-triage-configuration) section for details.
+
 ## Local development
 
 ### Setup
