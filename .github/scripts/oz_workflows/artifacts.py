@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+import warnings
 from typing import Any, Protocol, cast
 
 import httpx
@@ -134,9 +135,47 @@ def _download_artifact_text(client: OzAPI, artifact_uid: str) -> str:
 
 PR_DESCRIPTION_FILENAME = "pr_description.md"
 
+PR_METADATA_FILENAME = "pr-metadata.json"
+
+_PR_METADATA_REQUIRED_KEYS = ("branch_name", "pr_title", "pr_summary")
+
+
+def load_pr_metadata_artifact(run_id: str) -> dict[str, Any]:
+    """Load and validate the pr-metadata.json artifact from a completed Oz run.
+
+    The artifact must be a JSON object containing at least the keys
+    ``branch_name``, ``pr_title``, and ``pr_summary``.
+    """
+    metadata = poll_for_artifact(
+        run_id,
+        filename=PR_METADATA_FILENAME,
+    )
+    missing = [key for key in _PR_METADATA_REQUIRED_KEYS if key not in metadata]
+    if missing:
+        raise RuntimeError(
+            f"pr-metadata.json artifact from Oz run {run_id} is missing "
+            f"required key(s): {', '.join(missing)}"
+        )
+    pr_summary = metadata.get("pr_summary", "")
+    if not isinstance(pr_summary, str) or not pr_summary.strip():
+        raise RuntimeError(
+            f"pr-metadata.json artifact from Oz run {run_id} has an empty pr_summary"
+        )
+    return metadata
+
 
 def load_pr_description_artifact(run_id: str) -> str:
-    """Load and validate the pr_description.md artifact from a completed Oz run."""
+    """Load and validate the pr_description.md artifact from a completed Oz run.
+
+    .. deprecated::
+        Use :func:`load_pr_metadata_artifact` instead, which reads the
+        structured ``pr-metadata.json`` artifact.
+    """
+    warnings.warn(
+        "load_pr_description_artifact is deprecated; use load_pr_metadata_artifact instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     pr_description = poll_for_text_artifact(
         run_id,
         filename=PR_DESCRIPTION_FILENAME,

@@ -26,13 +26,27 @@ The Oz-specific differences are:
 - approved spec context may be supplied in `spec_context.md`
 - issue discussion may be supplied in `issue_comments.txt`
 - the workflow expects a reusable markdown summary in `implementation_summary.md`
-- the workflow may also expect a reusable PR body in `pr_description.md`
+- the workflow may also expect a structured PR metadata file in `pr-metadata.json`
 
 ## Inputs
 
 Expect issue details in the prompt, including the issue number, title, description, labels, assignees, and optional prior discussion captured in `issue_comments.txt`.
 
 If `spec_context.md` exists, it contains the approved spec context (product spec and/or tech spec) from a linked pull request branch and should be treated as the primary design context for this run.
+
+When the prompt asks for `pr-metadata.json`, the agent must produce a JSON file at the repository root with the following required fields:
+
+```json
+{
+  "branch_name": "oz-agent/implement-issue-42-add-retry-logic",
+  "pr_title": "fix: add retry logic for transient API failures",
+  "pr_summary": "Closes #42\n\n## Summary\n..."
+}
+```
+
+- **`branch_name`**: the branch the agent pushed to. Must start with the prefix supplied in the prompt (e.g. `oz-agent/implement-issue-{N}`).
+- **`pr_title`**: a conventional-commit-style PR title derived from the actual changes.
+- **`pr_summary`**: the full markdown PR body. The first line must be `Closes #<issue_number>` so GitHub auto-closes the issue when the PR merges.
 
 ## Workflow
 
@@ -45,12 +59,12 @@ If `spec_context.md` exists, it contains the approved spec context (product spec
 7. Do not include issue number references (e.g. `(#N)`, `Refs #N`) in commit messages. The issue is already linked in the PR body, the branch name, and the linked issue itself.
 8. Run the most relevant validation available in the repository for the files you changed. Prefer existing build, test, lint, or typecheck commands documented in the repository.
 9. Write a concise markdown summary for the workflow to reuse in `implementation_summary.md` at the repository root. Include what changed, how it was validated, and any remaining assumptions, spec updates, or follow-up notes.
-10. If the prompt asks for it, write `pr_description.md` at the repository root containing the full markdown body to use for the pull request. The first line of `pr_description.md` must be `Closes #<issue_number>` so GitHub auto-closes the issue when the PR is merged. Make it ready to paste directly into the PR body, with concise sections for the change summary, validation, and any assumptions or follow-up notes that reviewers should know.
-11. Treat `issue_comments.txt`, `spec_context.md`, `implementation_summary.md`, and `pr_description.md` as temporary workflow files only. Do not include them in the final diff.
+10. If the prompt asks for it, write `pr-metadata.json` at the repository root containing the structured PR metadata described in the Inputs section above. The `pr_summary` field must start with `Closes #<issue_number>` so GitHub auto-closes the issue when the PR is merged. Make the summary ready to use directly as the PR body, with concise sections for the change summary, validation, and any assumptions or follow-up notes that reviewers should know.
+11. Treat `issue_comments.txt`, `spec_context.md`, `implementation_summary.md`, and `pr-metadata.json` as temporary workflow files only. Do not include them in the final diff.
 12. Default behavior: do not stage files, create commits, push branches, open pull requests, or use the GitHub CLI. If the prompt explicitly says you are running in a cloud-environment workflow where the caller cannot read your local diff and instructs you to publish a named branch, you may commit and push exactly the requested implementation changes to that branch, but still do not open or update the pull request yourself unless the prompt explicitly asks for it.
 
 ## Output expectations
 
 - Leave the repository with the implementation changes ready to be committed by the workflow.
-- When requested by the prompt, leave a ready-to-use PR body in `pr_description.md`.
+- When requested by the prompt, leave a ready-to-use `pr-metadata.json` with `branch_name`, `pr_title`, and `pr_summary`.
 - If the issue is underspecified, make the smallest reasonable implementation choice, document that choice in `implementation_summary.md`, and avoid speculative extra changes.

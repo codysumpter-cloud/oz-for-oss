@@ -9,6 +9,7 @@ from oz_workflows.artifacts import (
     _download_artifact_json,
     _find_file_artifact,
     load_pr_description_artifact,
+    load_pr_metadata_artifact,
     poll_for_artifact,
     poll_for_text_artifact,
 )
@@ -177,16 +178,90 @@ class LoadPrDescriptionArtifactTest(unittest.TestCase):
     @patch("oz_workflows.artifacts.poll_for_text_artifact")
     def test_returns_stripped_description(self, mock_poll: MagicMock) -> None:
         mock_poll.return_value = "  Closes #42\n\n## Summary\n  "
-        result = load_pr_description_artifact("run-123")
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            result = load_pr_description_artifact("run-123")
         self.assertEqual(result, "Closes #42\n\n## Summary")
         mock_poll.assert_called_once_with("run-123", filename="pr_description.md")
 
     @patch("oz_workflows.artifacts.poll_for_text_artifact")
     def test_raises_when_empty(self, mock_poll: MagicMock) -> None:
         mock_poll.return_value = "   "
-        with self.assertRaises(RuntimeError) as ctx:
-            load_pr_description_artifact("run-123")
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            with self.assertRaises(RuntimeError) as ctx:
+                load_pr_description_artifact("run-123")
         self.assertIn("empty", str(ctx.exception))
+
+    @patch("oz_workflows.artifacts.poll_for_text_artifact")
+    def test_emits_deprecation_warning(self, mock_poll: MagicMock) -> None:
+        mock_poll.return_value = "body"
+        import warnings
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            load_pr_description_artifact("run-123")
+        deprecation_warnings = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+        self.assertTrue(len(deprecation_warnings) >= 1)
+        self.assertIn("load_pr_metadata_artifact", str(deprecation_warnings[0].message))
+
+
+class LoadPrMetadataArtifactTest(unittest.TestCase):
+    @patch("oz_workflows.artifacts.poll_for_artifact")
+    def test_returns_valid_metadata(self, mock_poll: MagicMock) -> None:
+        expected = {
+            "branch_name": "oz-agent/implement-issue-42-add-retry",
+            "pr_title": "fix: add retry logic",
+            "pr_summary": "Closes #42\n\n## Summary\nAdded retry.",
+        }
+        mock_poll.return_value = expected
+        result = load_pr_metadata_artifact("run-456")
+        self.assertEqual(result, expected)
+        mock_poll.assert_called_once_with("run-456", filename="pr-metadata.json")
+
+    @patch("oz_workflows.artifacts.poll_for_artifact")
+    def test_raises_when_missing_keys(self, mock_poll: MagicMock) -> None:
+        # Missing pr_summary
+        mock_poll.return_value = {
+            "branch_name": "oz-agent/implement-issue-42",
+            "pr_title": "feat: something",
+        }
+        with self.assertRaises(RuntimeError) as ctx:
+            load_pr_metadata_artifact("run-456")
+        self.assertIn("pr_summary", str(ctx.exception))
+
+    @patch("oz_workflows.artifacts.poll_for_artifact")
+    def test_raises_when_all_keys_missing(self, mock_poll: MagicMock) -> None:
+        mock_poll.return_value = {"extra": "value"}
+        with self.assertRaises(RuntimeError) as ctx:
+            load_pr_metadata_artifact("run-456")
+        self.assertIn("branch_name", str(ctx.exception))
+        self.assertIn("pr_title", str(ctx.exception))
+        self.assertIn("pr_summary", str(ctx.exception))
+
+    @patch("oz_workflows.artifacts.poll_for_artifact")
+    def test_raises_when_pr_summary_empty(self, mock_poll: MagicMock) -> None:
+        mock_poll.return_value = {
+            "branch_name": "oz-agent/implement-issue-42",
+            "pr_title": "feat: something",
+            "pr_summary": "   ",
+        }
+        with self.assertRaises(RuntimeError) as ctx:
+            load_pr_metadata_artifact("run-456")
+        self.assertIn("empty pr_summary", str(ctx.exception))
+
+    @patch("oz_workflows.artifacts.poll_for_artifact")
+    def test_allows_extra_keys(self, mock_poll: MagicMock) -> None:
+        metadata = {
+            "branch_name": "oz-agent/implement-issue-42",
+            "pr_title": "feat: new thing",
+            "pr_summary": "Closes #42\n\nSummary.",
+            "extra_field": "ignored",
+        }
+        mock_poll.return_value = metadata
+        result = load_pr_metadata_artifact("run-456")
+        self.assertEqual(result, metadata)
 
 
 if __name__ == "__main__":
