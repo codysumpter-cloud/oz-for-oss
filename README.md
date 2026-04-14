@@ -22,6 +22,65 @@ This repository currently automates:
 - PR review orchestration
 - unready-assignment guidance for Oz
 
+## Setting up a target repository
+
+To use the `oz-for-oss` reusable workflows in another repository, you need a GitHub App installation, a set of GitHub Actions secrets and variables, and local adapter workflows that call the reusable layer.
+
+### 1. Create and install a GitHub App
+
+The workflows authenticate through a GitHub App rather than a personal access token. Create an app under your organization (or personal account) with these permissions:
+
+**Repository permissions**
+
+- **Contents** — Read & Write (checkout code, push branches)
+- **Issues** — Read & Write (apply labels, post comments, manage assignees)
+- **Pull requests** — Read & Write (open PRs, post reviews)
+
+**Organization permissions**
+
+- None required.
+
+After creating the app, install it on every repository that will use the workflows. Note the **App ID** and generate a **private key** — both are needed in the next step.
+
+### 2. Configure GitHub Actions secrets and variables
+
+Add the following **secrets** to each target repository (or at the organization level):
+
+| Secret | Description |
+|---|---|
+| `OZ_MGMT_GHA_APP_ID` | The numeric App ID of the GitHub App created above. |
+| `OZ_MGMT_GHA_PRIVATE_KEY` | The PEM-encoded private key for that App. |
+| `WARP_API_KEY` | Your Warp API key, used to invoke Oz agents. |
+
+Optionally, set the following **repository variables** (not secrets) to customize agent behavior:
+
+| Variable | Description |
+|---|---|
+| `WARP_AGENT_MODEL` | Override the default Oz model (e.g. a specific model identifier). |
+| `WARP_AGENT_MCP` | MCP configuration for the agent, if any. |
+| `WARP_ENVIRONMENT_ID` | Cloud environment UID for Oz agent runs. |
+
+### 3. Add local adapter workflows
+
+The reusable workflows in this repository are invoked via `workflow_call`. Your target repository needs thin local adapter workflows that map GitHub events to the reusable workflows.
+
+Use the `*-local.yml` files in this repository as reference adapters. Copy them into `.github/workflows/` in your target repository and change each `uses:` ref from `./.github/workflows/<workflow>.yml` to `warpdotdev/oz-for-oss/.github/workflows/<workflow>.yml@main`.
+
+- **Issue triage** — [`triage-new-issues-local.yml`](.github/workflows/triage-new-issues-local.yml)
+- **Spec creation** — [`create-spec-from-issue-local.yml`](.github/workflows/create-spec-from-issue-local.yml)
+- **Implementation** — [`create-implementation-from-issue-local.yml`](.github/workflows/create-implementation-from-issue-local.yml)
+- **PR review and enforcement** — [`pr-hooks.yml`](.github/workflows/pr-hooks.yml) (orchestrates `enforce-pr-issue-state.yml`, `run-tests.yml`, and `review-pull-request.yml` together)
+- **Respond to PR comments** — [`respond-to-pr-comment-local.yml`](.github/workflows/respond-to-pr-comment-local.yml)
+- **Respond to triaged-issue comments** — [`respond-to-triaged-issue-comment-local.yml`](.github/workflows/respond-to-triaged-issue-comment-local.yml)
+- **Unready-assignment guard** — [`comment-on-unready-assigned-issue-local.yml`](.github/workflows/comment-on-unready-assigned-issue-local.yml)
+- **Review skill updates** — [`update-pr-review-local.yml`](.github/workflows/update-pr-review-local.yml) (scheduled weekly)
+
+Each adapter is deliberately thin — it defines the GitHub event triggers and conditions, then delegates to the reusable workflow.
+
+### 4. Bootstrap triage configuration (optional)
+
+If you want the triage agent to apply area and status labels, run the `bootstrap-issue-config` skill on your target repository. This generates `.github/issue-triage/config.json` and `.github/STAKEHOLDERS`. See the [Bootstrapping triage configuration](#bootstrapping-triage-configuration) section for details.
+
 ## Local development
 
 ### Setup
