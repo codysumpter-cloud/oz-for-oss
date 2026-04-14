@@ -44,7 +44,7 @@ When the prompt asks for `pr-metadata.json`, the agent must produce a JSON file 
 }
 ```
 
-- **`branch_name`**: the branch the agent pushed to. Must start with the prefix supplied in the prompt (e.g. `oz-agent/implement-issue-{N}`).
+- **`branch_name`**: the branch the agent pushed to. Must start with the prefix supplied in the prompt (e.g. `oz-agent/implement--{N}`) and contain a short auto-generated suffix describing the change.
 - **`pr_title`**: a conventional-commit-style PR title derived from the actual changes.
 - **`pr_summary`**: the full markdown PR body. The first line must be `Closes #<issue_number>` so GitHub auto-closes the issue when the PR merges.
 
