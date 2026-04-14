@@ -1,0 +1,56 @@
+name: Remove Stale Issue Labels on Plan Approved
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        description: Pull request number that was labeled plan-approved
+        required: true
+        type: string
+    secrets:
+      OZ_MGMT_GHA_APP_ID:
+        required: true
+      OZ_MGMT_GHA_PRIVATE_KEY:
+        required: true
+jobs:
+  remove_stale_labels:
+    name: Remove stale issue labels
+    runs-on: ubuntu-slim
+    env:
+      WORKFLOW_CODE_REPOSITORY: warpdotdev/oz-for-oss
+      WORKFLOW_CODE_REF: ${{ github.repository == 'warpdotdev/oz-for-oss' && github.sha || 'main' }}
+      WORKFLOW_CODE_PATH: __oz_shared
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Create GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.OZ_MGMT_GHA_APP_ID }}
+          owner: ${{ github.repository_owner }}
+          private-key: ${{ secrets.OZ_MGMT_GHA_PRIVATE_KEY }}
+      - name: Checkout repo
+        uses: actions/checkout@v5
+      - name: Checkout workflow code
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.WORKFLOW_CODE_REPOSITORY }}
+          ref: ${{ env.WORKFLOW_CODE_REF }}
+          path: ${{ env.WORKFLOW_CODE_PATH }}
+          token: ${{ steps.app_token.outputs.token }}
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install Python workflow dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r "${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/requirements.txt"
+      - name: Remove stale issue labels
+        env:
+          PYTHONPATH: ${{ env.WORKFLOW_CODE_PATH }}/.github/scripts
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: python "${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/remove_stale_issue_labels_on_plan_approved.py"
