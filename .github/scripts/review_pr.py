@@ -231,11 +231,15 @@ def main() -> None:
             - Use the repository's local `{skill_name}` skill as the base workflow.
             - You are running in a cloud environment rather than a local workflow checkout.
             - You must check out the exact PR head branch before generating the diff. Run:
+                ```
                 git fetch origin {pr.head.ref}
                 git checkout {pr.head.ref}
+                ```
               Do NOT use FETCH_HEAD — always reference the named branch.
             - Generate the diff against the base branch using a three-dot merge-base diff:
+                ```
                 git diff origin/{pr.base.ref}...HEAD
+                ```
               This isolates only the changes introduced by the PR.
             - Generate `pr_description.txt` and `pr_diff.txt` yourself before applying the review skill.
             - The annotated diff must use the same prefixes as the old workflow: `[OLD:n]`, `[NEW:n]`, and `[OLD:n,NEW:m]`.
