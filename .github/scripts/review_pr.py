@@ -230,7 +230,14 @@ def main() -> None:
             Cloud Workflow Requirements:
             - Use the repository's local `{skill_name}` skill as the base workflow.
             - You are running in a cloud environment rather than a local workflow checkout.
-            - Fetch the PR branch, generate `pr_description.txt`, and generate `pr_diff.txt` yourself before applying the review skill.
+            - You must check out the exact PR head branch before generating the diff. Run:
+                git fetch origin {pr.head.ref}
+                git checkout {pr.head.ref}
+              Do NOT use FETCH_HEAD — always reference the named branch.
+            - Generate the diff against the base branch using a three-dot merge-base diff:
+                git diff origin/{pr.base.ref}...HEAD
+              This isolates only the changes introduced by the PR.
+            - Generate `pr_description.txt` and `pr_diff.txt` yourself before applying the review skill.
             - The annotated diff must use the same prefixes as the old workflow: `[OLD:n]`, `[NEW:n]`, and `[OLD:n,NEW:m]`.
             - Only include comments for files and lines that exist in the generated PR diff. If feedback does not map to a diff file or commentable diff line, put it in `summary` instead of `comments`.
             - If spec context is present above, write it to `spec_context.md` before reviewing so the repository's `check-impl-against-spec` skill can be used.
