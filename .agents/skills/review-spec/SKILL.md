@@ -118,7 +118,18 @@ Your only output is the final `review.json`.
 If the prompt says you are in a cloud-environment workflow and the expected local context files are missing:
 
 - Create `pr_description.txt` yourself from the PR body or GitHub metadata provided in the prompt.
-- Fetch the PR branch and base branch, then generate `pr_diff.txt` yourself in the annotated format above before reviewing.
+- Fetch and check out the exact PR head branch by name before generating the diff. Run:
+    ```
+    git fetch origin <head_branch>
+    git checkout <head_branch>
+    ```
+  Do NOT use `FETCH_HEAD` — always reference the named branch.
+- Generate the diff against the base branch using a three-dot merge-base diff:
+    ```
+    git diff origin/<base_branch>...HEAD
+    ```
+  This isolates only the changes introduced by the PR, not accumulated state from other branches.
+- Convert the raw diff into `pr_diff.txt` using the annotated format above before reviewing.
 - Still produce `review.json` and validate it with `jq`.
 - After validation, upload the result via `oz-dev artifact upload review.json`.
 - IMPORTANT: the upload command is `oz-dev artifact upload` (singular `artifact`). Do not use `artifacts` (plural) — that is not a valid subcommand and will fail.
