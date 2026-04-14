@@ -64,13 +64,16 @@ Optionally, set the following **repository variables** (not secrets) to customiz
 
 The reusable workflows in this repository are invoked via `workflow_call`. Your target repository needs thin local adapter workflows that map GitHub events to the reusable workflows.
 
-Use the `*-local.yml` files in this repository as reference adapters. Copy them into `.github/workflows/` in your target repository and adjust the `uses:` ref as needed.
+Use the `*-local.yml` files in this repository as reference adapters. Copy them into `.github/workflows/` in your target repository and change each `uses:` ref from `./.github/workflows/<workflow>.yml` to `warpdotdev/oz-for-oss/.github/workflows/<workflow>.yml@main`.
 
 - **Issue triage** — [`triage-new-issues-local.yml`](.github/workflows/triage-new-issues-local.yml)
 - **Spec creation** — [`create-spec-from-issue-local.yml`](.github/workflows/create-spec-from-issue-local.yml)
 - **Implementation** — [`create-implementation-from-issue-local.yml`](.github/workflows/create-implementation-from-issue-local.yml)
 - **PR review and enforcement** — [`pr-hooks.yml`](.github/workflows/pr-hooks.yml) (orchestrates `enforce-pr-issue-state.yml`, `run-tests.yml`, and `review-pull-request.yml` together)
+- **Respond to PR comments** — [`respond-to-pr-comment-local.yml`](.github/workflows/respond-to-pr-comment-local.yml)
+- **Respond to triaged-issue comments** — [`respond-to-triaged-issue-comment-local.yml`](.github/workflows/respond-to-triaged-issue-comment-local.yml)
 - **Unready-assignment guard** — [`comment-on-unready-assigned-issue-local.yml`](.github/workflows/comment-on-unready-assigned-issue-local.yml)
+- **Review skill updates** — [`update-pr-review-local.yml`](.github/workflows/update-pr-review-local.yml) (scheduled weekly)
 
 Each adapter is deliberately thin — it defines the GitHub event triggers and conditions, then delegates to the reusable workflow.
 
