@@ -7,7 +7,7 @@ from oz_workflows.env import repo_parts, repo_slug, require_env
 from oz_workflows.helpers import resolve_issue_number_for_pr
 
 
-STALE_LABELS = {"ready-to-spec", "ready-to-implement"}
+STALE_LABELS = {"ready-to-spec"}
 
 
 def main() -> None:

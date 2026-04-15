@@ -26,8 +26,8 @@ class StaleLabelsConstantTest(unittest.TestCase):
     def test_contains_ready_to_spec(self) -> None:
         self.assertIn("ready-to-spec", STALE_LABELS)
 
-    def test_contains_ready_to_implement(self) -> None:
-        self.assertIn("ready-to-implement", STALE_LABELS)
+    def test_does_not_contain_ready_to_implement(self) -> None:
+        self.assertNotIn("ready-to-implement", STALE_LABELS)
 
 
 class MainTest(unittest.TestCase):
@@ -70,16 +70,15 @@ class MainTest(unittest.TestCase):
         github, _, issue = self._run_main(issue_labels=["ready-to-spec", "triaged"])
         issue.remove_from_labels.assert_called_once_with("ready-to-spec")
 
-    def test_removes_ready_to_implement_label(self) -> None:
+    def test_does_not_remove_ready_to_implement_label(self) -> None:
         github, _, issue = self._run_main(issue_labels=["ready-to-implement", "triaged"])
-        issue.remove_from_labels.assert_called_once_with("ready-to-implement")
+        issue.remove_from_labels.assert_not_called()
 
-    def test_removes_both_stale_labels(self) -> None:
+    def test_removes_only_ready_to_spec_when_both_present(self) -> None:
         github, _, issue = self._run_main(
             issue_labels=["ready-to-spec", "ready-to-implement", "triaged"]
         )
-        removed = {c.args[0] for c in issue.remove_from_labels.call_args_list}
-        self.assertEqual(removed, {"ready-to-spec", "ready-to-implement"})
+        issue.remove_from_labels.assert_called_once_with("ready-to-spec")
 
     def test_no_removal_when_no_stale_labels(self) -> None:
         github, _, issue = self._run_main(issue_labels=["triaged", "enhancement"])
