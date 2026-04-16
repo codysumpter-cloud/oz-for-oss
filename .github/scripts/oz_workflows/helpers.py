@@ -4,10 +4,11 @@ import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from github import Github
 from github.GithubException import UnknownObjectException
+from github.PullRequest import PullRequest
 from github.Repository import Repository
 
 from .env import optional_env
@@ -368,7 +369,7 @@ class WorkflowProgressComment:
         workflow: str,
         event_payload: dict[str, Any] | None = None,
         requester_login: str = "",
-        review_reply_target: tuple[Any, int] | None = None,
+        review_reply_target: tuple[object, int] | None = None,
     ) -> None:
         self.github = github
         self.owner = owner
@@ -560,14 +561,16 @@ class WorkflowProgressComment:
     def _list_comments(self) -> list[Any]:
         """List candidate progress comments for the current scope."""
         if self.review_reply_target is not None:
-            pr, trigger_comment_id = self.review_reply_target
+            pr_obj, trigger_comment_id = self.review_reply_target
+            pr = cast(PullRequest, pr_obj)
             all_comments = list(pr.get_review_comments())
             return _filter_review_comments_in_thread(all_comments, trigger_comment_id)
         return _list_issue_comments(self.github, self.owner, self.repo, self.issue_number)
 
     def _create_comment(self, body: str) -> Any:
         if self.review_reply_target is not None:
-            pr, trigger_comment_id = self.review_reply_target
+            pr_obj, trigger_comment_id = self.review_reply_target
+            pr = cast(PullRequest, pr_obj)
             return pr.create_review_comment_reply(trigger_comment_id, body)
         return _create_issue_comment(
             self.github,
@@ -579,7 +582,8 @@ class WorkflowProgressComment:
 
     def _get_comment(self, comment_id: int) -> Any:
         if self.review_reply_target is not None:
-            pr, _ = self.review_reply_target
+            pr_obj, _ = self.review_reply_target
+            pr = cast(PullRequest, pr_obj)
             return pr.get_review_comment(comment_id)
         return _get_issue_comment(
             self.github,
@@ -591,7 +595,8 @@ class WorkflowProgressComment:
 
     def _update_comment(self, comment_id: int, body: str) -> Any:
         if self.review_reply_target is not None:
-            pr, _ = self.review_reply_target
+            pr_obj, _ = self.review_reply_target
+            pr = cast(PullRequest, pr_obj)
             comment = pr.get_review_comment(comment_id)
             comment.edit(body)
             return comment
@@ -606,7 +611,8 @@ class WorkflowProgressComment:
 
     def _delete_comment(self, comment_id: int) -> None:
         if self.review_reply_target is not None:
-            pr, _ = self.review_reply_target
+            pr_obj, _ = self.review_reply_target
+            pr = cast(PullRequest, pr_obj)
             pr.get_review_comment(comment_id).delete()
             return
         _delete_issue_comment(
