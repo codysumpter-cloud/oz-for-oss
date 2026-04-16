@@ -302,7 +302,7 @@ class NormalizeReviewPayloadTest(unittest.TestCase):
         summary, comments = _normalize_review_payload(review, diff_line_map)
         self.assertEqual(comments, [])
 
-    def test_defaults_side_to_right(self) -> None:
+    def test_infers_right_side_when_missing_for_right_only_line(self) -> None:
         review = {
             "summary": "",
             "comments": [
@@ -317,6 +317,87 @@ class NormalizeReviewPayloadTest(unittest.TestCase):
         summary, comments = _normalize_review_payload(review, diff_line_map)
         self.assertEqual(len(comments), 1)
         self.assertEqual(comments[0]["side"], "RIGHT")
+
+    def test_infers_left_side_when_missing_for_deletion_only_line(self) -> None:
+        review = {
+            "summary": "",
+            "comments": [
+                {
+                    "path": "src/example.py",
+                    "line": 42,
+                    "body": "Why is this error handling being removed?",
+                }
+            ],
+        }
+        diff_line_map = {"src/example.py": {"LEFT": {42}, "RIGHT": set()}}
+        summary, comments = _normalize_review_payload(review, diff_line_map)
+        self.assertEqual(len(comments), 1)
+        self.assertEqual(comments[0]["side"], "LEFT")
+        self.assertEqual(comments[0]["line"], 42)
+
+    def test_accepts_explicit_left_side_for_deletion_line(self) -> None:
+        review = {
+            "summary": "",
+            "comments": [
+                {
+                    "path": "src/example.py",
+                    "line": 42,
+                    "side": "LEFT",
+                    "body": "Deleted branch still needed.",
+                }
+            ],
+        }
+        diff_line_map = {"src/example.py": {"LEFT": {42}, "RIGHT": set()}}
+        summary, comments = _normalize_review_payload(review, diff_line_map)
+        self.assertEqual(len(comments), 1)
+        self.assertEqual(comments[0]["side"], "LEFT")
+
+    def test_prefers_right_when_line_is_in_both_and_side_missing(self) -> None:
+        review = {
+            "summary": "",
+            "comments": [
+                {
+                    "path": "src/example.py",
+                    "line": 10,
+                    "body": "Comment on context line.",
+                }
+            ],
+        }
+        diff_line_map = {"src/example.py": {"LEFT": {10}, "RIGHT": {10}}}
+        summary, comments = _normalize_review_payload(review, diff_line_map)
+        self.assertEqual(len(comments), 1)
+        self.assertEqual(comments[0]["side"], "RIGHT")
+
+    def test_drops_comment_with_missing_side_and_line_not_in_either(self) -> None:
+        review = {
+            "summary": "",
+            "comments": [
+                {
+                    "path": "src/example.py",
+                    "line": 999,
+                    "body": "Line not in diff.",
+                }
+            ],
+        }
+        diff_line_map = {"src/example.py": {"LEFT": {42}, "RIGHT": {10}}}
+        summary, comments = _normalize_review_payload(review, diff_line_map)
+        self.assertEqual(comments, [])
+
+    def test_drops_comment_with_invalid_explicit_side(self) -> None:
+        review = {
+            "summary": "",
+            "comments": [
+                {
+                    "path": "src/example.py",
+                    "line": 10,
+                    "side": "BOTH",
+                    "body": "Bad side value.",
+                }
+            ],
+        }
+        diff_line_map = {"src/example.py": {"LEFT": set(), "RIGHT": {10}}}
+        summary, comments = _normalize_review_payload(review, diff_line_map)
+        self.assertEqual(comments, [])
 
 
 if __name__ == "__main__":

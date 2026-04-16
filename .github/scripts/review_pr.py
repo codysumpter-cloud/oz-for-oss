@@ -94,7 +94,7 @@ def _normalize_review_payload(
         path = _normalize_review_path(raw_comment.get("path"))
         line = raw_comment.get("line")
         body = str(raw_comment.get("body") or "").strip()
-        side = raw_comment.get("side") if raw_comment.get("side") in {"LEFT", "RIGHT"} else "RIGHT"
+        raw_side = raw_comment.get("side")
 
         if not path:
             errors.append(f"`comments[{index}]` is missing `path`.")
@@ -111,6 +111,29 @@ def _normalize_review_payload(
             continue
         if not body:
             errors.append(f"`comments[{index}]` for `{path}` is missing `body`.")
+            continue
+
+        if raw_side is None:
+            # Infer side from which diff map(s) the line appears in. Prefer RIGHT
+            # when the line is present on both sides (e.g. context lines), since
+            # comments on context typically refer to the post-change state.
+            line_in_right = line in diff_line_map[path]["RIGHT"]
+            line_in_left = line in diff_line_map[path]["LEFT"]
+            if line_in_right:
+                side = "RIGHT"
+            elif line_in_left:
+                side = "LEFT"
+            else:
+                errors.append(
+                    f"`comments[{index}]` for `{path}:{line}` is missing `side` and the line is not commentable on either side of the PR diff."
+                )
+                continue
+        elif raw_side in {"LEFT", "RIGHT"}:
+            side = raw_side
+        else:
+            errors.append(
+                f"`comments[{index}]` for `{path}:{line}` has invalid `side` `{raw_side}`; expected `LEFT` or `RIGHT`."
+            )
             continue
 
         allowed_lines = diff_line_map[path][side]
@@ -250,6 +273,7 @@ def main() -> None:
             - Generate `pr_description.txt` and `pr_diff.txt` yourself before applying the review skill.
             - The annotated diff must use the same prefixes as the old workflow: `[OLD:n]`, `[NEW:n]`, and `[OLD:n,NEW:m]`.
             - Only include comments for files and lines that exist in the generated PR diff. If feedback does not map to a diff file or commentable diff line, put it in `summary` instead of `comments`.
+            - Every entry in `comments` must include an explicit `side` field set to either `"RIGHT"` (for added or context lines using `[NEW:n]` or `[OLD:n,NEW:m]` line numbers) or `"LEFT"` (for deleted or context lines using `[OLD:n]` line numbers). Do not omit `side`. For example, a comment on a deleted line annotated as `[OLD:42]` must be emitted as `{"path": "path/to/file", "line": 42, "side": "LEFT", "body": "..."}`; a comment on an added line annotated as `[NEW:58]` must use `"side": "RIGHT"` with `"line": 58`.
             - If spec context is present above, write it to `spec_context.md` before reviewing so the repository's `check-impl-against-spec` skill can be used.
             - Do not post the final review directly.
             - After you create and validate `review.json`, upload it as an artifact via `oz-dev artifact upload review.json`. The subcommand is `artifact` (singular); do not use `artifacts`.
