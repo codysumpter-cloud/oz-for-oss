@@ -46,6 +46,22 @@ def main() -> None:
         )
         if should_review:
             pr_number = str(issue["number"])
+    elif github_event_name == "pull_request_review_comment":
+        pull_request = event["pull_request"]
+        comment = event["comment"]
+        body = comment.get("body") or ""
+        match = SLASH_COMMAND_PATTERN.search(body)
+        requester = comment.get("user", {}).get("login") or requester
+        comment_id = str(comment.get("id") or "")
+        if match:
+            focus = match.group(1).strip()
+        should_review = (
+            bool(match)
+            and comment.get("author_association") in ORG_MEMBER_ASSOCIATIONS
+            and not is_automation_user(comment.get("user"))
+        )
+        if should_review:
+            pr_number = str(pull_request["number"])
 
     set_output("should_review", "true" if should_review else "false")
     set_output("pr_number", pr_number if should_review else "")
