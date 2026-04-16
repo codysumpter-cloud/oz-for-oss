@@ -24,6 +24,7 @@ Provide a focused security pass on top of the general PR review. This is a suppl
 - Apply on code PRs whenever `review-pr` is applied.
 - Do not apply on spec-only PRs handled by `review-spec`.
 - Skip the skill entirely when no changed file introduces code or configuration that touches the concerns below; it is better to stay silent than to manufacture findings.
+- Do not duplicate findings the base `review-pr` pass will already raise. If the base review would naturally catch an issue, leave it there rather than re-reporting it from the security pass.
 
 ## Security concerns to audit
 

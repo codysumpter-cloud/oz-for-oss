@@ -27,6 +27,7 @@ The focus here is high-level design concerns that a security-minded reader would
 - Apply on spec PRs whenever `review-spec` is applied.
 - Do not apply on code PRs handled by `review-pr`; those use `security-review-pr` instead.
 - Skip the skill entirely when the changed spec content has no plausible security surface (e.g. purely editorial wording changes, typo fixes, or doc structure cleanup). It is better to stay silent than to manufacture findings.
+- Do not duplicate findings the base `review-spec` pass will already raise. If the base review would naturally catch an issue, leave it there rather than re-reporting it from the security pass.
 
 ## Security concerns to audit
 
