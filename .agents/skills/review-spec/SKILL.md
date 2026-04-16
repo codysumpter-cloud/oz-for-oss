@@ -23,7 +23,8 @@ Review a spec or plan pull request and write the output to `review.json`.
 - Evaluate specs for **issue alignment**: does the spec faithfully address the issue it is linked to, without significant scope creep or omissions?
 - Evaluate specs for **internal consistency**: do different sections of the spec contradict each other?
 - Flag missing sections that a spec should typically include (e.g. problem statement, proposed changes, open questions, follow-up items).
-- Do not apply code-level review criteria such as security, error handling, or performance to spec prose.
+- Always apply the repository's local `security-review-spec` skill as a supplemental high-level security pass on spec PRs. Fold any security findings into the same `review.json` produced by this review rather than emitting a separate output.
+- Do not apply code-level review criteria such as error handling or low-level performance to spec prose; the `security-review-spec` supplement covers design-level security concerns.
 - Include style or formatting comments only when they materially impair readability.
 
 ## Diff Line Annotations

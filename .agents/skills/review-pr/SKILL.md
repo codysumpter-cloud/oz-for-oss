@@ -19,6 +19,7 @@ Review the current pull request and write the output to `review.json`.
 ## Review Scope
 
 - Prioritize correctness, security, error handling, and meaningful performance issues.
+- Always apply the repository's local `security-review-pr` skill as a supplemental security pass on code PRs. Fold any security findings into the same `review.json` produced by this review rather than emitting a separate output.
 - When `spec_context.md` exists, use the repository's local `check-impl-against-spec` skill and treat material spec drift as a review concern.
 - Include style or nit comments only when you can provide a concrete suggestion block.
 - If a concern involves untouched code, mention it in the summary instead of an inline comment.
