@@ -164,20 +164,22 @@ def _filter_review_comments_in_thread(
 ) -> list[Any]:
     """Return review comments that belong to the thread containing *trigger_comment_id*.
 
-    A thread is identified by walking up ``in_reply_to_id`` pointers from the
-    triggering comment to the root, then collecting the root and every comment
-    that replies to it.
+    GitHub's REST API (and therefore PyGitHub) does not expose an endpoint for
+    fetching a single review thread by comment id; ``pullRequestReviewThread``
+    exists only in the GraphQL API. ``PullRequest.get_review_comment(id)``
+    returns just the one comment, and ``get_single_review_comments(review_id)``
+    scopes to a ``PullRequestReview`` batch rather than a reply thread, so we
+    have to filter client-side.
+
+    GitHub flat-threads review replies: every reply's ``in_reply_to_id`` points
+    directly at the thread root regardless of which comment was quoted, so the
+    root is either the triggering comment itself or the comment its
+    ``in_reply_to_id`` refers to.
     """
     by_id: dict[int, Any] = {int(_field(c, "id")): c for c in all_review_comments}
-    root_id = trigger_comment_id
-    while True:
-        comment = by_id.get(root_id)
-        if not comment:
-            break
-        parent = _field(comment, "in_reply_to_id")
-        if parent is None or int(parent) not in by_id:
-            break
-        root_id = int(parent)
+    trigger = by_id.get(trigger_comment_id)
+    parent = _field(trigger, "in_reply_to_id") if trigger is not None else None
+    root_id = int(parent) if parent is not None else trigger_comment_id
     return [
         c
         for c in all_review_comments
