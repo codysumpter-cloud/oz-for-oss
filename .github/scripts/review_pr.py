@@ -211,6 +211,11 @@ def main() -> None:
                 else "Perform a general review of the pull request."
             )
         )
+        supplemental_skill_line = (
+            "Also apply the repository's local `security-review-spec` skill as a supplemental high-level security pass and fold any security findings into the same combined `review.json`. Do not produce a separate security review output."
+            if spec_only
+            else "Also apply the repository's local `security-review-pr` skill as a supplemental security pass and fold any security findings into the same combined `review.json`. Do not produce a separate security review output."
+        )
         prompt = dedent(
             f"""
             Review pull request #{pr_number} in repository {owner}/{repo}.
@@ -229,8 +234,7 @@ def main() -> None:
 
             Cloud Workflow Requirements:
             - Use the repository's local `{skill_name}` skill as the base workflow.
-            - For code PRs (when the base skill is `review-pr`), also apply the repository's local `security-review-pr` skill as a supplemental security pass and fold any security findings into the same combined `review.json`. Do not produce a separate security review output.
-            - For spec PRs (when the base skill is `review-spec`), also apply the repository's local `security-review-spec` skill as a supplemental high-level security pass and fold any security findings into the same combined `review.json`. Do not produce a separate security review output.
+            - {supplemental_skill_line}
             - You are running in a cloud environment rather than a local workflow checkout.
             - You must check out the exact PR head branch before generating the diff. Run:
                 ```
