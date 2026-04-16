@@ -1058,6 +1058,7 @@ def resolve_spec_context_for_pr(
             "selected_spec_pr": None,
             "spec_entries": [],
             "changed_files": changed_files,
+            "pr_files": files,
         }
     spec_context = resolve_spec_context_for_issue(
         github,
@@ -1068,4 +1069,5 @@ def resolve_spec_context_for_pr(
     )
     spec_context["issue_number"] = issue_number
     spec_context["changed_files"] = changed_files
+    spec_context["pr_files"] = files
     return spec_context

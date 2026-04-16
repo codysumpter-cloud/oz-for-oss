@@ -60,12 +60,12 @@ def _commentable_lines_for_patch(patch: str | None) -> dict[str, set[int]]:
     return commentable_lines
 
 
-def _build_diff_line_map(pr: Any) -> dict[str, dict[str, set[int]]]:
+def _build_diff_line_map(files: list[Any]) -> dict[str, dict[str, set[int]]]:
     return {
         _normalize_review_path(file.filename): _commentable_lines_for_patch(
             getattr(file, "patch", None)
         )
-        for file in pr.get_files()
+        for file in files
     }
 
 
@@ -269,7 +269,7 @@ def main() -> None:
                 on_poll=lambda current_run: record_run_session_link(progress, current_run),
             )
             review = poll_for_artifact(run.run_id, filename="review.json")
-            diff_line_map = _build_diff_line_map(pr)
+            diff_line_map = _build_diff_line_map(spec_context.get("pr_files", []))
             summary, comments = _normalize_review_payload(review, diff_line_map)
             if not summary and not comments:
                 progress.complete("I completed the review and did not identify any actionable feedback for this pull request.")

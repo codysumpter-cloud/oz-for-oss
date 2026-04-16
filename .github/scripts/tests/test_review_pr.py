@@ -3,10 +3,17 @@ from __future__ import annotations
 import unittest
 
 from review_pr import (
+    _build_diff_line_map,
     _commentable_lines_for_patch,
     _normalize_review_path,
     _normalize_review_payload,
 )
+
+
+class _FakeFile:
+    def __init__(self, filename: str, patch: str | None) -> None:
+        self.filename = filename
+        self.patch = patch
 
 
 class NormalizeReviewPathTest(unittest.TestCase):
@@ -87,6 +94,29 @@ class CommentableLinesForPatchTest(unittest.TestCase):
         result = _commentable_lines_for_patch(None)
         self.assertEqual(result["LEFT"], set())
         self.assertEqual(result["RIGHT"], set())
+
+
+class BuildDiffLineMapTest(unittest.TestCase):
+    def test_builds_map_from_file_list(self) -> None:
+        files = [
+            _FakeFile(
+                "src/example.py",
+                "@@ -1,3 +1,3 @@\n ctx\n-old\n+new\n ctx\n",
+            )
+        ]
+        result = _build_diff_line_map(files)
+        self.assertIn("src/example.py", result)
+        self.assertIn(2, result["src/example.py"]["LEFT"])
+        self.assertIn(2, result["src/example.py"]["RIGHT"])
+
+    def test_normalizes_file_paths(self) -> None:
+        files = [_FakeFile("a/src/example.py", "")]
+        result = _build_diff_line_map(files)
+        self.assertIn("src/example.py", result)
+        self.assertNotIn("a/src/example.py", result)
+
+    def test_empty_file_list(self) -> None:
+        self.assertEqual(_build_diff_line_map([]), {})
 
 
 class NormalizeReviewPayloadTest(unittest.TestCase):
