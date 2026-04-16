@@ -888,6 +888,35 @@ class CleanupLegacyTriageCommentsTest(unittest.TestCase):
         _cleanup_legacy_triage_comments(github, "acme", "widgets", issue)
         self.assertEqual(len(github.comments), 1)
 
+    def test_uses_provided_comments_and_skips_fetch(self) -> None:
+        # Simulate a GitHub client whose comments list would be out of sync
+        # with what the caller already fetched. The function should prefer
+        # the caller-provided list and not re-fetch via ``issue.get_comments()``.
+        class IssueWithCountingComments(dict):
+            def __init__(self, number: int) -> None:
+                super().__init__(number=number)
+                self.get_comments_calls = 0
+
+            def get_comments(self) -> list[dict[str, object]]:
+                self.get_comments_calls += 1
+                return []
+
+        issue_number = 42
+        issue = IssueWithCountingComments(issue_number)
+        github = FakeTriageGitHubClient()
+        follow_up_body = build_comment_body(
+            "follow-up content",
+            follow_up_comment_metadata(issue_number),
+        )
+        # Seed the fake client so deletion routes to it.
+        github.create_comment("acme", "widgets", issue_number, follow_up_body)
+        pre_fetched = list(github.comments)
+        _cleanup_legacy_triage_comments(
+            github, "acme", "widgets", issue, comments=pre_fetched
+        )
+        self.assertEqual(issue.get_comments_calls, 0)
+        self.assertEqual(len(github.comments), 0)
+
 
 class ReplaceBodyTest(unittest.TestCase):
     def test_replaces_comment_content_preserving_metadata(self) -> None:

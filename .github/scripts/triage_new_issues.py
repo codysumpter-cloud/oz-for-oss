@@ -215,8 +215,13 @@ def process_issue(
         event_payload=event_payload,
     )
     progress.start("Oz is starting to work on triaging this issue.")
-    _cleanup_legacy_triage_comments(github, owner, repo, issue)
+    # Fetch the issue comments once and reuse them for legacy-comment cleanup
+    # and the triage prompt so we avoid two back-to-back
+    # ``GET /issues/{n}/comments`` calls on the same issue.
     comments = list(issue.get_comments())
+    _cleanup_legacy_triage_comments(
+        github, owner, repo, issue, comments=comments
+    )
     comments_text = format_issue_comments(comments, exclude_comment_id=triggering_comment_id)
     current_body = str(issue.body or "").strip()
     original_report = extract_original_issue_report(current_body)
@@ -535,17 +540,24 @@ def _cleanup_legacy_triage_comments(
     owner: str,
     repo: str,
     issue: Any,
+    *,
+    comments: list[Any] | None = None,
 ) -> None:
-    """Delete orphaned standalone follow-up, duplicate, and summary comments from prior triage runs."""
+    """Delete orphaned standalone follow-up, duplicate, and summary comments from prior triage runs.
+
+    Callers that have already fetched the issue's comments may pass them in
+    via *comments* to avoid an extra ``GET /issues/{n}/comments`` API call.
+    """
     issue_number = int(_field(issue, "number"))
     follow_up_marker = follow_up_comment_metadata(issue_number)
     duplicate_marker = duplicate_comment_metadata(issue_number)
     summary_marker = triage_summary_comment_metadata(issue_number)
-    comments = (
-        list(issue.get_comments())
-        if hasattr(issue, "get_comments")
-        else github.list_issue_comments(owner, repo, issue_number)
-    )
+    if comments is None:
+        comments = (
+            list(issue.get_comments())
+            if hasattr(issue, "get_comments")
+            else github.list_issue_comments(owner, repo, issue_number)
+        )
     for comment in comments:
         body = str(_field(comment, "body") or "")
         if follow_up_marker in body or duplicate_marker in body or summary_marker in body:

@@ -8,6 +8,7 @@ from oz_workflows.artifacts import load_pr_metadata_artifact
 
 from oz_workflows.env import load_event, repo_parts, repo_slug, workspace, require_env
 from oz_workflows.helpers import (
+    _login,
     branch_updated_since,
     build_next_steps_section,
     build_spec_preview_section,
@@ -42,7 +43,12 @@ def main() -> None:
     with closing(Github(auth=Auth.Token(require_env("GH_TOKEN")))) as client:
         github = client.get_repo(repo_slug())
         issue_data = github.get_issue(issue_number)
-        issue_data.add_to_assignees("oz-agent")
+        # Only call add_to_assignees when oz-agent is not already assigned.
+        # The POST /issues/{n}/assignees call is otherwise a no-op that still
+        # consumes API quota on every workflow run.
+        current_assignees = {_login(assignee) for assignee in (issue_data.assignees or [])}
+        if "oz-agent" not in current_assignees:
+            issue_data.add_to_assignees("oz-agent")
         comments = list(issue_data.get_comments())
         comments_text = org_member_comments_text(comments, exclude_comment_id=triggering_comment_id)
         triggering_comment_text = triggering_comment_prompt_text(event)
