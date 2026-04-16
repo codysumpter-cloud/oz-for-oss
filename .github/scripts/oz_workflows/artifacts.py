@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 import time
 import warnings
 from typing import Any, Protocol, cast
@@ -11,6 +12,28 @@ from oz_agent_sdk.types import AgentGetArtifactResponse
 from oz_agent_sdk.types.agent import RunItem
 
 from .oz_client import build_oz_client
+
+# Retry policy for artifact downloads. A transient CDN or S3 blip can surface as
+# either a 5xx response or as a network-level exception (connection reset, DNS
+# flake, read timeout, etc.). We want to retry a handful of times with
+# exponential backoff + jitter so a momentary failure at the tail end of an
+# otherwise successful agent run does not cause the entire workflow to fail.
+_DOWNLOAD_MAX_ATTEMPTS = 5
+_DOWNLOAD_INITIAL_BACKOFF_SECONDS = 1.0
+_DOWNLOAD_MAX_BACKOFF_SECONDS = 10.0
+
+# Network-level httpx exceptions that are worth retrying. These cover the
+# common transient failures for signed-URL downloads.
+_RETRYABLE_NETWORK_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.ReadError,
+    httpx.ReadTimeout,
+    httpx.WriteError,
+    httpx.WriteTimeout,
+    httpx.PoolTimeout,
+    httpx.RemoteProtocolError,
+)
 
 
 class _FileArtifactDataLike(Protocol):
@@ -115,7 +138,13 @@ def _download_artifact_json(client: OzAPI, artifact_uid: str) -> dict[str, Any]:
 
 
 def _download_artifact_text(client: OzAPI, artifact_uid: str) -> str:
-    """Fetch a FILE artifact's signed URL and download its text content."""
+    """Fetch a FILE artifact's signed URL and download its text content.
+
+    The download is retried with exponential backoff + jitter on 5xx
+    responses and on transient httpx network errors (connect/read timeouts,
+    protocol errors, etc.). 4xx responses are not retried and surface
+    immediately as ``httpx.HTTPStatusError``.
+    """
     response: AgentGetArtifactResponse = client.agent.get_artifact(artifact_uid)
     download_url = response.data.download_url
     if not download_url:
@@ -123,14 +152,51 @@ def _download_artifact_text(client: OzAPI, artifact_uid: str) -> str:
             f"Artifact {artifact_uid} did not return a download URL"
         )
     with httpx.Client(timeout=30) as http:
-        for attempt in range(2):
+        return _download_text_with_retries(http, download_url, artifact_uid)
+
+
+def _download_text_with_retries(
+    http: httpx.Client, download_url: str, artifact_uid: str
+) -> str:
+    """GET *download_url* with retries on 5xx and transient network errors.
+
+    Returns the response text on success. Raises the last encountered error
+    after ``_DOWNLOAD_MAX_ATTEMPTS`` failed attempts.
+    """
+    last_error: Exception | None = None
+    for attempt in range(_DOWNLOAD_MAX_ATTEMPTS):
+        try:
             download_response = http.get(download_url)
-            if download_response.status_code >= 500 and attempt == 0:
-                time.sleep(1)
-                continue
-            download_response.raise_for_status()
+        except _RETRYABLE_NETWORK_EXCEPTIONS as exc:
+            last_error = exc
+        else:
+            if download_response.status_code < 500:
+                # 2xx returns the body; 4xx raises a non-retryable error.
+                download_response.raise_for_status()
+                return download_response.text
+            last_error = httpx.HTTPStatusError(
+                (
+                    f"Server error {download_response.status_code} while "
+                    f"downloading artifact {artifact_uid}"
+                ),
+                request=download_response.request,
+                response=download_response,
+            )
+
+        if attempt >= _DOWNLOAD_MAX_ATTEMPTS - 1:
             break
-    return download_response.text
+        backoff = min(
+            _DOWNLOAD_INITIAL_BACKOFF_SECONDS * (2**attempt),
+            _DOWNLOAD_MAX_BACKOFF_SECONDS,
+        )
+        # Add jitter to avoid thundering-herd style retry storms across
+        # concurrently-running workflows.
+        time.sleep(backoff + random.uniform(0, 1))
+
+    # At least one attempt always runs, so last_error is set when we exit
+    # the loop without returning.
+    assert last_error is not None
+    raise last_error
 
 
 PR_DESCRIPTION_FILENAME = "pr_description.md"
