@@ -158,6 +158,33 @@ def _delete_issue_comment(
     github.delete_comment(owner, repo, comment_id)
 
 
+def _filter_review_comments_in_thread(
+    all_review_comments: list[Any],
+    trigger_comment_id: int,
+) -> list[Any]:
+    """Return review comments that belong to the thread containing *trigger_comment_id*.
+
+    A thread is identified by walking up ``in_reply_to_id`` pointers from the
+    triggering comment to the root, then collecting the root and every comment
+    that replies to it.
+    """
+    by_id: dict[int, Any] = {int(_field(c, "id")): c for c in all_review_comments}
+    root_id = trigger_comment_id
+    while True:
+        comment = by_id.get(root_id)
+        if not comment:
+            break
+        parent = _field(comment, "in_reply_to_id")
+        if parent is None or int(parent) not in by_id:
+            break
+        root_id = int(parent)
+    return [
+        c
+        for c in all_review_comments
+        if int(_field(c, "id")) == root_id or _field(c, "in_reply_to_id") == root_id
+    ]
+
+
 def org_member_comments_text(
     comments: list[Any],
     *,
@@ -339,6 +366,7 @@ class WorkflowProgressComment:
         workflow: str,
         event_payload: dict[str, Any] | None = None,
         requester_login: str = "",
+        review_reply_target: tuple[Any, int] | None = None,
     ) -> None:
         self.github = github
         self.owner = owner
@@ -352,6 +380,10 @@ class WorkflowProgressComment:
         self._workflow_prefix = _workflow_metadata_prefix(workflow, issue_number)
         self.comment_id: int | None = None
         self.session_link: str = ""
+        # When set, progress updates are posted/edited as review-comment replies
+        # within the triggering review thread instead of as PR-level issue
+        # comments. The tuple is (pull_request, trigger_review_comment_id).
+        self.review_reply_target = review_reply_target
 
     def start(self, status_line: str) -> None:
         self._append_sections([status_line])
@@ -400,36 +432,17 @@ class WorkflowProgressComment:
         body = build_comment_body("\n\n".join(sections), self.metadata)
         existing = self._get_or_find_existing_comment()
         if existing is None:
-            created = _create_issue_comment(
-                self.github,
-                self.owner,
-                self.repo,
-                self.issue_number,
-                body,
-            )
+            created = self._create_comment(body)
             self.comment_id = int(_field(created, "id"))
             return
-        _update_issue_comment(
-            self.github,
-            self.owner,
-            self.repo,
-            self.issue_number,
-            int(_field(existing, "id")),
-            body,
-        )
+        self._update_comment(int(_field(existing, "id")), body)
         self.comment_id = int(_field(existing, "id"))
 
     def cleanup(self) -> None:
         """Delete the progress comment if one exists from this or a previous run."""
         if self.comment_id is not None:
             try:
-                _delete_issue_comment(
-                    self.github,
-                    self.owner,
-                    self.repo,
-                    self.issue_number,
-                    self.comment_id,
-                )
+                self._delete_comment(self.comment_id)
             except Exception:
                 pass
             self.comment_id = None
@@ -439,13 +452,7 @@ class WorkflowProgressComment:
             if existing is None:
                 break
             try:
-                _delete_issue_comment(
-                    self.github,
-                    self.owner,
-                    self.repo,
-                    self.issue_number,
-                    int(_field(existing, "id")),
-                )
+                self._delete_comment(int(_field(existing, "id")))
             except Exception:
                 break
         self.comment_id = None
@@ -466,29 +473,18 @@ class WorkflowProgressComment:
             return
         existing = self._get_or_find_existing_comment()
         if existing is None:
-            created = _create_issue_comment(
-                self.github,
-                self.owner,
-                self.repo,
-                self.issue_number,
+            created = self._create_comment(
                 build_comment_body("\n\n".join(normalized_sections), self.metadata),
             )
             self.comment_id = int(_field(created, "id"))
             return
         updated_body = append_comment_sections(str(_field(existing, "body") or ""), self.metadata, normalized_sections)
-        _update_issue_comment(
-            self.github,
-            self.owner,
-            self.repo,
-            self.issue_number,
-            int(_field(existing, "id")),
-            updated_body,
-        )
+        self._update_comment(int(_field(existing, "id")), updated_body)
         self.comment_id = int(_field(existing, "id"))
 
     def _find_any_workflow_comment(self) -> Any | None:
         """Find any progress comment for this workflow on this issue, regardless of run."""
-        comments = _list_issue_comments(self.github, self.owner, self.repo, self.issue_number)
+        comments = self._list_comments()
         return next(
             (
                 comment
@@ -502,16 +498,10 @@ class WorkflowProgressComment:
     def _get_or_find_existing_comment(self) -> Any | None:
         if self.comment_id is not None:
             try:
-                return _get_issue_comment(
-                    self.github,
-                    self.owner,
-                    self.repo,
-                    self.comment_id,
-                    issue_number=self.issue_number,
-                )
+                return self._get_comment(self.comment_id)
             except UnknownObjectException:
                 self.comment_id = None
-        comments = _list_issue_comments(self.github, self.owner, self.repo, self.issue_number)
+        comments = self._list_comments()
         existing = next(
             (
                 comment
@@ -523,6 +513,66 @@ class WorkflowProgressComment:
         if existing:
             self.comment_id = int(_field(existing, "id"))
         return existing
+
+    def _list_comments(self) -> list[Any]:
+        """List candidate progress comments for the current scope."""
+        if self.review_reply_target is not None:
+            pr, trigger_comment_id = self.review_reply_target
+            all_comments = list(pr.get_review_comments())
+            return _filter_review_comments_in_thread(all_comments, trigger_comment_id)
+        return _list_issue_comments(self.github, self.owner, self.repo, self.issue_number)
+
+    def _create_comment(self, body: str) -> Any:
+        if self.review_reply_target is not None:
+            pr, trigger_comment_id = self.review_reply_target
+            return pr.create_review_comment_reply(trigger_comment_id, body)
+        return _create_issue_comment(
+            self.github,
+            self.owner,
+            self.repo,
+            self.issue_number,
+            body,
+        )
+
+    def _get_comment(self, comment_id: int) -> Any:
+        if self.review_reply_target is not None:
+            pr, _ = self.review_reply_target
+            return pr.get_review_comment(comment_id)
+        return _get_issue_comment(
+            self.github,
+            self.owner,
+            self.repo,
+            comment_id,
+            issue_number=self.issue_number,
+        )
+
+    def _update_comment(self, comment_id: int, body: str) -> Any:
+        if self.review_reply_target is not None:
+            pr, _ = self.review_reply_target
+            comment = pr.get_review_comment(comment_id)
+            comment.edit(body)
+            return comment
+        return _update_issue_comment(
+            self.github,
+            self.owner,
+            self.repo,
+            self.issue_number,
+            comment_id,
+            body,
+        )
+
+    def _delete_comment(self, comment_id: int) -> None:
+        if self.review_reply_target is not None:
+            pr, _ = self.review_reply_target
+            pr.get_review_comment(comment_id).delete()
+            return
+        _delete_issue_comment(
+            self.github,
+            self.owner,
+            self.repo,
+            self.issue_number,
+            comment_id,
+        )
 
 
 def record_run_session_link(progress: WorkflowProgressComment, run: object) -> None:
@@ -867,23 +917,7 @@ def review_thread_comments_text(
     trigger_comment_id: int,
 ) -> str:
     """Extract and format the review thread containing *trigger_comment_id*."""
-    by_id: dict[int, Any] = {int(_field(c, "id")): c for c in all_review_comments}
-
-    root_id = trigger_comment_id
-    while True:
-        comment = by_id.get(root_id)
-        if not comment:
-            break
-        parent = _field(comment, "in_reply_to_id")
-        if parent is None or int(parent) not in by_id:
-            break
-        root_id = int(parent)
-
-    thread = [
-        c
-        for c in all_review_comments
-        if int(_field(c, "id")) == root_id or _field(c, "in_reply_to_id") == root_id
-    ]
+    thread = _filter_review_comments_in_thread(all_review_comments, trigger_comment_id)
     filtered = [c for c in thread if _is_org_member(c)]
     if not filtered:
         return ""

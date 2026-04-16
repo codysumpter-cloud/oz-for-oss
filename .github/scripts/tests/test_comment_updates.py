@@ -123,6 +123,134 @@ class CommentUpdateTest(unittest.TestCase):
         self.assertEqual(len(github.comments), 0)
 
 
+class ReviewReplyProgressCommentTest(unittest.TestCase):
+    def test_creates_reply_in_review_thread_instead_of_issue_comment(self) -> None:
+        github = FakeGitHubClient()
+        pr = FakePullRequest(trigger_comment_id=100)
+        progress = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="respond-to-pr-comment",
+            requester_login="alice",
+            review_reply_target=(pr, 100),
+        )
+        progress.start("Oz is working on changes requested in this PR.")
+
+        # No issue-level comments should have been created.
+        self.assertEqual(github.comments, [])
+        # A reply was posted within the review thread.
+        replies = [c for c in pr.review_comments if c.get("in_reply_to_id") == 100]
+        self.assertEqual(len(replies), 1)
+        self.assertIn("Oz is working on changes", replies[0]["body"])
+
+    def test_keeps_appending_to_same_review_reply(self) -> None:
+        github = FakeGitHubClient()
+        pr = FakePullRequest(trigger_comment_id=100)
+        progress = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="respond-to-pr-comment",
+            requester_login="alice",
+            review_reply_target=(pr, 100),
+        )
+        progress.start("Oz is working on changes requested in this PR.")
+        progress.record_session_link("https://example.test/session/123")
+        progress.complete("I pushed changes to this PR based on the comment.")
+
+        replies = [c for c in pr.review_comments if c.get("in_reply_to_id") == 100]
+        self.assertEqual(len(replies), 1)
+        body = replies[0]["body"]
+        self.assertIn("@alice", body)
+        self.assertIn("Oz is working on changes", body)
+        self.assertIn("Sharing session at: https://example.test/session/123", body)
+        self.assertIn("I pushed changes to this PR based on the comment.", body)
+
+    def test_report_error_updates_reply_within_review_thread(self) -> None:
+        github = FakeGitHubClient()
+        pr = FakePullRequest(trigger_comment_id=100)
+        progress = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="respond-to-pr-comment",
+            requester_login="alice",
+            review_reply_target=(pr, 100),
+        )
+        progress.start("Oz is starting to work on this.")
+        progress.report_error()
+
+        self.assertEqual(github.comments, [])
+        replies = [c for c in pr.review_comments if c.get("in_reply_to_id") == 100]
+        self.assertEqual(len(replies), 1)
+        self.assertIn("unexpected error", replies[0]["body"])
+
+    def test_does_not_touch_unrelated_review_threads(self) -> None:
+        github = FakeGitHubClient()
+        pr = FakePullRequest(trigger_comment_id=100)
+        # Pre-existing unrelated thread in the same PR.
+        pr.review_comments.append(
+            {"id": 200, "in_reply_to_id": None, "body": "Other thread root", "user": {"login": "bob"}}
+        )
+        pr.review_comments.append(
+            {"id": 201, "in_reply_to_id": 200, "body": "Other thread reply", "user": {"login": "carol"}}
+        )
+        progress = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="respond-to-pr-comment",
+            requester_login="alice",
+            review_reply_target=(pr, 100),
+        )
+        progress.start("Oz is starting.")
+        progress.complete("Oz finished.")
+
+        # Comments in the other thread were not modified or deleted.
+        other = [c for c in pr.review_comments if c["id"] in (200, 201)]
+        self.assertEqual(len(other), 2)
+        self.assertEqual(other[0]["body"], "Other thread root")
+        self.assertEqual(other[1]["body"], "Other thread reply")
+
+        # The reply was created in the target thread, not elsewhere.
+        replies_in_thread = [c for c in pr.review_comments if c.get("in_reply_to_id") == 100]
+        self.assertEqual(len(replies_in_thread), 1)
+
+    def test_separate_runs_create_separate_review_replies(self) -> None:
+        github = FakeGitHubClient()
+        pr = FakePullRequest(trigger_comment_id=100)
+        run1 = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="respond-to-pr-comment",
+            requester_login="alice",
+            review_reply_target=(pr, 100),
+        )
+        run1.start("First run start.")
+        run2 = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="respond-to-pr-comment",
+            requester_login="alice",
+            review_reply_target=(pr, 100),
+        )
+        run2.start("Second run start.")
+
+        replies = [c for c in pr.review_comments if c.get("in_reply_to_id") == 100]
+        self.assertEqual(len(replies), 2)
+        self.assertIn("First run start.", replies[0]["body"])
+        self.assertIn("Second run start.", replies[1]["body"])
+
+
 class WorkflowRunUrlTest(unittest.TestCase):
     def test_returns_url_when_all_env_vars_set(self) -> None:
         env = {
@@ -324,6 +452,75 @@ class FakeGitHubClient:
 
     def list_issue_events(self, owner: str, repo: str, issue_number: int) -> list[dict[str, object]]:
         return []
+
+
+class FakeReviewComment:
+    """A minimal stand-in for ``github.PullRequestComment.PullRequestComment``."""
+
+    def __init__(self, pr: "FakePullRequest", data: dict[str, object]) -> None:
+        self._pr = pr
+        self._data = data
+
+    @property
+    def id(self) -> int:
+        return int(self._data["id"])  # type: ignore[arg-type]
+
+    @property
+    def body(self) -> str:
+        return str(self._data.get("body") or "")
+
+    @property
+    def in_reply_to_id(self) -> object:
+        return self._data.get("in_reply_to_id")
+
+    @property
+    def user(self) -> object:
+        return self._data.get("user")
+
+    def edit(self, body: str) -> None:
+        self._data["body"] = body
+
+    def delete(self) -> None:
+        self._pr.review_comments = [
+            c for c in self._pr.review_comments if int(c["id"]) != self.id  # type: ignore[arg-type]
+        ]
+
+
+class FakePullRequest:
+    """A minimal stand-in for ``github.PullRequest.PullRequest`` review-comment APIs."""
+
+    def __init__(self, *, trigger_comment_id: int = 100) -> None:
+        self.review_comments: list[dict[str, object]] = [
+            {
+                "id": trigger_comment_id,
+                "in_reply_to_id": None,
+                "body": "@oz-agent please take a look at this.",
+                "user": {"login": "triggerer"},
+            }
+        ]
+
+    def _next_id(self) -> int:
+        return max(int(c["id"]) for c in self.review_comments) + 1  # type: ignore[arg-type]
+
+    def get_review_comments(self) -> list[FakeReviewComment]:
+        return [FakeReviewComment(self, c) for c in self.review_comments]
+
+    def get_review_comment(self, comment_id: int) -> FakeReviewComment:
+        for c in self.review_comments:
+            if int(c["id"]) == comment_id:  # type: ignore[arg-type]
+                return FakeReviewComment(self, c)
+        raise AssertionError(f"Missing review comment {comment_id}")
+
+    def create_review_comment_reply(self, comment_id: int, body: str) -> FakeReviewComment:
+        new_id = self._next_id()
+        data: dict[str, object] = {
+            "id": new_id,
+            "in_reply_to_id": comment_id,
+            "body": body,
+            "user": {"login": "oz-agent"},
+        }
+        self.review_comments.append(data)
+        return FakeReviewComment(self, data)
 
 
 if __name__ == "__main__":
