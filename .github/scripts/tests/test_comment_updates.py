@@ -250,6 +250,75 @@ class ReviewReplyProgressCommentTest(unittest.TestCase):
         self.assertIn("First run start.", replies[0]["body"])
         self.assertIn("Second run start.", replies[1]["body"])
 
+    def test_dedupes_duplicate_replies_from_retried_post(self) -> None:
+        # Simulate PyGitHub's default retry policy retrying POST on a 5xx
+        # response where GitHub actually processed each attempt and created
+        # multiple duplicate review-comment replies server-side.
+        github = FakeGitHubClient()
+        pr = FakePullRequest(trigger_comment_id=100, duplicate_reply_count=3)
+        progress = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="respond-to-pr-comment",
+            requester_login="alice",
+            review_reply_target=(pr, 100),
+        )
+        progress.start("Oz is working on changes requested in this PR.")
+
+        replies = [c for c in pr.review_comments if c.get("in_reply_to_id") == 100]
+        self.assertEqual(len(replies), 1)
+        self.assertIn("Oz is working on changes", replies[0]["body"])
+
+    def test_session_link_update_survives_transient_patch_failure(self) -> None:
+        # The poll loop calls record_session_link every tick. If a single
+        # PATCH fails with a transient error the run must continue so the
+        # next poll has a chance to record the link.
+        github = FakeGitHubClient()
+        pr = FakePullRequest(trigger_comment_id=100)
+        progress = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="respond-to-pr-comment",
+            requester_login="alice",
+            review_reply_target=(pr, 100),
+        )
+        progress.start("Oz is working.")
+        pr.fail_next_edit = True
+        progress.record_session_link("https://example.test/session/abc")
+        # The first attempt failed, so the session link should not be
+        # recorded yet, but the workflow is expected to continue running.
+        replies = [c for c in pr.review_comments if c.get("in_reply_to_id") == 100]
+        self.assertNotIn("https://example.test/session/abc", replies[0]["body"])
+        # The next poll retries with the same link and succeeds.
+        progress.record_session_link("https://example.test/session/abc")
+        replies = [c for c in pr.review_comments if c.get("in_reply_to_id") == 100]
+        self.assertIn("Sharing session at: https://example.test/session/abc", replies[0]["body"])
+
+    def test_session_link_skips_patch_when_link_unchanged(self) -> None:
+        # Poll loops call record_session_link on every tick with the same
+        # link. Subsequent identical calls should be a no-op so the bot
+        # doesn't spam PATCH requests at GitHub.
+        github = FakeGitHubClient()
+        pr = FakePullRequest(trigger_comment_id=100)
+        progress = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="respond-to-pr-comment",
+            requester_login="alice",
+            review_reply_target=(pr, 100),
+        )
+        progress.start("Oz is working.")
+        progress.record_session_link("https://example.test/session/abc")
+        edits_after_first = pr.edit_count
+        progress.record_session_link("https://example.test/session/abc")
+        self.assertEqual(pr.edit_count, edits_after_first)
+
 
 class WorkflowRunUrlTest(unittest.TestCase):
     def test_returns_url_when_all_env_vars_set(self) -> None:
@@ -478,6 +547,10 @@ class FakeReviewComment:
         return self._data.get("user")
 
     def edit(self, body: str) -> None:
+        if self._pr.fail_next_edit:
+            self._pr.fail_next_edit = False
+            raise RuntimeError("simulated transient PATCH failure")
+        self._pr.edit_count += 1
         self._data["body"] = body
 
     def delete(self) -> None:
@@ -489,7 +562,12 @@ class FakeReviewComment:
 class FakePullRequest:
     """A minimal stand-in for ``github.PullRequest.PullRequest`` review-comment APIs."""
 
-    def __init__(self, *, trigger_comment_id: int = 100) -> None:
+    def __init__(
+        self,
+        *,
+        trigger_comment_id: int = 100,
+        duplicate_reply_count: int = 1,
+    ) -> None:
         self.review_comments: list[dict[str, object]] = [
             {
                 "id": trigger_comment_id,
@@ -498,6 +576,16 @@ class FakePullRequest:
                 "user": {"login": "triggerer"},
             }
         ]
+        # When >1, ``create_review_comment_reply`` simulates PyGitHub's
+        # retry-on-5xx behavior by inserting extra duplicate replies that
+        # the server created but never returned successfully to the client.
+        self.duplicate_reply_count = max(1, duplicate_reply_count)
+        # When True, the next ``edit`` call raises to simulate a transient
+        # GitHub API failure on PATCH.
+        self.fail_next_edit = False
+        # Tracks successful ``edit`` calls for tests that assert on PATCH
+        # frequency.
+        self.edit_count = 0
 
     def _next_id(self) -> int:
         return max(int(c["id"]) for c in self.review_comments) + 1  # type: ignore[arg-type]
@@ -512,15 +600,19 @@ class FakePullRequest:
         raise AssertionError(f"Missing review comment {comment_id}")
 
     def create_review_comment_reply(self, comment_id: int, body: str) -> FakeReviewComment:
-        new_id = self._next_id()
-        data: dict[str, object] = {
-            "id": new_id,
-            "in_reply_to_id": comment_id,
-            "body": body,
-            "user": {"login": "oz-agent"},
-        }
-        self.review_comments.append(data)
-        return FakeReviewComment(self, data)
+        last: FakeReviewComment | None = None
+        for _ in range(self.duplicate_reply_count):
+            new_id = self._next_id()
+            data: dict[str, object] = {
+                "id": new_id,
+                "in_reply_to_id": comment_id,
+                "body": body,
+                "user": {"login": "oz-agent"},
+            }
+            self.review_comments.append(data)
+            last = FakeReviewComment(self, data)
+        assert last is not None
+        return last
 
 
 if __name__ == "__main__":

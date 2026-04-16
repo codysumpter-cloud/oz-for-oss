@@ -391,10 +391,21 @@ class WorkflowProgressComment:
         self._append_sections([status_line])
 
     def record_session_link(self, session_link: str) -> None:
-        if not session_link.strip():
+        normalized = session_link.strip()
+        if not normalized:
             return
-        self.session_link = session_link.strip()
-        self._append_sections([_format_progress_link_section(session_link)])
+        if normalized == self.session_link:
+            # The session link hasn't changed since the last successful
+            # update, so there is nothing new to post.
+            return
+        try:
+            self._append_sections([_format_progress_link_section(normalized)])
+        except Exception:
+            # Recording the session link happens from the run-agent poll
+            # loop. A transient GitHub API failure here should not abort
+            # the entire workflow run; try again on the next poll.
+            return
+        self.session_link = normalized
 
     def complete(self, status_line: str) -> None:
         self._append_sections([status_line])
@@ -478,11 +489,41 @@ class WorkflowProgressComment:
             created = self._create_comment(
                 build_comment_body("\n\n".join(normalized_sections), self.metadata),
             )
-            self.comment_id = int(_field(created, "id"))
+            created_id = int(_field(created, "id"))
+            self._dedupe_duplicate_created_comments(keep_id=created_id)
+            self.comment_id = created_id
             return
         updated_body = append_comment_sections(str(_field(existing, "body") or ""), self.metadata, normalized_sections)
         self._update_comment(int(_field(existing, "id")), updated_body)
         self.comment_id = int(_field(existing, "id"))
+
+    def _dedupe_duplicate_created_comments(self, *, keep_id: int) -> None:
+        """Delete any stray comments matching this run's metadata marker.
+
+        PyGitHub's default retry policy retries POST requests on 5xx
+        responses. When GitHub returns a 5xx but actually processed the
+        create-comment request server-side, those retries produce duplicate
+        comments that all share this run's unique ``run_id`` metadata
+        marker. Remove them here so the progress comment stays as a single
+        entry; best-effort, since the duplicates are cosmetic.
+        """
+        try:
+            comments = self._list_comments()
+        except Exception:
+            return
+        for comment in comments:
+            comment_id = int(_field(comment, "id") or 0)
+            if comment_id == keep_id or comment_id <= 0:
+                continue
+            body = _field(comment, "body")
+            if not isinstance(body, str) or self.metadata not in body:
+                continue
+            try:
+                self._delete_comment(comment_id)
+            except Exception:
+                # Deleting duplicates is best-effort; leave extras in place
+                # rather than letting cleanup errors abort the workflow.
+                continue
 
     def _find_any_workflow_comment(self) -> Any | None:
         """Find any progress comment for this workflow on this issue, regardless of run."""
