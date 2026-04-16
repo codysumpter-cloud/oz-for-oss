@@ -7,7 +7,9 @@ from unittest.mock import patch
 
 from pathlib import Path
 
+from oz_workflows import oz_client
 from oz_workflows.oz_client import (
+    _workflow_code_root,
     build_agent_config,
     build_oz_client,
     skill_file_path,
@@ -130,6 +132,93 @@ class SkillSpecTest(unittest.TestCase):
     def test_preserves_already_qualified_skill_spec(self) -> None:
         qualified = "warpdotdev/oz-oss-testbed:.agents/skills/create-tech-spec/SKILL.md"
         self.assertEqual(skill_spec(qualified), qualified)
+
+
+class WorkflowCodeRootTest(unittest.TestCase):
+    def test_honors_configured_absolute_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            with patch.dict(
+                os.environ,
+                {"WORKFLOW_CODE_PATH": str(root)},
+                clear=False,
+            ):
+                self.assertEqual(_workflow_code_root(), root)
+
+    def test_resolves_relative_configured_path_against_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace_root = Path(tempdir)
+            (workspace_root / "__oz_shared").mkdir()
+            with patch.dict(
+                os.environ,
+                {
+                    "GITHUB_WORKSPACE": str(workspace_root),
+                    "WORKFLOW_CODE_PATH": "__oz_shared",
+                },
+                clear=False,
+            ):
+                self.assertEqual(
+                    _workflow_code_root(), workspace_root / "__oz_shared"
+                )
+
+    def test_walks_up_to_github_sentinel(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo_root = Path(tempdir).resolve()
+            nested = repo_root / ".github" / "scripts" / "oz_workflows"
+            nested.mkdir(parents=True)
+            fake_module = nested / "oz_client.py"
+            fake_module.write_text("", encoding="utf-8")
+            env_without_override = {
+                key: value
+                for key, value in os.environ.items()
+                if key != "WORKFLOW_CODE_PATH"
+            }
+            with patch.dict(os.environ, env_without_override, clear=True), patch.object(
+                oz_client, "__file__", str(fake_module)
+            ):
+                self.assertEqual(_workflow_code_root(), repo_root)
+
+    def test_walks_up_when_module_is_nested_deeper(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo_root = Path(tempdir).resolve()
+            nested = (
+                repo_root
+                / ".github"
+                / "scripts"
+                / "oz_workflows"
+                / "extra"
+                / "deeper"
+            )
+            nested.mkdir(parents=True)
+            fake_module = nested / "oz_client.py"
+            fake_module.write_text("", encoding="utf-8")
+            env_without_override = {
+                key: value
+                for key, value in os.environ.items()
+                if key != "WORKFLOW_CODE_PATH"
+            }
+            with patch.dict(os.environ, env_without_override, clear=True), patch.object(
+                oz_client, "__file__", str(fake_module)
+            ):
+                self.assertEqual(_workflow_code_root(), repo_root)
+
+    def test_raises_when_no_github_sentinel_found(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            nested = Path(tempdir).resolve() / "vendor" / "oz_workflows"
+            nested.mkdir(parents=True)
+            fake_module = nested / "oz_client.py"
+            fake_module.write_text("", encoding="utf-8")
+            env_without_override = {
+                key: value
+                for key, value in os.environ.items()
+                if key != "WORKFLOW_CODE_PATH"
+            }
+            with patch.dict(os.environ, env_without_override, clear=True), patch.object(
+                oz_client, "__file__", str(fake_module)
+            ):
+                with self.assertRaises(RuntimeError) as ctx:
+                    _workflow_code_root()
+                self.assertIn(".github", str(ctx.exception))
 
 
 class BuildAgentConfigTest(unittest.TestCase):
