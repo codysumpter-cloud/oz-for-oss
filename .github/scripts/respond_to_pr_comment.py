@@ -68,6 +68,7 @@ def _handle_review_comment(
         additional_context=thread_context,
         context_label="Review thread context (org members only)",
         requester=requester,
+        review_reply_target=(pr, trigger_comment_id),
     )
 
 
@@ -127,6 +128,7 @@ def _run_implementation(
     additional_context: str,
     context_label: str,
     requester: str,
+    review_reply_target: tuple[object, int] | None = None,
 ) -> None:
     pr_number = int(getattr(pr, "number"))
     head_branch = getattr(getattr(pr, "head"), "ref")
@@ -145,6 +147,7 @@ def _run_implementation(
         workflow="respond-to-pr-comment",
         event_payload=event,
         requester_login=requester,
+        review_reply_target=review_reply_target,
     )
     progress.start("Oz is working on changes requested in this PR.")
 
