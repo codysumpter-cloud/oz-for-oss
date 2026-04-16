@@ -6,7 +6,7 @@ from textwrap import dedent
 from github import Auth, Github
 
 from oz_workflows.actions import append_summary
-from oz_workflows.artifacts import load_pr_description_artifact
+from oz_workflows.artifacts import load_pr_metadata_artifact
 from oz_workflows.env import load_event, repo_parts, repo_slug, workspace, require_env
 from oz_workflows.helpers import (
     branch_updated_since,
@@ -135,9 +135,12 @@ def main() -> None:
             - If that branch already exists, fetch it and continue from it. Otherwise create it from `{default_branch}`.
             - Align the implementation with the plan context above when present.
             - Run the most relevant validation available in the repository.
-            - If you produce changes, write `pr_description.md` at the repository root containing the full markdown PR body the workflow should use when opening or updating the PR.
-            - After validating `pr_description.md`, upload it as an artifact via `oz-dev artifact upload pr_description.md`. The subcommand is `artifact` (singular); do not use `artifacts`.
-            - If you produce changes, commit them to `{target_branch}` and push that branch to origin.
+            - If you produce changes, write `pr-metadata.json` at the repository root containing a JSON object with these required fields:
+              - `branch_name`: the branch you pushed to. You may customize it by appending a short descriptive slug to the default (e.g. `{target_branch}-add-retry-logic`), but it must start with `{target_branch}`.
+              - `pr_title`: a conventional-commit-style PR title derived from the actual changes (e.g. `feat: add retry logic for transient API failures`).
+              - `pr_summary`: the full markdown PR body (this replaces the former `pr_description.md` contents). The first line must be `Closes #{{issue_number}}` so GitHub auto-closes the issue when the PR merges.
+            - After writing `pr-metadata.json`, upload it as an artifact via `oz-dev artifact upload pr-metadata.json`. The subcommand is `artifact` (singular); do not use `artifacts`.
+            - If you produce changes, commit them to the branch specified in your `pr-metadata.json` `branch_name` field and push that branch to origin.
             - Do not open or update the pull request yourself.
             - If no implementation diff is warranted, do not push the branch.
             {coauthor_directives}
@@ -158,6 +161,36 @@ def main() -> None:
                 on_poll=lambda current_run: record_run_session_link(progress, current_run),
             )
 
+            commit_type = conventional_commit_prefix(issue.get("labels", []))
+            fallback_title = f"{commit_type}: {issue_title}"
+
+            # Load the structured metadata artifact to discover the
+            # actual branch, PR title, and PR body the agent produced.
+            # If the agent did not produce changes it will not upload
+            # the artifact, so we fall back to checking the default
+            # branch.
+            try:
+                metadata = load_pr_metadata_artifact(run.run_id)
+            except RuntimeError:
+                metadata = None
+
+            if metadata is not None:
+                pr_title = metadata.get("pr_title") or fallback_title
+                pr_body = metadata["pr_summary"]
+
+                # Use the agent-chosen branch when it extends the
+                # expected prefix; otherwise keep the original target.
+                agent_branch = metadata.get("branch_name", "")
+                if (
+                    not selected_spec_pr
+                    and agent_branch
+                    and agent_branch.startswith(target_branch)
+                ):
+                    target_branch = agent_branch
+            else:
+                pr_title = fallback_title
+                pr_body = ""
+
             if not branch_updated_since(
                 github,
                 owner,
@@ -168,12 +201,14 @@ def main() -> None:
                 progress.complete("I analyzed this issue but did not produce an implementation diff.")
                 return
 
-            commit_type = conventional_commit_prefix(issue.get("labels", []))
-            pr_body = load_pr_description_artifact(run.run_id)
+            if not pr_body:
+                raise RuntimeError(
+                    f"Branch {target_branch} was updated but no pr-metadata.json artifact was found."
+                )
 
             if selected_spec_pr:
                 github.get_pull(int(selected_spec_pr["number"])).edit(
-                    title=f"{commit_type}: {issue_title}",
+                    title=pr_title,
                     body=pr_body,
                 )
                 progress.complete(
@@ -185,10 +220,10 @@ def main() -> None:
             existing_prs = list(github.get_pulls(state="open", head=f"{owner}:{target_branch}"))
             if existing_prs:
                 pr = existing_prs[0]
-                pr.edit(body=pr_body)
+                pr.edit(title=pr_title, body=pr_body)
             else:
                 pr = github.create_pull(
-                    title=f"{commit_type}: {issue_title}",
+                    title=pr_title,
                     head=target_branch,
                     base=default_branch,
                     body=pr_body,

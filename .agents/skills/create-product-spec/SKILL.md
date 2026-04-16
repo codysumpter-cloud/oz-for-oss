@@ -20,7 +20,7 @@ The Oz-specific differences are:
 - the primary input is a GitHub issue, not a Linear issue
 - the output path is `specs/GH<issue-number>/product.md`
 - `issue_comments.txt` and triggering-comment context are first-class inputs
-- a workflow may also request a reusable PR body in `pr_description.md`
+- a workflow may also request a structured PR metadata file in `pr-metadata.json`
 - do not create or edit Linear issues as part of this workflow
 
 ## Inputs
@@ -48,12 +48,12 @@ If a triggering comment or other workflow-provided comment context is present, t
 7. Do not include implementation details, file-level changes, or technical design. Those belong in the tech spec.
 8. Do not implement the feature or modify production code as part of this task. Limit changes to the product spec artifact. Treat temporary context files such as `issue_comments.txt` as scratch input only and do not commit them.
 9. Do not include issue number references (e.g. `(#N)`, `Refs #N`) in commit messages. The issue is already linked in the PR.
-10. If the prompt asks for it, write `pr_description.md` at the repository root containing the full markdown body to use for the spec pull request. Summarize the product and technical planning clearly enough that reviewers can use it directly as the PR body.
+10. If the prompt asks for it, write `pr-metadata.json` at the repository root containing a JSON object with the fields `branch_name`, `pr_title`, and `pr_summary`. The `pr_summary` should summarize the product and technical planning clearly enough that reviewers can use it directly as the PR body.
 11. Default behavior: do not stage files, create commits, push branches, open pull requests, or use the GitHub CLI. If the prompt explicitly says you are running in a cloud-environment workflow where the caller cannot read your local diff and instructs you to publish a named branch, you may commit and push exactly the requested spec changes to that branch, but still do not open or update the pull request yourself unless the prompt explicitly asks for it.
 12. In your final response, provide a brief summary of the product spec and call out any assumptions or open questions so the workflow can reuse that summary when creating the PR.
 
 ## Output expectations
 
 - Leave the repository with the new or updated product spec file ready to be committed by the workflow.
-- When requested by the prompt, leave a ready-to-use PR body in `pr_description.md`.
+- When requested by the prompt, leave a ready-to-use `pr-metadata.json` with `branch_name`, `pr_title`, and `pr_summary`.
 - If the issue is underspecified, still produce the best possible product spec and clearly capture assumptions or open questions in the spec file and final response.

@@ -4,7 +4,7 @@ from contextlib import closing
 from datetime import timedelta
 from textwrap import dedent
 from github import Auth, Github
-from oz_workflows.artifacts import load_pr_description_artifact
+from oz_workflows.artifacts import load_pr_metadata_artifact
 
 from oz_workflows.env import load_event, repo_parts, repo_slug, workspace, require_env
 from oz_workflows.helpers import (
@@ -87,8 +87,11 @@ def main() -> None:
             - Use the shared spec-first skill `{spec_driven_implementation_skill_path}` as the base workflow for this run. Prefer the consuming repository's version when present; otherwise use the checked-in oz-for-oss copy.
             - First, read the shared product-spec skill `{write_product_spec_skill_path}`, then read the Oz wrapper skill `{create_product_spec_skill_path}`, and create a product spec at `specs/GH{issue_number}/product.md`.
             - Then, read the shared tech-spec skill `{write_tech_spec_skill_path}`, then read the Oz wrapper skill `{create_tech_spec_skill_path}`, and create a tech spec at `specs/GH{issue_number}/tech.md`.
-            - If you produce spec changes, write `pr_description.md` at the repository root containing the full markdown PR body the workflow should use when opening or updating the spec PR.
-            - After validating `pr_description.md`, upload it as an artifact via `oz-dev artifact upload pr_description.md`. The subcommand is `artifact` (singular); do not use `artifacts`.
+            - If you produce spec changes, write `pr-metadata.json` at the repository root containing a JSON object with these required fields:
+              - `branch_name`: the branch you pushed to (use `{branch_name}` exactly).
+              - `pr_title`: a conventional-commit-style PR title for the spec changes (e.g. `spec: {issue_title}`).
+              - `pr_summary`: the full markdown PR body (this replaces the former `pr_description.md` contents).
+            - After writing `pr-metadata.json`, upload it as an artifact via `oz-dev artifact upload pr-metadata.json`. The subcommand is `artifact` (singular); do not use `artifacts`.
             - If you produce spec changes, commit only the spec changes to branch `{branch_name}` and push that branch to origin.
             - Do not open or update the pull request yourself.
             - If there is no worthwhile spec diff, do not push the branch.
@@ -120,13 +123,15 @@ def main() -> None:
                 progress.complete("I analyzed this issue but did not produce a spec diff.")
                 return
             existing_prs = list(github.get_pulls(state="open", head=f"{owner}:{branch_name}"))
-            pr_body = load_pr_description_artifact(run.run_id)
+            metadata = load_pr_metadata_artifact(run.run_id)
+            pr_title = metadata.get("pr_title") or f"spec: {issue_title}"
+            pr_body = metadata["pr_summary"]
             if existing_prs:
                 pr = existing_prs[0]
-                pr.edit(title=f"spec: {issue_title}", body=pr_body)
+                pr.edit(title=pr_title, body=pr_body)
             else:
                 pr = github.create_pull(
-                    title=f"spec: {issue_title}",
+                    title=pr_title,
                     head=branch_name,
                     base=default_branch,
                     body=pr_body,
