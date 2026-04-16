@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from datetime import datetime, timezone
@@ -11,7 +12,10 @@ from github.GithubException import UnknownObjectException
 from github.PullRequest import PullRequest
 from github.Repository import Repository
 
+from . import actions
 from .env import optional_env
+
+logger = logging.getLogger(__name__)
 
 
 # Author associations that indicate organization membership.
@@ -412,22 +416,55 @@ class WorkflowProgressComment:
         self._append_sections([status_line])
 
     def report_error(self) -> None:
-        """Update the progress comment to indicate a workflow failure."""
+        """Update the progress comment to indicate a workflow failure.
+
+        ``report_error`` is the last-chance hook before the caller re-raises,
+        so it must not depend on GitHub API calls beyond the comment CRUD
+        itself. The common reason this runs is that a prior GitHub API call
+        failed (outage, rate limit, etc.), so we reuse the requester login
+        cached by earlier successful comment updates rather than re-resolving
+        it via ``resolve_progress_requester_login`` (which can trigger an
+        events API lookup through ``resolve_oz_assigner_login``). When the
+        fallback comment write itself fails, surface the problem via logs
+        and a GitHub Actions ``::error::`` annotation instead of silently
+        swallowing the exception.
+        """
+        run_url = _workflow_run_url()
+        if run_url:
+            message = (
+                "Oz ran into an unexpected error while working on this. "
+                f"You can view the [workflow run]({run_url}) for more details."
+            )
+        else:
+            message = "Oz ran into an unexpected error while working on this."
+        sections: list[str] = []
+        normalized_requester = self.requester_login.strip().removeprefix("@")
+        if normalized_requester:
+            sections.append(f"@{normalized_requester}")
+        sections.append(message)
+        if self.session_link:
+            sections.append(_format_progress_link_section(self.session_link))
+        body = build_comment_body("\n\n".join(sections), self.metadata)
         try:
-            run_url = _workflow_run_url()
-            if run_url:
-                message = (
-                    "Oz ran into an unexpected error while working on this. "
-                    f"You can view the [workflow run]({run_url}) for more details."
-                )
-            else:
-                message = "Oz ran into an unexpected error while working on this."
-            sections = [message]
-            if self.session_link:
-                sections.append(_format_progress_link_section(self.session_link))
-            self.replace_body("\n\n".join(sections))
+            existing = self._get_or_find_existing_comment()
+            if existing is None:
+                created = self._create_comment(body)
+                self.comment_id = int(_field(created, "id"))
+                return
+            self._update_comment(int(_field(existing, "id")), body)
+            self.comment_id = int(_field(existing, "id"))
         except Exception:
-            pass
+            logger.exception(
+                "Failed to post workflow error comment for %s/%s issue #%s",
+                self.owner,
+                self.repo,
+                self.issue_number,
+            )
+            actions.error(
+                f"Oz workflow '{self.workflow}' failed and the user-facing error "
+                f"comment could not be posted to issue #{self.issue_number}. "
+                f"See the workflow run logs for details."
+            )
 
     def replace_body(self, content: str) -> None:
         """Replace the full comment body, preserving the metadata marker."""
@@ -439,6 +476,7 @@ class WorkflowProgressComment:
             event_payload=self.event_payload,
             requester_login=self.requester_login,
         )
+        self._cache_requester_login(requester)
         sections: list[str] = []
         if requester:
             sections.append(f"@{requester}")
@@ -471,6 +509,19 @@ class WorkflowProgressComment:
                 break
         self.comment_id = None
 
+    def _cache_requester_login(self, requester: str) -> None:
+        """Cache a resolved requester login so later calls can reuse it.
+
+        ``report_error`` must not trigger new GitHub API calls to resolve
+        the requester login when the workflow is already failing (e.g. a
+        GitHub API outage). Caching the resolved value after every
+        successful update lets the error path reuse it without needing
+        another events/issue lookup.
+        """
+        normalized = (requester or "").strip().removeprefix("@")
+        if normalized:
+            self.requester_login = normalized
+
     def _append_sections(self, sections: list[str]) -> None:
         normalized_sections = [section.strip() for section in sections if section and section.strip()]
         requester = resolve_progress_requester_login(
@@ -481,6 +532,7 @@ class WorkflowProgressComment:
             event_payload=self.event_payload,
             requester_login=self.requester_login,
         )
+        self._cache_requester_login(requester)
         if requester:
             normalized_sections.insert(0, f"@{requester}")
         if not normalized_sections:
