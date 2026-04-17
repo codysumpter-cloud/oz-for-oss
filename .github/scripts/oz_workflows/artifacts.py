@@ -194,8 +194,14 @@ def _download_text_with_retries(
         time.sleep(backoff + random.uniform(0, 1))
 
     # At least one attempt always runs, so last_error is set when we exit
-    # the loop without returning.
-    assert last_error is not None
+    # the loop without returning. Guard against the theoretical case where
+    # it isn't so we don't raise ``TypeError`` under ``python -O`` (which
+    # strips ``assert`` statements).
+    if last_error is None:
+        raise RuntimeError(
+            f"Exhausted retries downloading artifact {artifact_uid} "
+            "without recording an error"
+        )
     raise last_error
 
 
