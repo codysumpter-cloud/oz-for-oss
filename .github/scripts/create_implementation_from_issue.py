@@ -9,11 +9,11 @@ from oz_workflows.actions import append_summary
 from oz_workflows.artifacts import load_pr_metadata_artifact
 from oz_workflows.env import load_event, repo_parts, repo_slug, workspace, require_env
 from oz_workflows.helpers import (
-    _login,
     branch_updated_since,
     build_next_steps_section,
     coauthor_prompt_lines,
     conventional_commit_prefix,
+    get_login,
     is_automation_user,
     org_member_comments_text,
     record_run_session_link,
@@ -45,7 +45,7 @@ def main() -> None:
         # Only call add_to_assignees when oz-agent is not already assigned.
         # The POST /issues/{n}/assignees call is otherwise a no-op that still
         # consumes API quota on every workflow run.
-        current_assignees = {_login(assignee) for assignee in (issue_data.assignees or [])}
+        current_assignees = {get_login(assignee) for assignee in (issue_data.assignees or [])}
         if "oz-agent" not in current_assignees:
             issue_data.add_to_assignees("oz-agent")
         comments = list(issue_data.get_comments())

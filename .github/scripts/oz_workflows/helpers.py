@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from github import Github
 from github.GithubException import UnknownObjectException
@@ -24,13 +25,13 @@ def parse_datetime(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
 
 
-def _field(item: Any, name: str, default: Any = None) -> Any:
+def get_field(item: Any, name: str, default: Any = None) -> Any:
     if isinstance(item, dict):
         return item.get(name, default)
     return getattr(item, name, default)
 
 
-def _login(item: Any) -> str:
+def get_login(item: Any) -> str:
     if isinstance(item, dict):
         return str(item.get("login") or "")
     return str(getattr(item, "login", "") or "")
@@ -38,24 +39,24 @@ def _login(item: Any) -> str:
 
 def is_automation_user(user: Any) -> bool:
     """Return whether *user* is an automation account that should not trigger workflows."""
-    login = _login(user).strip().lower()
-    user_type = str(_field(user, "type", "") or "").strip().lower()
+    login = get_login(user).strip().lower()
+    user_type = str(get_field(user, "type", "") or "").strip().lower()
     return (
         user_type == "bot"
         or (bool(login) and login.endswith("[bot]"))
     )
 
 
-def _timestamp_text(value: Any) -> str:
+def get_timestamp_text(value: Any) -> str:
     if isinstance(value, datetime):
         return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     return str(value or "")
 
 
-def _label_name(label: Any) -> str:
+def get_label_name(label: Any) -> str:
     if isinstance(label, str):
         return label
-    return str(_field(label, "name", "") or "")
+    return str(get_field(label, "name", "") or "")
 
 
 def format_issue_comments_for_prompt(
@@ -68,95 +69,20 @@ def format_issue_comments_for_prompt(
     selected = [
         comment
         for comment in comments
-        if int(_field(comment, "id") or 0) != exclude_comment_id
-        and metadata_prefix not in str(_field(comment, "body") or "")
+        if int(get_field(comment, "id") or 0) != exclude_comment_id
+        and metadata_prefix not in str(get_field(comment, "body") or "")
     ]
     if not selected:
         return "- None"
     formatted = []
     for comment in selected:
-        user = _login(_field(comment, "user")) or "unknown"
-        association = _field(comment, "author_association") or "NONE"
-        body = str(_field(comment, "body") or "").strip() or "(no body)"
+        user = get_login(get_field(comment, "user")) or "unknown"
+        association = get_field(comment, "author_association") or "NONE"
+        body = str(get_field(comment, "body") or "").strip() or "(no body)"
         formatted.append(
-            f"- @{user} [{association}] ({_timestamp_text(_field(comment, 'created_at'))}): {body}"
+            f"- @{user} [{association}] ({get_timestamp_text(get_field(comment, 'created_at'))}): {body}"
         )
     return "\n".join(formatted)
-
-
-def _list_issue_comments(
-    github: Repository | Any,
-    owner: str,
-    repo: str,
-    issue_number: int,
-) -> list[Any]:
-    if hasattr(github, "get_issue"):
-        return list(github.get_issue(issue_number).get_comments())
-    return list(github.list_issue_comments(owner, repo, issue_number))
-
-
-def _list_issue_events(
-    github: Repository | Any,
-    owner: str,
-    repo: str,
-    issue_number: int,
-) -> list[Any]:
-    if hasattr(github, "get_issue"):
-        return list(github.get_issue(issue_number).get_events())
-    return list(github.list_issue_events(owner, repo, issue_number))
-
-
-def _get_issue_comment(
-    github: Repository | Any,
-    owner: str,
-    repo: str,
-    comment_id: int,
-    *,
-    issue_number: int,
-) -> Any:
-    if hasattr(github, "get_issue"):
-        return github.get_issue(issue_number).get_comment(comment_id)
-    return github.get_comment(owner, repo, comment_id)
-
-
-def _create_issue_comment(
-    github: Repository | Any,
-    owner: str,
-    repo: str,
-    issue_number: int,
-    body: str,
-) -> Any:
-    if hasattr(github, "get_issue"):
-        return github.get_issue(issue_number).create_comment(body)
-    return github.create_comment(owner, repo, issue_number, body)
-
-
-def _update_issue_comment(
-    github: Repository | Any,
-    owner: str,
-    repo: str,
-    issue_number: int,
-    comment_id: int,
-    body: str,
-) -> Any:
-    if hasattr(github, "get_issue"):
-        comment = github.get_issue(issue_number).get_comment(comment_id)
-        comment.edit(body)
-        return comment
-    return github.update_comment(owner, repo, comment_id, body)
-
-
-def _delete_issue_comment(
-    github: Repository | Any,
-    owner: str,
-    repo: str,
-    issue_number: int,
-    comment_id: int,
-) -> None:
-    if hasattr(github, "get_issue"):
-        github.get_issue(issue_number).get_comment(comment_id).delete()
-        return
-    github.delete_comment(owner, repo, comment_id)
 
 
 def _filter_review_comments_in_thread(
@@ -177,14 +103,14 @@ def _filter_review_comments_in_thread(
     root is either the triggering comment itself or the comment its
     ``in_reply_to_id`` refers to.
     """
-    by_id: dict[int, Any] = {int(_field(c, "id")): c for c in all_review_comments}
+    by_id: dict[int, Any] = {int(get_field(c, "id")): c for c in all_review_comments}
     trigger = by_id.get(trigger_comment_id)
-    parent = _field(trigger, "in_reply_to_id") if trigger is not None else None
+    parent = get_field(trigger, "in_reply_to_id") if trigger is not None else None
     root_id = int(parent) if parent is not None else trigger_comment_id
     return [
         c
         for c in all_review_comments
-        if int(_field(c, "id")) == root_id or _field(c, "in_reply_to_id") == root_id
+        if int(get_field(c, "id")) == root_id or get_field(c, "in_reply_to_id") == root_id
     ]
 
 
@@ -196,13 +122,13 @@ def org_member_comments_text(
     selected = [
         comment
         for comment in comments
-        if _field(comment, "author_association") in ORG_MEMBER_ASSOCIATIONS
-        and int(_field(comment, "id") or 0) != exclude_comment_id
+        if get_field(comment, "author_association") in ORG_MEMBER_ASSOCIATIONS
+        and int(get_field(comment, "id") or 0) != exclude_comment_id
     ]
     if not selected:
         return ""
     return "\n".join(
-        f"- {_login(_field(comment, 'user')) or 'unknown'} ({_timestamp_text(_field(comment, 'created_at'))}): {_field(comment, 'body') or ''}"
+        f"- {get_login(get_field(comment, 'user')) or 'unknown'} ({get_timestamp_text(get_field(comment, 'created_at'))}): {get_field(comment, 'body') or ''}"
         for comment in selected
     )
 
@@ -218,15 +144,51 @@ def triggering_comment_prompt_text(event_payload: dict[str, Any]) -> str:
     return f"@{author_login} commented:\n{body}"
 
 
-def comment_metadata(workflow: str, issue_number: int, *, run_id: str = "") -> str:
+def comment_metadata(
+    workflow: str,
+    issue_number: int,
+    *,
+    run_id: str = "",
+    oz_run_id: str = "",
+    github_run_id: str = "",
+) -> str:
+    payload: dict[str, Any] = {
+        "type": "issue-status",
+        "workflow": workflow,
+        "issue": issue_number,
+    }
     if run_id:
-        return f'<!-- oz-agent-metadata: {{"type":"issue-status","workflow":"{workflow}","issue":{issue_number},"run_id":"{run_id}"}} -->'
-    return f'<!-- oz-agent-metadata: {{"type":"issue-status","workflow":"{workflow}","issue":{issue_number}}} -->'
+        payload["run_id"] = run_id
+    if github_run_id:
+        payload["github_run_id"] = github_run_id
+    if oz_run_id:
+        payload["oz_run_id"] = oz_run_id
+    return f"<!-- oz-agent-metadata: {json.dumps(payload, separators=(',', ':'))} -->"
 
 
 def _workflow_metadata_prefix(workflow: str, issue_number: int) -> str:
     """Return the stable metadata prefix shared by all runs of the same workflow on an issue."""
     return f'<!-- oz-agent-metadata: {{"type":"issue-status","workflow":"{workflow}","issue":{issue_number}'
+
+
+def _strip_workflow_metadata(body: str, workflow_prefix: str) -> str:
+    """Remove any metadata marker in *body* whose prefix matches *workflow_prefix*.
+
+    The progress comment metadata marker is rebuilt mid-run when additional
+    identifiers (e.g. the Oz run id) become available. This helper strips any
+    existing marker for the same workflow+issue so callers can rebuild the
+    body with the current metadata.
+    """
+    if not body or not workflow_prefix:
+        return body
+    start = body.find(workflow_prefix)
+    if start == -1:
+        return body
+    end = body.find("-->", start)
+    if end == -1:
+        return body
+    end += len("-->")
+    return (body[:start] + body[end:]).strip()
 
 
 def split_comment_body(body: str, metadata: str) -> tuple[str, str]:
@@ -294,7 +256,7 @@ def append_comment_sections(existing_body: str, metadata: str, sections: list[st
 
 
 def resolve_oz_assigner_login(
-    github: Repository | Any,
+    github: Repository,
     owner: str,
     repo: str,
     issue_number: int,
@@ -307,29 +269,29 @@ def resolve_oz_assigner_login(
     ):
         return (event_payload.get("sender") or {}).get("login") or ""
 
-    events = _list_issue_events(github, owner, repo, issue_number)
+    events = list(github.get_issue(issue_number).get_events())
     matching_events = [
         event
         for event in events
-        if _field(event, "event") == "assigned"
-        and _login(_field(event, "assignee")) == "oz-agent"
+        if get_field(event, "event") == "assigned"
+        and get_login(get_field(event, "assignee")) == "oz-agent"
     ]
     if not matching_events:
         return (event_payload.get("sender") or {}).get("login") or ""
 
     matching_events.sort(
         key=lambda event: (
-            _field(event, "created_at").astimezone(timezone.utc)
-            if isinstance(_field(event, "created_at"), datetime)
-            else parse_datetime(str(_field(event, "created_at") or "1970-01-01T00:00:00Z"))
+            get_field(event, "created_at").astimezone(timezone.utc)
+            if isinstance(get_field(event, "created_at"), datetime)
+            else parse_datetime(str(get_field(event, "created_at") or "1970-01-01T00:00:00Z"))
         ),
         reverse=True,
     )
-    return _login(_field(matching_events[0], "actor"))
+    return get_login(get_field(matching_events[0], "actor"))
 
 
 def resolve_progress_requester_login(
-    github: Repository | Any,
+    github: Repository,
     owner: str,
     repo: str,
     issue_number: int,
@@ -361,7 +323,7 @@ def resolve_progress_requester_login(
 class WorkflowProgressComment:
     def __init__(
         self,
-        github: Repository | Any,
+        github: Repository,
         owner: str,
         repo: str,
         issue_number: int,
@@ -369,7 +331,7 @@ class WorkflowProgressComment:
         workflow: str,
         event_payload: dict[str, Any] | None = None,
         requester_login: str = "",
-        review_reply_target: tuple[object, int] | None = None,
+        review_reply_target: tuple[PullRequest, int] | None = None,
     ) -> None:
         self.github = github
         self.owner = owner
@@ -379,7 +341,14 @@ class WorkflowProgressComment:
         self.event_payload = event_payload or {}
         self.requester_login = requester_login
         self.run_id = uuid.uuid4().hex
-        self.metadata = comment_metadata(workflow, issue_number, run_id=self.run_id)
+        self.github_run_id = optional_env("GITHUB_RUN_ID")
+        self.oz_run_id: str = ""
+        self.metadata = comment_metadata(
+            workflow,
+            issue_number,
+            run_id=self.run_id,
+            github_run_id=self.github_run_id,
+        )
         self._workflow_prefix = _workflow_metadata_prefix(workflow, issue_number)
         self.comment_id: int | None = None
         self.session_link: str = ""
@@ -407,6 +376,40 @@ class WorkflowProgressComment:
             # the entire workflow run; try again on the next poll.
             return
         self.session_link = normalized
+
+    def record_oz_run_id(self, oz_run_id: str) -> None:
+        """Record the Oz agent run id and refresh the metadata marker.
+
+        When the Oz run id becomes known mid-run (after ``client.agent.run``
+        returns its run id), fold it into the comment metadata so the marker
+        on the GitHub comment captures the Oz run id alongside the GitHub
+        Actions run id.
+        """
+        normalized = (oz_run_id or "").strip()
+        if not normalized or normalized == self.oz_run_id:
+            return
+        try:
+            self.oz_run_id = normalized
+            self.metadata = comment_metadata(
+                self.workflow,
+                self.issue_number,
+                run_id=self.run_id,
+                oz_run_id=self.oz_run_id,
+                github_run_id=self.github_run_id,
+            )
+            existing = self._get_or_find_existing_comment()
+            if existing is None:
+                return
+            existing_body = str(get_field(existing, "body") or "")
+            content = _strip_workflow_metadata(existing_body, self._workflow_prefix)
+            new_body = build_comment_body(content, self.metadata)
+            if new_body == existing_body:
+                return
+            self._update_comment(int(get_field(existing, "id")), new_body)
+        except Exception:
+            # Refreshing the metadata marker is best-effort; a transient
+            # GitHub API failure should not abort the workflow run.
+            return
 
     def complete(self, status_line: str) -> None:
         self._append_sections([status_line])
@@ -447,10 +450,10 @@ class WorkflowProgressComment:
         existing = self._get_or_find_existing_comment()
         if existing is None:
             created = self._create_comment(body)
-            self.comment_id = int(_field(created, "id"))
+            self.comment_id = int(get_field(created, "id"))
             return
-        self._update_comment(int(_field(existing, "id")), body)
-        self.comment_id = int(_field(existing, "id"))
+        self._update_comment(int(get_field(existing, "id")), body)
+        self.comment_id = int(get_field(existing, "id"))
 
     def cleanup(self) -> None:
         """Delete the progress comment if one exists from this or a previous run."""
@@ -466,7 +469,7 @@ class WorkflowProgressComment:
             if existing is None:
                 break
             try:
-                self._delete_comment(int(_field(existing, "id")))
+                self._delete_comment(int(get_field(existing, "id")))
             except Exception:
                 break
         self.comment_id = None
@@ -490,13 +493,13 @@ class WorkflowProgressComment:
             created = self._create_comment(
                 build_comment_body("\n\n".join(normalized_sections), self.metadata),
             )
-            created_id = int(_field(created, "id"))
+            created_id = int(get_field(created, "id"))
             self._dedupe_duplicate_created_comments(keep_id=created_id)
             self.comment_id = created_id
             return
-        updated_body = append_comment_sections(str(_field(existing, "body") or ""), self.metadata, normalized_sections)
-        self._update_comment(int(_field(existing, "id")), updated_body)
-        self.comment_id = int(_field(existing, "id"))
+        updated_body = append_comment_sections(str(get_field(existing, "body") or ""), self.metadata, normalized_sections)
+        self._update_comment(int(get_field(existing, "id")), updated_body)
+        self.comment_id = int(get_field(existing, "id"))
 
     def _dedupe_duplicate_created_comments(self, *, keep_id: int) -> None:
         """Delete any stray comments matching this run's metadata marker.
@@ -513,10 +516,10 @@ class WorkflowProgressComment:
         except Exception:
             return
         for comment in comments:
-            comment_id = int(_field(comment, "id") or 0)
+            comment_id = int(get_field(comment, "id") or 0)
             if comment_id == keep_id or comment_id <= 0:
                 continue
-            body = _field(comment, "body")
+            body = get_field(comment, "body")
             if not isinstance(body, str) or self.metadata not in body:
                 continue
             try:
@@ -533,8 +536,8 @@ class WorkflowProgressComment:
             (
                 comment
                 for comment in comments
-                if isinstance(_field(comment, "body"), str)
-                and self._workflow_prefix in (_field(comment, "body") or "")
+                if isinstance(get_field(comment, "body"), str)
+                and self._workflow_prefix in (get_field(comment, "body") or "")
             ),
             None,
         )
@@ -550,82 +553,57 @@ class WorkflowProgressComment:
             (
                 comment
                 for comment in comments
-                if isinstance(_field(comment, "body"), str) and self.metadata in str(_field(comment, "body") or "")
+                if isinstance(get_field(comment, "body"), str) and self.metadata in str(get_field(comment, "body") or "")
             ),
             None,
         )
         if existing:
-            self.comment_id = int(_field(existing, "id"))
+            self.comment_id = int(get_field(existing, "id"))
         return existing
 
     def _list_comments(self) -> list[Any]:
         """List candidate progress comments for the current scope."""
         if self.review_reply_target is not None:
-            pr_obj, trigger_comment_id = self.review_reply_target
-            pr = cast(PullRequest, pr_obj)
+            pr, trigger_comment_id = self.review_reply_target
             all_comments = list(pr.get_review_comments())
             return _filter_review_comments_in_thread(all_comments, trigger_comment_id)
-        return _list_issue_comments(self.github, self.owner, self.repo, self.issue_number)
+        return list(self.github.get_issue(self.issue_number).get_comments())
 
     def _create_comment(self, body: str) -> Any:
         if self.review_reply_target is not None:
-            pr_obj, trigger_comment_id = self.review_reply_target
-            pr = cast(PullRequest, pr_obj)
+            pr, trigger_comment_id = self.review_reply_target
             return pr.create_review_comment_reply(trigger_comment_id, body)
-        return _create_issue_comment(
-            self.github,
-            self.owner,
-            self.repo,
-            self.issue_number,
-            body,
-        )
+        return self.github.get_issue(self.issue_number).create_comment(body)
 
     def _get_comment(self, comment_id: int) -> Any:
         if self.review_reply_target is not None:
-            pr_obj, _ = self.review_reply_target
-            pr = cast(PullRequest, pr_obj)
+            pr, _ = self.review_reply_target
             return pr.get_review_comment(comment_id)
-        return _get_issue_comment(
-            self.github,
-            self.owner,
-            self.repo,
-            comment_id,
-            issue_number=self.issue_number,
-        )
+        return self.github.get_issue(self.issue_number).get_comment(comment_id)
 
     def _update_comment(self, comment_id: int, body: str) -> Any:
         if self.review_reply_target is not None:
-            pr_obj, _ = self.review_reply_target
-            pr = cast(PullRequest, pr_obj)
+            pr, _ = self.review_reply_target
             comment = pr.get_review_comment(comment_id)
             comment.edit(body)
             return comment
-        return _update_issue_comment(
-            self.github,
-            self.owner,
-            self.repo,
-            self.issue_number,
-            comment_id,
-            body,
-        )
+        comment = self.github.get_issue(self.issue_number).get_comment(comment_id)
+        comment.edit(body)
+        return comment
 
     def _delete_comment(self, comment_id: int) -> None:
         if self.review_reply_target is not None:
-            pr_obj, _ = self.review_reply_target
-            pr = cast(PullRequest, pr_obj)
+            pr, _ = self.review_reply_target
             pr.get_review_comment(comment_id).delete()
             return
-        _delete_issue_comment(
-            self.github,
-            self.owner,
-            self.repo,
-            self.issue_number,
-            comment_id,
-        )
+        self.github.get_issue(self.issue_number).get_comment(comment_id).delete()
 
 
 def record_run_session_link(progress: WorkflowProgressComment, run: object) -> None:
-    """Record the current Oz session link on a progress comment when available."""
+    """Record the current Oz session link and run id on a progress comment when available."""
+    oz_run_id = getattr(run, "run_id", None) or ""
+    if oz_run_id:
+        progress.record_oz_run_id(str(oz_run_id))
     session_link = getattr(run, "session_link", None) or ""
     progress.record_session_link(session_link)
 
@@ -651,7 +629,7 @@ def conventional_commit_prefix(labels: list[Any], *, default: str = "feat") -> s
     known mapping, or *default* when no label matches.
     """
     for label in labels:
-        name = _label_name(label).lower()
+        name = get_label_name(label).lower()
         if name in _LABEL_TO_COMMIT_TYPE:
             return _LABEL_TO_COMMIT_TYPE[name]
     return default
@@ -699,9 +677,9 @@ def resolve_coauthor_line(
     except Exception:
         user = None
 
-    name = (_field(user, "name") if user else None) or login
-    user_id = _field(user, "id") if user else None
-    created_at = _field(user, "created_at") if user else None
+    name = (get_field(user, "name") if user else None) or login
+    user_id = get_field(user, "id") if user else None
+    created_at = get_field(user, "created_at") if user else None
     email = _noreply_email(login, user_id, created_at)
     return f"Co-Authored-By: {name} <{email}>"
 
@@ -752,9 +730,9 @@ def _summarize_commits(commits: list[Any]) -> str:
     max_lines = 15
     for commit in commits:
         if isinstance(commit, dict):
-            msg = (_field(commit, "commit") or {}).get("message") or ""
+            msg = (get_field(commit, "commit") or {}).get("message") or ""
         else:
-            msg = getattr(_field(commit, "commit"), "message", "") or ""
+            msg = getattr(get_field(commit, "commit"), "message", "") or ""
         first_line = msg.split("\n", 1)[0].strip()
         if not first_line:
             continue
@@ -767,7 +745,7 @@ def _summarize_commits(commits: list[Any]) -> str:
 
 
 def build_pr_body(
-    github: Repository | Any,
+    github: Repository,
     owner: str,
     repo: str,
     *,
@@ -786,16 +764,12 @@ def build_pr_body(
         sections.append(f"Related issue: #{issue_number}")
 
     commits: list[Any] = []
-    if hasattr(github, "compare"):
-        try:
-            comparison = github.compare(base, head)
-        except UnknownObjectException:
-            comparison = None
-        if comparison is not None:
-            commits = list(getattr(comparison, "commits", []) or [])
-    else:
-        comparison = github.compare_commits(owner, repo, base, head)
-        commits = (comparison or {}).get("commits") or []
+    try:
+        comparison = github.compare(base, head)
+    except UnknownObjectException:
+        comparison = None
+    if comparison is not None:
+        commits = list(getattr(comparison, "commits", []) or [])
     summary = _summarize_commits(commits)
     if summary:
         sections.append(f"## Changes\n{summary}")
@@ -813,46 +787,33 @@ def build_next_steps_section(steps: list[str]) -> str:
     return "Next steps:\n" + "\n".join(f"- {step}" for step in normalized_steps)
 
 
-def branch_exists(github: Repository | Any, owner: str, repo: str, branch: str) -> bool:
-    if hasattr(github, "get_git_ref"):
-        try:
-            github.get_git_ref(f"heads/{branch}")
-            return True
-        except UnknownObjectException:
-            return False
-    return github.get_ref(owner, repo, f"heads/{branch}") is not None
+def branch_exists(github: Repository, owner: str, repo: str, branch: str) -> bool:
+    try:
+        github.get_git_ref(f"heads/{branch}")
+        return True
+    except UnknownObjectException:
+        return False
 
 
 def branch_updated_since(
-    github: Repository | Any,
+    github: Repository,
     owner: str,
     repo: str,
     branch: str,
     *,
     created_after: datetime,
 ) -> bool:
-    if hasattr(github, "get_branch"):
-        try:
-            branch_ref = github.get_branch(branch)
-        except UnknownObjectException:
-            return False
-        commit = _field(branch_ref, "commit")
-        commit_data = _field(commit, "commit")
-        committer = _field(commit_data, "committer")
-        commit_date = _field(committer, "date")
-        if not isinstance(commit_date, datetime):
-            return False
-        return commit_date.astimezone(timezone.utc) >= created_after
-
-    ref = github.get_ref(owner, repo, f"heads/{branch}")
-    if not ref:
+    try:
+        branch_ref = github.get_branch(branch)
+    except UnknownObjectException:
         return False
-    sha = ref.get("object", {}).get("sha")
-    if not sha:
+    commit = get_field(branch_ref, "commit")
+    commit_data = get_field(commit, "commit")
+    committer = get_field(commit_data, "committer")
+    commit_date = get_field(committer, "date")
+    if not isinstance(commit_date, datetime):
         return False
-    commit = github.get_commit(owner, repo, sha)
-    committed_at = parse_datetime(commit["commit"]["committer"]["date"])
-    return committed_at >= created_after
+    return commit_date.astimezone(timezone.utc) >= created_after
 
 
 def find_matching_spec_prs(
@@ -870,7 +831,7 @@ def find_matching_spec_prs(
         # ``PullRequest.as_issue()`` issues a fresh ``GET /issues/{n}`` call for
         # every PR, whereas labels are already attached to the ``PullRequest``
         # object returned by ``get_pulls``.
-        labels = [_label_name(label) for label in pr.labels]
+        labels = [get_label_name(label) for label in pr.labels]
         files = list(pr.get_files())
         spec_files = [
             str(file.filename)
@@ -880,7 +841,7 @@ def find_matching_spec_prs(
         entry = {
             "number": pr.number,
             "url": pr.html_url,
-            "updated_at": _timestamp_text(pr.updated_at),
+            "updated_at": get_timestamp_text(pr.updated_at),
             "head_ref_name": pr.head.ref,
             "head_repo_full_name": pr.head.repo.full_name if pr.head.repo else "",
             "spec_files": spec_files,
@@ -953,14 +914,14 @@ def resolve_spec_context_for_issue(
 
 
 def _is_org_member(comment: Any) -> bool:
-    return _field(comment, "author_association") in ORG_MEMBER_ASSOCIATIONS
+    return get_field(comment, "author_association") in ORG_MEMBER_ASSOCIATIONS
 
 
 def _format_review_comment(comment: Any) -> str:
-    login = _login(_field(comment, "user")) or "unknown"
-    created = _timestamp_text(_field(comment, "created_at"))
-    body = _field(comment, "body") or ""
-    path = _field(comment, "path") or ""
+    login = get_login(get_field(comment, "user")) or "unknown"
+    created = get_timestamp_text(get_field(comment, "created_at"))
+    body = get_field(comment, "body") or ""
+    path = get_field(comment, "path") or ""
     prefix = f"{path}: " if path else ""
     return f"- {prefix}{login} ({created}): {body}"
 
@@ -985,16 +946,16 @@ def all_review_comments_text(review_comments: list[Any]) -> str:
 
     by_path: dict[str, list[Any]] = {}
     for c in filtered:
-        path = _field(c, "path") or "(no file)"
+        path = get_field(c, "path") or "(no file)"
         by_path.setdefault(path, []).append(c)
 
     sections: list[str] = []
     for path, comments in by_path.items():
         lines = [f"File: {path}"]
         for c in comments:
-            login = _login(_field(c, "user")) or "unknown"
-            created = _timestamp_text(_field(c, "created_at"))
-            body = _field(c, "body") or ""
+            login = get_login(get_field(c, "user")) or "unknown"
+            created = get_timestamp_text(get_field(c, "created_at"))
+            body = get_field(c, "body") or ""
             lines.append(f"  - {login} ({created}): {body}")
         sections.append("\n".join(lines))
     return "\n\n".join(sections)
@@ -1019,7 +980,7 @@ def resolve_issue_number_for_pr(
     *,
     issue_cache: dict[int, Any] | None = None,
 ) -> int | None:
-    head_ref = str(_field(_field(pr, "head"), "ref") or "")
+    head_ref = str(get_field(get_field(pr, "head"), "ref") or "")
     branch_issue_matches = [
         int(match.group(1))
         for match in re.finditer(r"(?:^|/)(?:spec|implement)-issue-(\d+)(?:$|[/-])", head_ref)
@@ -1030,7 +991,7 @@ def resolve_issue_number_for_pr(
         for match in [re.match(r"^specs/GH(\d+)/(?:product|tech)\.md$", filename)]
         if match
     ]
-    explicit_issue_numbers = extract_issue_numbers_from_text(owner, repo, str(_field(pr, "body") or ""))
+    explicit_issue_numbers = extract_issue_numbers_from_text(owner, repo, str(get_field(pr, "body") or ""))
     candidates = list(dict.fromkeys(branch_issue_matches + spec_file_issue_numbers + explicit_issue_numbers))
     for candidate in candidates:
         # Reuse a caller-provided cache so repeated calls across multiple
@@ -1072,6 +1033,7 @@ def resolve_spec_context_for_pr(
             "selected_spec_pr": None,
             "spec_entries": [],
             "changed_files": changed_files,
+            "pr_files": files,
         }
     spec_context = resolve_spec_context_for_issue(
         github,
@@ -1082,4 +1044,5 @@ def resolve_spec_context_for_pr(
     )
     spec_context["issue_number"] = issue_number
     spec_context["changed_files"] = changed_files
+    spec_context["pr_files"] = files
     return spec_context
