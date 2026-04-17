@@ -117,14 +117,16 @@ def _build_diff_line_map(pr: Any) -> dict[str, dict[str, set[int]]]:
     return diff_line_map
 
 
-def _extract_suggestion_blocks(body: str) -> list[list[str]]:
+def _extract_suggestion_blocks(body: str | None) -> list[list[str]]:
     """Extract the line content of each ```suggestion fenced block in the body."""
     blocks: list[list[str]] = []
     for match in SUGGESTION_BLOCK_PATTERN.finditer(body or ""):
         content = match.group("content")
         # Strip the trailing newline introduced by the closing fence, but keep
-        # any internal blank lines intact.
-        lines = content.split("\n")
+        # any internal blank lines intact. Also strip a trailing CR so that
+        # CRLF-encoded bodies compare equal to patch content, which has CR
+        # stripped by str.splitlines().
+        lines = [line.rstrip("\r") for line in content.split("\n")]
         blocks.append(lines)
     return blocks
 

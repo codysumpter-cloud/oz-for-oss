@@ -493,6 +493,11 @@ class ExtractSuggestionBlocksTest(unittest.TestCase):
         self.assertEqual(_extract_suggestion_blocks(""), [])
         self.assertEqual(_extract_suggestion_blocks(None), [])
 
+    def test_strips_trailing_cr_from_crlf_bodies(self) -> None:
+        body = "Prefix.\r\n\r\n```suggestion\r\nfoo()\r\nbar()\r\n```\r\n"
+        blocks = _extract_suggestion_blocks(body)
+        self.assertEqual(blocks, [["foo()", "bar()"]])
+
 
 class ValidateSuggestionBlocksTest(unittest.TestCase):
     def test_flags_duplicate_prefix(self) -> None:
