@@ -100,11 +100,11 @@ def _line_content_for_patch(patch: str | None) -> dict[str, dict[int, str]]:
 
 
 def _build_diff_maps(
-    pr: Any,
+    files: list[Any],
 ) -> tuple[dict[str, dict[str, set[int]]], dict[str, dict[str, dict[int, str]]]]:
     diff_line_map: dict[str, dict[str, set[int]]] = {}
     diff_content_map: dict[str, dict[str, dict[int, str]]] = {}
-    for file in pr.get_files():
+    for file in files:
         path = _normalize_review_path(file.filename)
         patch = getattr(file, "patch", None)
         diff_line_map[path] = _commentable_lines_for_patch(patch)
@@ -112,8 +112,8 @@ def _build_diff_maps(
     return diff_line_map, diff_content_map
 
 
-def _build_diff_line_map(pr: Any) -> dict[str, dict[str, set[int]]]:
-    diff_line_map, _ = _build_diff_maps(pr)
+def _build_diff_line_map(files: list[Any]) -> dict[str, dict[str, set[int]]]:
+    diff_line_map, _ = _build_diff_maps(files)
     return diff_line_map
 
 
@@ -388,7 +388,9 @@ def main() -> None:
                 on_poll=lambda current_run: record_run_session_link(progress, current_run),
             )
             review = poll_for_artifact(run.run_id, filename="review.json")
-            diff_line_map, diff_content_map = _build_diff_maps(pr)
+            diff_line_map, diff_content_map = _build_diff_maps(
+                spec_context.get("pr_files", [])
+            )
             summary, comments = _normalize_review_payload(
                 review, diff_line_map, diff_content_map
             )
