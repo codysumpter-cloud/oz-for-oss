@@ -409,7 +409,7 @@ class ExtractFollowUpQuestionsTest(unittest.TestCase):
 class ApplyTriageResultTest(unittest.TestCase):
     def test_replaces_primary_and_repro_labels(self) -> None:
         github = FakeTriageGitHubClient()
-        issue = {
+        issue = github.issue({
             "number": 42,
             "labels": [
                 {"name": "bug"},
@@ -418,7 +418,7 @@ class ApplyTriageResultTest(unittest.TestCase):
                 {"name": "area:workflow"},
             ],
             "body": "Original body",
-        }
+        })
         apply_triage_result(
             github,
             "acme",
@@ -453,11 +453,11 @@ class ApplyTriageResultTest(unittest.TestCase):
 
     def test_skips_triaged_label_when_needs_info_present(self) -> None:
         github = FakeTriageGitHubClient()
-        issue = {
+        issue = github.issue({
             "number": 55,
             "labels": [],
             "body": "Original body",
-        }
+        })
         apply_triage_result(
             github,
             "acme",
@@ -483,11 +483,11 @@ class ApplyTriageResultTest(unittest.TestCase):
 
     def test_adds_needs_info_when_follow_up_questions_present(self) -> None:
         github = FakeTriageGitHubClient()
-        issue = {
+        issue = github.issue({
             "number": 57,
             "labels": [],
             "body": "Original body",
-        }
+        })
         apply_triage_result(
             github,
             "acme",
@@ -516,11 +516,11 @@ class ApplyTriageResultTest(unittest.TestCase):
 
     def test_does_not_post_separate_summary_comment(self) -> None:
         github = FakeTriageGitHubClient()
-        issue = {
+        issue = github.issue({
             "number": 58,
             "labels": [],
             "body": "Original body",
-        }
+        })
         apply_triage_result(
             github,
             "acme",
@@ -548,11 +548,11 @@ class ApplyTriageResultTest(unittest.TestCase):
 
     def test_removes_triaged_on_retriage_with_needs_info(self) -> None:
         github = FakeTriageGitHubClient()
-        issue = {
+        issue = github.issue({
             "number": 56,
             "labels": [{"name": "triaged"}, {"name": "bug"}],
             "body": "Original body",
-        }
+        })
         apply_triage_result(
             github,
             "acme",
@@ -583,7 +583,7 @@ class ApplyTriageResultTest(unittest.TestCase):
 class SyncFollowUpCommentTest(unittest.TestCase):
     def test_creates_managed_follow_up_comment(self) -> None:
         github = FakeTriageGitHubClient()
-        issue = {"number": 42, "user": {"login": "alice"}}
+        issue = github.issue({"number": 42, "user": {"login": "alice"}})
         sync_follow_up_comment(
             github,
             "acme",
@@ -599,7 +599,7 @@ class SyncFollowUpCommentTest(unittest.TestCase):
 
     def test_deletes_existing_comment_when_questions_empty(self) -> None:
         github = FakeTriageGitHubClient()
-        issue = {"number": 42, "user": {"login": "alice"}}
+        issue = github.issue({"number": 42, "user": {"login": "alice"}})
         sync_follow_up_comment(
             github,
             "acme",
@@ -615,7 +615,7 @@ class SyncFollowUpCommentTest(unittest.TestCase):
 
     def test_noop_when_no_existing_comment_and_questions_empty(self) -> None:
         github = FakeTriageGitHubClient()
-        issue = {"number": 42, "user": {"login": "alice"}}
+        issue = github.issue({"number": 42, "user": {"login": "alice"}})
         sync_follow_up_comment(github, "acme", "widgets", issue, questions=[])
         self.assertEqual(len(github.comments), 0)
         self.assertEqual(github.deleted_comment_ids, [])
@@ -623,7 +623,7 @@ class SyncFollowUpCommentTest(unittest.TestCase):
 class SyncTriageSummaryCommentTest(unittest.TestCase):
     def test_creates_managed_summary_comment(self) -> None:
         github = FakeTriageGitHubClient()
-        issue = {"number": 42}
+        issue = github.issue({"number": 42})
         sync_triage_summary_comment(
             github,
             "acme",
@@ -639,7 +639,7 @@ class SyncTriageSummaryCommentTest(unittest.TestCase):
 
     def test_updates_existing_managed_summary_comment(self) -> None:
         github = FakeTriageGitHubClient()
-        issue = {"number": 42}
+        issue = github.issue({"number": 42})
         sync_triage_summary_comment(
             github,
             "acme",
@@ -660,7 +660,7 @@ class SyncTriageSummaryCommentTest(unittest.TestCase):
 
     def test_deletes_existing_summary_comment_when_issue_body_empty(self) -> None:
         github = FakeTriageGitHubClient()
-        issue = {"number": 42}
+        issue = github.issue({"number": 42})
         sync_triage_summary_comment(
             github,
             "acme",
@@ -757,7 +757,7 @@ class BuildDuplicateCommentTest(unittest.TestCase):
 class SyncDuplicateCommentTest(unittest.TestCase):
     def test_creates_managed_duplicate_comment(self) -> None:
         github = FakeTriageGitHubClient()
-        issue = {"number": 42, "user": {"login": "alice"}}
+        issue = github.issue({"number": 42, "user": {"login": "alice"}})
         sync_duplicate_comment(
             github,
             "acme",
@@ -774,7 +774,7 @@ class SyncDuplicateCommentTest(unittest.TestCase):
 
     def test_preserves_existing_comment_when_duplicates_empty(self) -> None:
         github = FakeTriageGitHubClient()
-        issue = {"number": 42, "user": {"login": "alice"}}
+        issue = github.issue({"number": 42, "user": {"login": "alice"}})
         sync_duplicate_comment(
             github,
             "acme",
@@ -868,23 +868,23 @@ class CleanupLegacyTriageCommentsTest(unittest.TestCase):
             duplicate_comment_metadata(issue_number),
         )
         summary_body = build_triage_summary_comment(
-            {"number": issue_number},
+            github.issue({"number": issue_number}),
             "## Triage summary",
         )
-        github.create_comment("acme", "widgets", issue_number, follow_up_body)
-        github.create_comment("acme", "widgets", issue_number, dup_body)
-        github.create_comment("acme", "widgets", issue_number, summary_body)
-        github.create_comment("acme", "widgets", issue_number, "unrelated comment")
+        github._append_comment(follow_up_body)
+        github._append_comment(dup_body)
+        github._append_comment(summary_body)
+        github._append_comment("unrelated comment")
         self.assertEqual(len(github.comments), 4)
-        issue = {"number": issue_number}
+        issue = github.issue({"number": issue_number})
         _cleanup_legacy_triage_comments(github, "acme", "widgets", issue)
         self.assertEqual(len(github.comments), 1)
         self.assertIn("unrelated", str(github.comments[0]["body"]))
 
     def test_noop_when_no_legacy_comments(self) -> None:
         github = FakeTriageGitHubClient()
-        github.create_comment("acme", "widgets", 42, "normal comment")
-        issue = {"number": 42}
+        github._append_comment("normal comment")
+        issue = github.issue({"number": 42})
         _cleanup_legacy_triage_comments(github, "acme", "widgets", issue)
         self.assertEqual(len(github.comments), 1)
 
@@ -1190,7 +1190,89 @@ class FakeCommandSignaturesGitHubClient:
         return self.repo
 
 
+class FakeTriageComment:
+    """A minimal stand-in for ``github.IssueComment.IssueComment``."""
+
+    def __init__(self, repo: "FakeTriageGitHubClient", data: dict[str, object]) -> None:
+        self._repo = repo
+        self._data = data
+
+    @property
+    def id(self) -> int:
+        return int(self._data["id"])  # type: ignore[arg-type]
+
+    @property
+    def body(self) -> str:
+        return str(self._data.get("body") or "")
+
+    def edit(self, body: str) -> None:
+        self._data["body"] = body
+
+    def delete(self) -> None:
+        self._repo.deleted_comment_ids.append(self.id)
+        self._repo.comments = [
+            c for c in self._repo.comments if int(c["id"]) != self.id  # type: ignore[arg-type]
+        ]
+
+
+class FakeTriageIssue:
+    """A minimal stand-in for ``github.Issue.Issue``."""
+
+    def __init__(self, repo: "FakeTriageGitHubClient", data: dict[str, object]) -> None:
+        self._repo = repo
+        self._data = data
+
+    @property
+    def number(self) -> int:
+        return int(self._data.get("number") or 0)  # type: ignore[arg-type]
+
+    @property
+    def labels(self) -> list[object]:
+        return list(self._data.get("labels") or [])  # type: ignore[arg-type]
+
+    @property
+    def body(self) -> str:
+        return str(self._data.get("body") or "")
+
+    @property
+    def user(self) -> object:
+        return self._data.get("user")
+
+    @property
+    def pull_request(self) -> object:
+        return self._data.get("pull_request")
+
+    @property
+    def assignees(self) -> list[object]:
+        return list(self._data.get("assignees") or [])  # type: ignore[arg-type]
+
+    def add_to_labels(self, *label_names: str) -> None:
+        self._repo.added_labels.extend(label_names)
+
+    def remove_from_labels(self, label_name: str) -> None:
+        self._repo.removed_labels.append(label_name)
+
+    def get_comments(self) -> list[FakeTriageComment]:
+        return [FakeTriageComment(self._repo, c) for c in self._repo.comments]
+
+    def create_comment(self, body: str) -> FakeTriageComment:
+        data: dict[str, object] = {"id": len(self._repo.comments) + 1, "body": body}
+        self._repo.comments.append(data)
+        return FakeTriageComment(self._repo, data)
+
+    def get_comment(self, comment_id: int) -> FakeTriageComment:
+        for c in self._repo.comments:
+            if int(c["id"]) == comment_id:  # type: ignore[arg-type]
+                return FakeTriageComment(self._repo, c)
+        raise AssertionError(f"Missing comment {comment_id}")
+
+    def get_events(self) -> list[object]:
+        return []
+
+
 class FakeTriageGitHubClient:
+    """A minimal stand-in for ``github.Repository.Repository``."""
+
     def __init__(self) -> None:
         self.comments: list[dict[str, object]] = []
         self.added_labels: list[str] = []
@@ -1198,41 +1280,17 @@ class FakeTriageGitHubClient:
         self.updated_issue_body = ""
         self.deleted_comment_ids: list[int] = []
 
-    def add_labels(self, owner: str, repo: str, issue_number: int, labels: list[str]) -> list[dict[str, object]]:
-        self.added_labels = list(labels)
-        return [{"name": label} for label in labels]
+    def issue(self, data: dict[str, object]) -> FakeTriageIssue:
+        """Wrap *data* as a PyGitHub-like Issue bound to this fake repository."""
+        return FakeTriageIssue(self, data)
 
-    def remove_label(self, owner: str, repo: str, issue_number: int, label_name: str) -> None:
-        self.removed_labels.append(label_name)
+    def get_issue(self, issue_number: int) -> FakeTriageIssue:
+        return FakeTriageIssue(self, {"number": issue_number})
 
-    def update_issue(self, owner: str, repo: str, issue_number: int, **fields: object) -> dict[str, object]:
-        self.updated_issue_body = str(fields.get("body") or "")
-        return {"number": issue_number, "body": self.updated_issue_body}
-
-    def list_issue_comments(self, owner: str, repo: str, issue_number: int) -> list[dict[str, object]]:
-        return [dict(comment) for comment in self.comments]
-
-    def create_comment(self, owner: str, repo: str, issue_number: int, body: str) -> dict[str, object]:
-        comment = {"id": len(self.comments) + 1, "body": body}
+    def _append_comment(self, body: str) -> dict[str, object]:
+        comment: dict[str, object] = {"id": len(self.comments) + 1, "body": body}
         self.comments.append(comment)
-        return dict(comment)
-
-    def get_comment(self, owner: str, repo: str, comment_id: int) -> dict[str, object]:
-        for comment in self.comments:
-            if int(comment["id"]) == comment_id:
-                return dict(comment)
-        raise AssertionError(f"Missing comment {comment_id}")
-
-    def update_comment(self, owner: str, repo: str, comment_id: int, body: str) -> dict[str, object]:
-        for comment in self.comments:
-            if int(comment["id"]) == comment_id:
-                comment["body"] = body
-                return dict(comment)
-        raise AssertionError(f"Missing comment {comment_id}")
-
-    def delete_comment(self, owner: str, repo: str, comment_id: int) -> None:
-        self.deleted_comment_ids.append(comment_id)
-        self.comments = [comment for comment in self.comments if int(comment["id"]) != comment_id]
+        return comment
 
 
 class FakeRecentIssuesGitHubClient:

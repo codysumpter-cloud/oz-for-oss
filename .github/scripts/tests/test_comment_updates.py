@@ -495,36 +495,63 @@ class ReportErrorTest(unittest.TestCase):
                 os.environ.pop(key, None)
 
 
+class FakeIssueComment:
+    """A minimal stand-in for ``github.IssueComment.IssueComment``."""
+
+    def __init__(self, repo: "FakeGitHubClient", data: dict[str, object]) -> None:
+        self._repo = repo
+        self._data = data
+
+    @property
+    def id(self) -> int:
+        return int(self._data["id"])  # type: ignore[arg-type]
+
+    @property
+    def body(self) -> str:
+        return str(self._data.get("body") or "")
+
+    def edit(self, body: str) -> None:
+        self._data["body"] = body
+
+    def delete(self) -> None:
+        self._repo.comments = [
+            c for c in self._repo.comments if int(c["id"]) != self.id  # type: ignore[arg-type]
+        ]
+
+
+class FakeIssue:
+    """A minimal stand-in for ``github.Issue.Issue``."""
+
+    def __init__(self, repo: "FakeGitHubClient", issue_number: int) -> None:
+        self._repo = repo
+        self._issue_number = issue_number
+
+    def get_comments(self) -> list[FakeIssueComment]:
+        return [FakeIssueComment(self._repo, c) for c in self._repo.comments]
+
+    def create_comment(self, body: str) -> FakeIssueComment:
+        data: dict[str, object] = {"id": len(self._repo.comments) + 1, "body": body}
+        self._repo.comments.append(data)
+        return FakeIssueComment(self._repo, data)
+
+    def get_comment(self, comment_id: int) -> FakeIssueComment:
+        for c in self._repo.comments:
+            if int(c["id"]) == comment_id:  # type: ignore[arg-type]
+                return FakeIssueComment(self._repo, c)
+        raise AssertionError(f"Missing comment {comment_id}")
+
+    def get_events(self) -> list[object]:
+        return []
+
+
 class FakeGitHubClient:
+    """A minimal stand-in for ``github.Repository.Repository``."""
+
     def __init__(self) -> None:
         self.comments: list[dict[str, object]] = []
 
-    def list_issue_comments(self, owner: str, repo: str, issue_number: int) -> list[dict[str, object]]:
-        return [dict(comment) for comment in self.comments]
-
-    def create_comment(self, owner: str, repo: str, issue_number: int, body: str) -> dict[str, object]:
-        comment = {"id": len(self.comments) + 1, "body": body}
-        self.comments.append(comment)
-        return dict(comment)
-
-    def get_comment(self, owner: str, repo: str, comment_id: int) -> dict[str, object]:
-        for comment in self.comments:
-            if int(comment["id"]) == comment_id:
-                return dict(comment)
-        raise AssertionError(f"Missing comment {comment_id}")
-
-    def update_comment(self, owner: str, repo: str, comment_id: int, body: str) -> dict[str, object]:
-        for comment in self.comments:
-            if int(comment["id"]) == comment_id:
-                comment["body"] = body
-                return dict(comment)
-        raise AssertionError(f"Missing comment {comment_id}")
-
-    def delete_comment(self, owner: str, repo: str, comment_id: int) -> None:
-        self.comments = [c for c in self.comments if int(c["id"]) != comment_id]
-
-    def list_issue_events(self, owner: str, repo: str, issue_number: int) -> list[dict[str, object]]:
-        return []
+    def get_issue(self, issue_number: int) -> FakeIssue:
+        return FakeIssue(self, issue_number)
 
 
 class FakeReviewComment:

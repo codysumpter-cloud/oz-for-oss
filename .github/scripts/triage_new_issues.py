@@ -436,15 +436,9 @@ def apply_triage_result(
         warning(f"Skipping unmanaged label '{label_name}' for issue #{issue_number}")
     for label_name in current_labels:
         if should_replace_triage_label(label_name) and label_name not in managed_labels:
-            if hasattr(issue, "remove_from_labels"):
-                issue.remove_from_labels(label_name)
-            else:
-                github.remove_label(owner, repo, issue_number, label_name)
+            issue.remove_from_labels(label_name)
     if managed_labels:
-        if hasattr(issue, "add_to_labels"):
-            issue.add_to_labels(*managed_labels)
-        else:
-            github.add_labels(owner, repo, issue_number, managed_labels)
+        issue.add_to_labels(*managed_labels)
 
 
 def ensure_label_exists(
@@ -544,19 +538,11 @@ def _cleanup_legacy_triage_comments(
     follow_up_marker = follow_up_comment_metadata(issue_number)
     duplicate_marker = duplicate_comment_metadata(issue_number)
     summary_marker = triage_summary_comment_metadata(issue_number)
-    comments = (
-        list(issue.get_comments())
-        if hasattr(issue, "get_comments")
-        else github.list_issue_comments(owner, repo, issue_number)
-    )
-    for comment in comments:
+    for comment in list(issue.get_comments()):
         body = str(get_field(comment, "body") or "")
         if follow_up_marker in body or duplicate_marker in body or summary_marker in body:
             try:
-                if hasattr(comment, "delete"):
-                    comment.delete()
-                else:
-                    github.delete_comment(owner, repo, int(get_field(comment, "id")))
+                comment.delete()
             except Exception:
                 pass
 
@@ -654,24 +640,16 @@ def sync_triage_summary_comment(
     issue_number = int(get_field(issue, "number"))
     metadata = triage_summary_comment_metadata(issue_number)
     if not issue_body.strip():
-        comments = (
-            list(issue.get_comments())
-            if hasattr(issue, "get_comments")
-            else github.list_issue_comments(owner, repo, issue_number)
-        )
         existing = next(
             (
                 comment
-                for comment in comments
+                for comment in issue.get_comments()
                 if metadata in str(get_field(comment, "body") or "")
             ),
             None,
         )
         if existing is not None:
-            if hasattr(existing, "delete"):
-                existing.delete()
-            else:
-                github.delete_comment(owner, repo, int(get_field(existing, "id")))
+            existing.delete()
         return
     _sync_managed_issue_comment(
         github,
@@ -719,24 +697,16 @@ def sync_follow_up_comment(
     if not questions:
         issue_number = int(get_field(issue, "number"))
         metadata = follow_up_comment_metadata(issue_number)
-        comments = (
-            list(issue.get_comments())
-            if hasattr(issue, "get_comments")
-            else github.list_issue_comments(owner, repo, issue_number)
-        )
         existing = next(
             (
                 comment
-                for comment in comments
+                for comment in issue.get_comments()
                 if metadata in str(get_field(comment, "body") or "")
             ),
             None,
         )
         if existing is not None:
-            if hasattr(existing, "delete"):
-                existing.delete()
-            else:
-                github.delete_comment(owner, repo, int(get_field(existing, "id")))
+            existing.delete()
         return
     _sync_managed_issue_comment(
         github,
@@ -893,31 +863,19 @@ def _sync_managed_issue_comment(
     metadata: str,
     comment_body: str,
 ) -> None:
-    issue_number = int(get_field(issue, "number"))
-    comments = (
-        list(issue.get_comments())
-        if hasattr(issue, "get_comments")
-        else github.list_issue_comments(owner, repo, issue_number)
-    )
     existing = next(
         (
             comment
-            for comment in comments
+            for comment in issue.get_comments()
             if metadata in str(get_field(comment, "body") or "")
         ),
         None,
     )
     if existing is None:
-        if hasattr(issue, "create_comment"):
-            issue.create_comment(comment_body)
-        else:
-            github.create_comment(owner, repo, issue_number, comment_body)
+        issue.create_comment(comment_body)
         return
     if str(get_field(existing, "body") or "") != comment_body:
-        if hasattr(existing, "edit"):
-            existing.edit(comment_body)
-        else:
-            github.update_comment(owner, repo, int(get_field(existing, "id")), comment_body)
+        existing.edit(comment_body)
 
 
 if __name__ == "__main__":
