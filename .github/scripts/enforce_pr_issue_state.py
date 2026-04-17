@@ -61,24 +61,28 @@ def main() -> None:
                 explicit_issue = issue
                 break
 
-        # Post a state-aware start line so the progress comment framing
-        # is consistent with the rest of the Oz workflows even on the
-        # enforce path. When we exit via ``cleanup()`` below (the allow
-        # case) the comment is deleted, so this start line is only
-        # user-visible on the close path.
-        progress.start(
-            format_enforce_start_line(
-                explicit_issue=explicit_issue is not None,
-                change_kind=change_kind,
-            )
-        )
-
+        # Only post the state-aware start line on paths that will
+        # actually reach ``progress.complete(...)``. Posting a start
+        # line and then immediately deleting it via ``cleanup()`` on
+        # the allow paths would still notify subscribers about a
+        # comment they never see, so run the deterministic allow
+        # short-circuits first and start the progress comment only
+        # right before a path that posts a final user-visible update.
+        # ``cleanup()`` is still called on the allow paths so that any
+        # orphan progress comments left behind by a previous run on
+        # the same PR are removed.
         if explicit_issue:
             labels = [label.name for label in explicit_issue.labels]
             if required_label in labels or (not has_code_changes and has_plan_approved):
                 progress.cleanup()
                 set_output("allow_review", "true")
                 return
+            progress.start(
+                format_enforce_start_line(
+                    explicit_issue=True,
+                    change_kind=change_kind,
+                )
+            )
             close_comment = (
                 f"The PR that you've opened seems to contain {change_kind} changes and is associated with issue "
                 f"#{explicit_issue.number}, which is not marked as `{required_label}`. This PR will be "
@@ -94,6 +98,13 @@ def main() -> None:
             progress.cleanup()
             set_output("allow_review", "true")
             return
+
+        progress.start(
+            format_enforce_start_line(
+                explicit_issue=False,
+                change_kind=change_kind,
+            )
+        )
 
         ready_issues = [
             issue
