@@ -338,12 +338,19 @@ class BuildPrBodyTest(unittest.TestCase):
         self.assertIn("Closes #7", body)
 
 
+class _FakeIssueWithEvents:
+    def get_events(self) -> list[object]:
+        return []
+
+
 class FakeGitHubClient:
+    """A minimal stand-in for ``github.Repository.Repository`` / ``github.Github``."""
+
     def __init__(self, *, users: dict[str, dict[str, object]] | None = None) -> None:
         self._users = users or {}
 
-    def list_issue_events(self, owner: str, repo: str, issue_number: int) -> list[dict[str, object]]:
-        return []
+    def get_issue(self, issue_number: int) -> _FakeIssueWithEvents:
+        return _FakeIssueWithEvents()
 
     def get_user(self, username: str) -> dict[str, object] | None:
         return self._users.get(username)
@@ -470,12 +477,19 @@ class IsSpecOnlyPrTest(unittest.TestCase):
         self.assertFalse(is_spec_only_pr([]))
 
 
+class _FakeComparison:
+    def __init__(self, commits: list[dict[str, object]]) -> None:
+        self.commits = commits
+
+
 class FakeGitHubClientWithCompare:
+    """A minimal stand-in for ``github.Repository.Repository.compare``."""
+
     def __init__(self, commits: list[dict[str, object]]) -> None:
         self._commits = commits
 
-    def compare_commits(self, owner: str, repo: str, base: str, head: str) -> dict[str, object]:
-        return {"commits": self._commits}
+    def compare(self, base: str, head: str) -> _FakeComparison:
+        return _FakeComparison(self._commits)
 
 
 if __name__ == "__main__":

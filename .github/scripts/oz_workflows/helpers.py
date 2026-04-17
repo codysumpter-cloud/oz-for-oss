@@ -4,7 +4,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from github import Github
 from github.GithubException import UnknownObjectException
@@ -82,81 +82,6 @@ def format_issue_comments_for_prompt(
             f"- @{user} [{association}] ({_timestamp_text(_field(comment, 'created_at'))}): {body}"
         )
     return "\n".join(formatted)
-
-
-def _list_issue_comments(
-    github: Repository | Any,
-    owner: str,
-    repo: str,
-    issue_number: int,
-) -> list[Any]:
-    if hasattr(github, "get_issue"):
-        return list(github.get_issue(issue_number).get_comments())
-    return list(github.list_issue_comments(owner, repo, issue_number))
-
-
-def _list_issue_events(
-    github: Repository | Any,
-    owner: str,
-    repo: str,
-    issue_number: int,
-) -> list[Any]:
-    if hasattr(github, "get_issue"):
-        return list(github.get_issue(issue_number).get_events())
-    return list(github.list_issue_events(owner, repo, issue_number))
-
-
-def _get_issue_comment(
-    github: Repository | Any,
-    owner: str,
-    repo: str,
-    comment_id: int,
-    *,
-    issue_number: int,
-) -> Any:
-    if hasattr(github, "get_issue"):
-        return github.get_issue(issue_number).get_comment(comment_id)
-    return github.get_comment(owner, repo, comment_id)
-
-
-def _create_issue_comment(
-    github: Repository | Any,
-    owner: str,
-    repo: str,
-    issue_number: int,
-    body: str,
-) -> Any:
-    if hasattr(github, "get_issue"):
-        return github.get_issue(issue_number).create_comment(body)
-    return github.create_comment(owner, repo, issue_number, body)
-
-
-def _update_issue_comment(
-    github: Repository | Any,
-    owner: str,
-    repo: str,
-    issue_number: int,
-    comment_id: int,
-    body: str,
-) -> Any:
-    if hasattr(github, "get_issue"):
-        comment = github.get_issue(issue_number).get_comment(comment_id)
-        comment.edit(body)
-        return comment
-    return github.update_comment(owner, repo, comment_id, body)
-
-
-def _delete_issue_comment(
-    github: Repository | Any,
-    owner: str,
-    repo: str,
-    issue_number: int,
-    comment_id: int,
-) -> None:
-    if hasattr(github, "get_issue"):
-        github.get_issue(issue_number).get_comment(comment_id).delete()
-        return
-    github.delete_comment(owner, repo, comment_id)
 
 
 def _filter_review_comments_in_thread(
@@ -294,7 +219,7 @@ def append_comment_sections(existing_body: str, metadata: str, sections: list[st
 
 
 def resolve_oz_assigner_login(
-    github: Repository | Any,
+    github: Repository,
     owner: str,
     repo: str,
     issue_number: int,
@@ -307,7 +232,7 @@ def resolve_oz_assigner_login(
     ):
         return (event_payload.get("sender") or {}).get("login") or ""
 
-    events = _list_issue_events(github, owner, repo, issue_number)
+    events = list(github.get_issue(issue_number).get_events())
     matching_events = [
         event
         for event in events
@@ -329,7 +254,7 @@ def resolve_oz_assigner_login(
 
 
 def resolve_progress_requester_login(
-    github: Repository | Any,
+    github: Repository,
     owner: str,
     repo: str,
     issue_number: int,
@@ -361,7 +286,7 @@ def resolve_progress_requester_login(
 class WorkflowProgressComment:
     def __init__(
         self,
-        github: Repository | Any,
+        github: Repository,
         owner: str,
         repo: str,
         issue_number: int,
@@ -369,7 +294,7 @@ class WorkflowProgressComment:
         workflow: str,
         event_payload: dict[str, Any] | None = None,
         requester_login: str = "",
-        review_reply_target: tuple[object, int] | None = None,
+        review_reply_target: tuple[PullRequest, int] | None = None,
     ) -> None:
         self.github = github
         self.owner = owner
@@ -561,67 +486,39 @@ class WorkflowProgressComment:
     def _list_comments(self) -> list[Any]:
         """List candidate progress comments for the current scope."""
         if self.review_reply_target is not None:
-            pr_obj, trigger_comment_id = self.review_reply_target
-            pr = cast(PullRequest, pr_obj)
+            pr, trigger_comment_id = self.review_reply_target
             all_comments = list(pr.get_review_comments())
             return _filter_review_comments_in_thread(all_comments, trigger_comment_id)
-        return _list_issue_comments(self.github, self.owner, self.repo, self.issue_number)
+        return list(self.github.get_issue(self.issue_number).get_comments())
 
     def _create_comment(self, body: str) -> Any:
         if self.review_reply_target is not None:
-            pr_obj, trigger_comment_id = self.review_reply_target
-            pr = cast(PullRequest, pr_obj)
+            pr, trigger_comment_id = self.review_reply_target
             return pr.create_review_comment_reply(trigger_comment_id, body)
-        return _create_issue_comment(
-            self.github,
-            self.owner,
-            self.repo,
-            self.issue_number,
-            body,
-        )
+        return self.github.get_issue(self.issue_number).create_comment(body)
 
     def _get_comment(self, comment_id: int) -> Any:
         if self.review_reply_target is not None:
-            pr_obj, _ = self.review_reply_target
-            pr = cast(PullRequest, pr_obj)
+            pr, _ = self.review_reply_target
             return pr.get_review_comment(comment_id)
-        return _get_issue_comment(
-            self.github,
-            self.owner,
-            self.repo,
-            comment_id,
-            issue_number=self.issue_number,
-        )
+        return self.github.get_issue(self.issue_number).get_comment(comment_id)
 
     def _update_comment(self, comment_id: int, body: str) -> Any:
         if self.review_reply_target is not None:
-            pr_obj, _ = self.review_reply_target
-            pr = cast(PullRequest, pr_obj)
+            pr, _ = self.review_reply_target
             comment = pr.get_review_comment(comment_id)
             comment.edit(body)
             return comment
-        return _update_issue_comment(
-            self.github,
-            self.owner,
-            self.repo,
-            self.issue_number,
-            comment_id,
-            body,
-        )
+        comment = self.github.get_issue(self.issue_number).get_comment(comment_id)
+        comment.edit(body)
+        return comment
 
     def _delete_comment(self, comment_id: int) -> None:
         if self.review_reply_target is not None:
-            pr_obj, _ = self.review_reply_target
-            pr = cast(PullRequest, pr_obj)
+            pr, _ = self.review_reply_target
             pr.get_review_comment(comment_id).delete()
             return
-        _delete_issue_comment(
-            self.github,
-            self.owner,
-            self.repo,
-            self.issue_number,
-            comment_id,
-        )
+        self.github.get_issue(self.issue_number).get_comment(comment_id).delete()
 
 
 def record_run_session_link(progress: WorkflowProgressComment, run: object) -> None:
@@ -767,7 +664,7 @@ def _summarize_commits(commits: list[Any]) -> str:
 
 
 def build_pr_body(
-    github: Repository | Any,
+    github: Repository,
     owner: str,
     repo: str,
     *,
@@ -786,16 +683,12 @@ def build_pr_body(
         sections.append(f"Related issue: #{issue_number}")
 
     commits: list[Any] = []
-    if hasattr(github, "compare"):
-        try:
-            comparison = github.compare(base, head)
-        except UnknownObjectException:
-            comparison = None
-        if comparison is not None:
-            commits = list(getattr(comparison, "commits", []) or [])
-    else:
-        comparison = github.compare_commits(owner, repo, base, head)
-        commits = (comparison or {}).get("commits") or []
+    try:
+        comparison = github.compare(base, head)
+    except UnknownObjectException:
+        comparison = None
+    if comparison is not None:
+        commits = list(getattr(comparison, "commits", []) or [])
     summary = _summarize_commits(commits)
     if summary:
         sections.append(f"## Changes\n{summary}")
@@ -813,46 +706,33 @@ def build_next_steps_section(steps: list[str]) -> str:
     return "Next steps:\n" + "\n".join(f"- {step}" for step in normalized_steps)
 
 
-def branch_exists(github: Repository | Any, owner: str, repo: str, branch: str) -> bool:
-    if hasattr(github, "get_git_ref"):
-        try:
-            github.get_git_ref(f"heads/{branch}")
-            return True
-        except UnknownObjectException:
-            return False
-    return github.get_ref(owner, repo, f"heads/{branch}") is not None
+def branch_exists(github: Repository, owner: str, repo: str, branch: str) -> bool:
+    try:
+        github.get_git_ref(f"heads/{branch}")
+        return True
+    except UnknownObjectException:
+        return False
 
 
 def branch_updated_since(
-    github: Repository | Any,
+    github: Repository,
     owner: str,
     repo: str,
     branch: str,
     *,
     created_after: datetime,
 ) -> bool:
-    if hasattr(github, "get_branch"):
-        try:
-            branch_ref = github.get_branch(branch)
-        except UnknownObjectException:
-            return False
-        commit = _field(branch_ref, "commit")
-        commit_data = _field(commit, "commit")
-        committer = _field(commit_data, "committer")
-        commit_date = _field(committer, "date")
-        if not isinstance(commit_date, datetime):
-            return False
-        return commit_date.astimezone(timezone.utc) >= created_after
-
-    ref = github.get_ref(owner, repo, f"heads/{branch}")
-    if not ref:
+    try:
+        branch_ref = github.get_branch(branch)
+    except UnknownObjectException:
         return False
-    sha = ref.get("object", {}).get("sha")
-    if not sha:
+    commit = _field(branch_ref, "commit")
+    commit_data = _field(commit, "commit")
+    committer = _field(commit_data, "committer")
+    commit_date = _field(committer, "date")
+    if not isinstance(commit_date, datetime):
         return False
-    commit = github.get_commit(owner, repo, sha)
-    committed_at = parse_datetime(commit["commit"]["committer"]["date"])
-    return committed_at >= created_after
+    return commit_date.astimezone(timezone.utc) >= created_after
 
 
 def find_matching_spec_prs(
