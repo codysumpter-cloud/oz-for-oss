@@ -1,0 +1,24 @@
+name: Set up Oz Python environment
+description: >-
+  Install the Python dependencies used by Oz workflow scripts. Uses uv with
+  caching and relies on the Python interpreter pre-installed on the runner
+  image (ubuntu-slim ships Python 3.12), so no separate setup-python step is
+  needed.
+inputs:
+  requirements-path:
+    description: Path to the requirements.txt file to install.
+    required: false
+    default: .github/scripts/requirements.txt
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+        cache-dependency-glob: ${{ inputs.requirements-path }}
+    - name: Install Python workflow dependencies
+      shell: bash
+      env:
+        REQUIREMENTS_PATH: ${{ inputs.requirements-path }}
+      run: uv pip install --system -r "$REQUIREMENTS_PATH"
