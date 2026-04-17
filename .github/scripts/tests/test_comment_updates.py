@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
 import os
 import unittest
 
 from oz_workflows.helpers import (
+    _strip_workflow_metadata,
+    _workflow_metadata_prefix,
     _workflow_run_url,
     append_comment_sections,
     build_comment_body,
+    comment_metadata,
     WorkflowProgressComment,
 )
 
@@ -640,6 +644,203 @@ class FakePullRequest:
             last = FakeReviewComment(self, data)
         assert last is not None
         return last
+
+
+class CommentMetadataTest(unittest.TestCase):
+    def _parse_metadata(self, marker: str) -> dict[str, object]:
+        prefix = "<!-- oz-agent-metadata: "
+        suffix = " -->"
+        self.assertTrue(marker.startswith(prefix))
+        self.assertTrue(marker.endswith(suffix))
+        return json.loads(marker[len(prefix):-len(suffix)])
+
+    def test_includes_only_type_workflow_issue_when_no_run_ids(self) -> None:
+        marker = comment_metadata("triage-new-issues", 42)
+        parsed = self._parse_metadata(marker)
+        self.assertEqual(
+            parsed,
+            {"type": "issue-status", "workflow": "triage-new-issues", "issue": 42},
+        )
+
+    def test_includes_run_id_when_provided(self) -> None:
+        marker = comment_metadata("triage-new-issues", 42, run_id="abc123")
+        parsed = self._parse_metadata(marker)
+        self.assertEqual(parsed["run_id"], "abc123")
+        self.assertNotIn("oz_run_id", parsed)
+        self.assertNotIn("github_run_id", parsed)
+
+    def test_includes_oz_run_id_when_provided(self) -> None:
+        marker = comment_metadata(
+            "triage-new-issues",
+            42,
+            run_id="abc",
+            oz_run_id="oz-run-xyz",
+            github_run_id="99",
+        )
+        parsed = self._parse_metadata(marker)
+        self.assertEqual(parsed["oz_run_id"], "oz-run-xyz")
+        self.assertEqual(parsed["github_run_id"], "99")
+        self.assertEqual(parsed["run_id"], "abc")
+
+    def test_omits_empty_run_ids(self) -> None:
+        marker = comment_metadata(
+            "triage-new-issues",
+            42,
+            run_id="",
+            oz_run_id="",
+            github_run_id="",
+        )
+        parsed = self._parse_metadata(marker)
+        self.assertNotIn("run_id", parsed)
+        self.assertNotIn("oz_run_id", parsed)
+        self.assertNotIn("github_run_id", parsed)
+
+    def test_marker_starts_with_workflow_prefix(self) -> None:
+        marker = comment_metadata(
+            "triage-new-issues",
+            42,
+            run_id="abc",
+            oz_run_id="oz",
+            github_run_id="99",
+        )
+        prefix = _workflow_metadata_prefix("triage-new-issues", 42)
+        self.assertTrue(marker.startswith(prefix))
+
+
+class StripWorkflowMetadataTest(unittest.TestCase):
+    def test_strips_marker_matching_prefix(self) -> None:
+        prefix = _workflow_metadata_prefix("triage-new-issues", 42)
+        metadata = comment_metadata("triage-new-issues", 42, run_id="abc")
+        body = f"Some content\n\n{metadata}"
+        self.assertEqual(_strip_workflow_metadata(body, prefix), "Some content")
+
+    def test_returns_body_when_prefix_absent(self) -> None:
+        prefix = _workflow_metadata_prefix("triage-new-issues", 42)
+        body = "Some content without metadata"
+        self.assertEqual(_strip_workflow_metadata(body, prefix), body)
+
+    def test_returns_empty_for_empty_body(self) -> None:
+        prefix = _workflow_metadata_prefix("triage-new-issues", 42)
+        self.assertEqual(_strip_workflow_metadata("", prefix), "")
+
+    def test_ignores_marker_from_other_workflow(self) -> None:
+        prefix = _workflow_metadata_prefix("triage-new-issues", 42)
+        other = comment_metadata("create-spec-from-issue", 42, run_id="abc")
+        body = f"Content\n\n{other}"
+        self.assertEqual(_strip_workflow_metadata(body, prefix), body)
+
+
+class WorkflowProgressCommentMetadataTest(unittest.TestCase):
+    def test_initial_metadata_includes_github_run_id_from_env(self) -> None:
+        os.environ["GITHUB_RUN_ID"] = "555"
+        try:
+            github = FakeGitHubClient()
+            progress = WorkflowProgressComment(
+                github,
+                "acme",
+                "widgets",
+                42,
+                workflow="triage-new-issues",
+                requester_login="alice",
+            )
+            self.assertIn('"github_run_id":"555"', progress.metadata)
+            self.assertNotIn("oz_run_id", progress.metadata)
+        finally:
+            os.environ.pop("GITHUB_RUN_ID", None)
+
+    def test_initial_metadata_omits_github_run_id_when_env_missing(self) -> None:
+        os.environ.pop("GITHUB_RUN_ID", None)
+        github = FakeGitHubClient()
+        progress = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="triage-new-issues",
+            requester_login="alice",
+        )
+        self.assertNotIn("github_run_id", progress.metadata)
+
+    def test_record_oz_run_id_refreshes_comment_metadata(self) -> None:
+        os.environ["GITHUB_RUN_ID"] = "555"
+        try:
+            github = FakeGitHubClient()
+            progress = WorkflowProgressComment(
+                github,
+                "acme",
+                "widgets",
+                42,
+                workflow="triage-new-issues",
+                requester_login="alice",
+            )
+            progress.start("Oz is starting to triage this issue.")
+            progress.record_oz_run_id("oz-run-xyz")
+
+            self.assertEqual(len(github.comments), 1)
+            body = str(github.comments[0]["body"])
+            self.assertIn('"oz_run_id":"oz-run-xyz"', body)
+            self.assertIn('"github_run_id":"555"', body)
+            # Body content is preserved alongside the refreshed marker.
+            self.assertIn("Oz is starting to triage this issue.", body)
+            # Only one metadata marker remains after the refresh.
+            self.assertEqual(body.count("<!-- oz-agent-metadata:"), 1)
+        finally:
+            os.environ.pop("GITHUB_RUN_ID", None)
+
+    def test_record_oz_run_id_is_idempotent(self) -> None:
+        github = FakeGitHubClient()
+        progress = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="triage-new-issues",
+            requester_login="alice",
+        )
+        progress.start("Oz is starting.")
+        progress.record_oz_run_id("oz-run-xyz")
+        body_first = str(github.comments[0]["body"])
+        progress.record_oz_run_id("oz-run-xyz")
+        body_second = str(github.comments[0]["body"])
+        self.assertEqual(body_first, body_second)
+
+    def test_record_oz_run_id_noop_when_no_comment_yet(self) -> None:
+        github = FakeGitHubClient()
+        progress = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="triage-new-issues",
+            requester_login="alice",
+        )
+        # Calling record_oz_run_id before any comment exists should just
+        # update in-memory state and not create a GitHub comment.
+        progress.record_oz_run_id("oz-run-xyz")
+        self.assertEqual(github.comments, [])
+        self.assertEqual(progress.oz_run_id, "oz-run-xyz")
+        self.assertIn('"oz_run_id":"oz-run-xyz"', progress.metadata)
+
+    def test_subsequent_append_preserves_refreshed_metadata(self) -> None:
+        github = FakeGitHubClient()
+        progress = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="triage-new-issues",
+            requester_login="alice",
+        )
+        progress.start("Oz is starting.")
+        progress.record_oz_run_id("oz-run-xyz")
+        progress.complete("Oz finished triaging.")
+
+        self.assertEqual(len(github.comments), 1)
+        body = str(github.comments[0]["body"])
+        self.assertIn("Oz is starting.", body)
+        self.assertIn("Oz finished triaging.", body)
+        self.assertIn('"oz_run_id":"oz-run-xyz"', body)
+        self.assertEqual(body.count("<!-- oz-agent-metadata:"), 1)
 
 
 if __name__ == "__main__":
