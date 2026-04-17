@@ -4,8 +4,9 @@ from contextlib import closing
 import json
 import re
 from textwrap import dedent
-from typing import Any
+from typing import Any, TypedDict
 from github import Auth, Github
+from github.File import File
 
 from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.helpers import (
@@ -16,6 +17,18 @@ from oz_workflows.helpers import (
 )
 from oz_workflows.artifacts import poll_for_artifact
 from oz_workflows.oz_client import build_agent_config, run_agent
+
+
+class ReviewComment(TypedDict, total=False):
+    """Normalized review comment accepted by ``PullRequest.create_review``."""
+
+    path: str
+    line: int
+    side: str
+    body: str
+    start_line: int
+    start_side: str
+
 
 HUNK_HEADER_PATTERN = re.compile(
     r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))? \+(?P<new_start>\d+)(?:,(?P<new_count>\d+))? @@"
@@ -100,19 +113,19 @@ def _line_content_for_patch(patch: str | None) -> dict[str, dict[int, str]]:
 
 
 def _build_diff_maps(
-    files: list[Any],
+    files: list[File],
 ) -> tuple[dict[str, dict[str, set[int]]], dict[str, dict[str, dict[int, str]]]]:
     diff_line_map: dict[str, dict[str, set[int]]] = {}
     diff_content_map: dict[str, dict[str, dict[int, str]]] = {}
     for file in files:
         path = _normalize_review_path(file.filename)
-        patch = getattr(file, "patch", None)
+        patch = file.patch
         diff_line_map[path] = _commentable_lines_for_patch(patch)
         diff_content_map[path] = _line_content_for_patch(patch)
     return diff_line_map, diff_content_map
 
 
-def _build_diff_line_map(files: list[Any]) -> dict[str, dict[str, set[int]]]:
+def _build_diff_line_map(files: list[File]) -> dict[str, dict[str, set[int]]]:
     diff_line_map, _ = _build_diff_maps(files)
     return diff_line_map
 
@@ -179,7 +192,7 @@ def _normalize_review_payload(
     review: dict[str, Any],
     diff_line_map: dict[str, dict[str, set[int]]],
     diff_content_map: dict[str, dict[str, dict[int, str]]] | None = None,
-) -> tuple[str, list[dict[str, Any]]]:
+) -> tuple[str, list[ReviewComment]]:
     if not isinstance(review, dict):
         raise ValueError("Review payload must be a JSON object.")
 
@@ -191,7 +204,7 @@ def _normalize_review_payload(
     if not isinstance(raw_comments, list):
         raise ValueError("Review payload `comments` must be a list.")
 
-    normalized_comments: list[dict[str, Any]] = []
+    normalized_comments: list[ReviewComment] = []
     errors: list[str] = []
 
     for index, raw_comment in enumerate(raw_comments):
@@ -228,7 +241,7 @@ def _normalize_review_payload(
             )
             continue
 
-        normalized_comment: dict[str, Any] = {
+        normalized_comment: ReviewComment = {
             "path": path,
             "line": line,
             "side": side,

@@ -9,8 +9,11 @@ from typing import Any
 
 from github import Github
 from github.GithubException import UnknownObjectException
+from github.IssueComment import IssueComment
 from github.PullRequest import PullRequest
+from github.PullRequestComment import PullRequestComment
 from github.Repository import Repository
+from oz_agent_sdk.types.agent import RunItem
 
 from .env import optional_env
 
@@ -529,7 +532,7 @@ class WorkflowProgressComment:
                 # rather than letting cleanup errors abort the workflow.
                 continue
 
-    def _find_any_workflow_comment(self) -> Any | None:
+    def _find_any_workflow_comment(self) -> IssueComment | PullRequestComment | None:
         """Find any progress comment for this workflow on this issue, regardless of run."""
         comments = self._list_comments()
         return next(
@@ -542,7 +545,7 @@ class WorkflowProgressComment:
             None,
         )
 
-    def _get_or_find_existing_comment(self) -> Any | None:
+    def _get_or_find_existing_comment(self) -> IssueComment | PullRequestComment | None:
         if self.comment_id is not None:
             try:
                 return self._get_comment(self.comment_id)
@@ -561,35 +564,35 @@ class WorkflowProgressComment:
             self.comment_id = int(get_field(existing, "id"))
         return existing
 
-    def _list_comments(self) -> list[Any]:
+    def _list_comments(self) -> list[IssueComment] | list[PullRequestComment]:
         """List candidate progress comments for the current scope."""
         if self.review_reply_target is not None:
             pr, trigger_comment_id = self.review_reply_target
-            all_comments = list(pr.get_review_comments())
-            return _filter_review_comments_in_thread(all_comments, trigger_comment_id)
+            all_review_comments = list(pr.get_review_comments())
+            return _filter_review_comments_in_thread(all_review_comments, trigger_comment_id)
         return list(self.github.get_issue(self.issue_number).get_comments())
 
-    def _create_comment(self, body: str) -> Any:
+    def _create_comment(self, body: str) -> IssueComment | PullRequestComment:
         if self.review_reply_target is not None:
             pr, trigger_comment_id = self.review_reply_target
             return pr.create_review_comment_reply(trigger_comment_id, body)
         return self.github.get_issue(self.issue_number).create_comment(body)
 
-    def _get_comment(self, comment_id: int) -> Any:
+    def _get_comment(self, comment_id: int) -> IssueComment | PullRequestComment:
         if self.review_reply_target is not None:
             pr, _ = self.review_reply_target
             return pr.get_review_comment(comment_id)
         return self.github.get_issue(self.issue_number).get_comment(comment_id)
 
-    def _update_comment(self, comment_id: int, body: str) -> Any:
+    def _update_comment(self, comment_id: int, body: str) -> IssueComment | PullRequestComment:
         if self.review_reply_target is not None:
             pr, _ = self.review_reply_target
-            comment = pr.get_review_comment(comment_id)
-            comment.edit(body)
-            return comment
-        comment = self.github.get_issue(self.issue_number).get_comment(comment_id)
-        comment.edit(body)
-        return comment
+            review_comment = pr.get_review_comment(comment_id)
+            review_comment.edit(body)
+            return review_comment
+        issue_comment = self.github.get_issue(self.issue_number).get_comment(comment_id)
+        issue_comment.edit(body)
+        return issue_comment
 
     def _delete_comment(self, comment_id: int) -> None:
         if self.review_reply_target is not None:
@@ -599,7 +602,7 @@ class WorkflowProgressComment:
         self.github.get_issue(self.issue_number).get_comment(comment_id).delete()
 
 
-def record_run_session_link(progress: WorkflowProgressComment, run: object) -> None:
+def record_run_session_link(progress: WorkflowProgressComment, run: RunItem) -> None:
     """Record the current Oz session link and run id on a progress comment when available."""
     oz_run_id = getattr(run, "run_id", None) or ""
     if oz_run_id:
@@ -659,7 +662,7 @@ def _noreply_email(login: str, user_id: int | None, created_at: datetime | str |
 
 
 def resolve_coauthor_line(
-    github: Github | Any,
+    github: Github,
     event_payload: dict[str, Any],
 ) -> str:
     """Resolve a ``Co-Authored-By`` line from the event that triggered the workflow."""
