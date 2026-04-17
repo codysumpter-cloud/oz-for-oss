@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import io
 import json
+import logging
 import os
 import unittest
+from contextlib import redirect_stdout
 
 from oz_workflows.helpers import (
     _strip_workflow_metadata,
@@ -494,6 +497,101 @@ class ReportErrorTest(unittest.TestCase):
             for key in env:
                 os.environ.pop(key, None)
 
+    def test_report_error_uses_cached_requester_without_api_lookup(self) -> None:
+        # Simulate the bug's trigger: no requester_login provided at
+        # construction (so resolve_progress_requester_login would normally
+        # fall back to resolve_oz_assigner_login/_list_issue_events) and
+        # the underlying GitHub API refuses issue-events lookups. The
+        # initial start() populates the requester from the event payload
+        # and caches it, and a later GitHub API outage during report_error
+        # must not re-trigger the failing events lookup.
+        github = FailingEventsGitHubClient()
+        progress = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            7,
+            workflow="test-workflow",
+            event_payload={"sender": {"login": "alice"}},
+        )
+        progress.start("Oz is starting.")
+        # The requester should have been cached from the event payload on
+        # the successful first update.
+        self.assertEqual(progress.requester_login, "alice")
+        # Now clear the event payload as if only the cached value remains
+        # (e.g. a fresh object reconstructed from run state).
+        progress.event_payload = {}
+
+        # The API is still healthy for comment CRUD, so report_error
+        # should succeed using the cached login, and it must not attempt
+        # to re-resolve the requester via list_issue_events.
+        with self.assertLogs("oz_workflows.helpers", level="ERROR") as captured:
+            progress.report_error()
+            # assertLogs requires at least one record; emit a synthetic
+            # one so we can still assert no ERROR was emitted by the SUT.
+            logging.getLogger("oz_workflows.helpers").error("sentinel")
+        self.assertEqual(
+            [rec.getMessage() for rec in captured.records if rec.levelno >= logging.ERROR and rec.getMessage() != "sentinel"],
+            [],
+        )
+        self.assertEqual(github.events_calls, 0)
+        self.assertEqual(len(github.comments), 1)
+        body = github.comments[0]["body"]
+        self.assertIn("@alice", body)
+        self.assertIn("unexpected error", body)
+
+    def test_report_error_logs_and_emits_annotation_when_comment_write_fails(self) -> None:
+        # When the GitHub API outage also prevents posting the fallback
+        # user-facing error comment, report_error must not silently
+        # swallow the exception: it should log the traceback via
+        # logger.exception and emit an `::error::` annotation so the
+        # Actions run is visibly marked failed.
+        github = CommentWriteFailsGitHubClient()
+        progress = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            7,
+            workflow="test-workflow",
+            requester_login="alice",
+        )
+
+        buf = io.StringIO()
+        with self.assertLogs("oz_workflows.helpers", level="ERROR") as captured, redirect_stdout(buf):
+            progress.report_error()
+
+        # The simulated outage message should appear in the logged
+        # traceback so operators can see the root cause.
+        self.assertTrue(
+            any("Failed to post workflow error comment" in rec.getMessage() for rec in captured.records),
+            msg=f"Expected error log not found in records: {[rec.getMessage() for rec in captured.records]}",
+        )
+        self.assertTrue(
+            any("simulated GitHub API outage" in (rec.exc_text or "") for rec in captured.records),
+            msg="Expected swallowed exception traceback to be logged",
+        )
+        # An ::error:: annotation should have been emitted to stdout so
+        # the Actions UI marks the step as failed.
+        self.assertIn("::error::", buf.getvalue())
+        self.assertIn("test-workflow", buf.getvalue())
+
+    def test_report_error_does_not_raise_when_everything_fails(self) -> None:
+        # report_error is the last-chance hook before the caller re-raises
+        # the underlying workflow exception; it must never itself raise.
+        github = CommentWriteFailsGitHubClient()
+        progress = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            7,
+            workflow="test-workflow",
+            requester_login="alice",
+        )
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            # Should not raise.
+            progress.report_error()
+
 
 class FakeIssueComment:
     """A minimal stand-in for ``github.IssueComment.IssueComment``."""
@@ -552,6 +650,58 @@ class FakeGitHubClient:
 
     def get_issue(self, issue_number: int) -> FakeIssue:
         return FakeIssue(self, issue_number)
+
+
+class FailingEventsGitHubClient(FakeGitHubClient):
+    """A FakeGitHubClient whose issue-events endpoint is broken.
+
+    Simulates the scenario in issue #220: the workflow is triggered by a
+    GitHub API outage that specifically takes down the issue-events
+    endpoint used by ``resolve_oz_assigner_login``. Any attempt to
+    resolve the requester login via that fallback must surface as a
+    failure so we can assert the error path never reaches it.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.events_calls = 0
+
+    def list_issue_events(self, owner: str, repo: str, issue_number: int) -> list[dict[str, object]]:
+        self.events_calls += 1
+        raise RuntimeError("simulated GitHub API outage on events endpoint")
+
+
+class CommentWriteFailsIssueComment(FakeIssueComment):
+    """A FakeIssueComment whose edit endpoint is broken."""
+
+    def edit(self, body: str) -> None:
+        raise RuntimeError("simulated GitHub API outage on update_comment")
+
+
+class CommentWriteFailsIssue(FakeIssue):
+    """A FakeIssue whose comment write endpoints are broken."""
+
+    def create_comment(self, body: str) -> FakeIssueComment:
+        raise RuntimeError("simulated GitHub API outage on create_comment")
+
+    def get_comment(self, comment_id: int) -> FakeIssueComment:
+        for c in self._repo.comments:
+            if int(c["id"]) == comment_id:  # type: ignore[arg-type]
+                return CommentWriteFailsIssueComment(self._repo, c)
+        raise AssertionError(f"Missing comment {comment_id}")
+
+
+class CommentWriteFailsGitHubClient(FakeGitHubClient):
+    """A FakeGitHubClient whose comment write endpoints are broken.
+
+    Simulates a GitHub outage that also prevents the fallback error
+    comment from being posted. ``report_error`` must catch the failure,
+    log it, and emit an ``::error::`` annotation rather than silently
+    swallow it.
+    """
+
+    def get_issue(self, issue_number: int) -> CommentWriteFailsIssue:
+        return CommentWriteFailsIssue(self, issue_number)
 
 
 class FakeReviewComment:
