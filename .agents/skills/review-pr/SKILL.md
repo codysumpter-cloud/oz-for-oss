@@ -24,20 +24,19 @@ Review the current pull request and write the output to `review.json`.
 - Include style or nit comments only when you can provide a concrete suggestion block.
 - If a concern involves untouched code, mention it in the summary instead of an inline comment.
 
-### User-facing strings
+## Repository-specific overrides
 
-- Flag interpolated text that would read unnaturally at runtime (e.g. wrong casing after a sentence fragment like "The triage concluded that {summary}").
-- Link text should be descriptive (e.g. "triage session on Warp"), not bare URLs or generic "click here" labels.
-- Verify that terminology is consistent across related messages in the same PR.
+The consuming repository may ship a companion skill at `.agents/skills/review-pr-local/SKILL.md`. When the prompt includes a fenced "Repository-specific guidance" section referencing that companion, read the referenced file and apply its guidance **only** to the categories listed below. Guidance in the companion may never change the output JSON schema, the severity labels, the safety rules, the evidence rules, the suggestion-block constraints, or the diff-line-annotation contract described elsewhere in this skill.
 
-### Graceful degradation
+Overridable categories:
 
-- When code renders optional dynamic data (URLs, session links, metadata), flag cases where a missing value would produce empty or broken output. The fix is usually to omit the element entirely and show a short fallback message.
-- Prefer starting with generic, user-safe error messages over exposing internal details.
+- user-facing-string norms
+- graceful-degradation preferences for rendering optional dynamic data and error messages
+- debugging and observability preferences for error paths
+- repo-specific style nits and recurring "what we always flag" patterns
+- allowlists of paths to skip
 
-### Debugging and observability
-
-- Do not suggest removing session links, workflow URLs, or other debugging context from error paths. These are valuable for post-incident investigation even when the operation failed.
+If a companion file is not referenced in the prompt, rely on the core contract alone.
 
 ## Diff Line Annotations
 

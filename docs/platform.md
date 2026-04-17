@@ -96,13 +96,32 @@ That makes the review agent less like a generic bot and more like a reusable eva
 
 There is also a repository-local branch-follow-up path in [`respond-to-pr-comment.yml`](../.github/workflows/respond-to-pr-comment.yml), implemented by [`respond_to_pr_comment.py`](../.github/scripts/respond_to_pr_comment.py). It is not part of the reusable `workflow_call` surface today, but it is still a useful illustration of the same core model: PR discussion becomes prompt context, and the implementation skill is reused to continue work on the branch.
 
-## The self-improvement agent
+## Core skills and repo-local companions
 
-The last core role is the self-improvement agent. It is grounded in [`update-pr-review`](../.agents/skills/update-pr-review/SKILL.md), and the reusable wrapper is [`update-pr-review.yml`](../.github/workflows/update-pr-review.yml), implemented by [`update_pr_review.py`](../.github/scripts/update_pr_review.py).
+Each reusable agent role has a **core skill** in [`../.agents/skills/<agent>/SKILL.md`](../.agents/skills/) and, when repo-tunable behavior exists, a paired **repo-local companion** in [`../.agents/skills/<agent>-local/SKILL.md`](../.agents/skills/). The core skill expresses the cross-repo contract — output schema, severity labels, safety rules, evidence rules — and is treated as read-only from the self-improvement loops. The companion specializes only the override categories the core skill explicitly enumerates (for example `review-pr`'s user-facing-string norms, or `triage-issue`'s label taxonomy).
 
-This role is distinct from the review agent itself. It does not review application code or specs directly. Instead, it reads recent PR review discussions and updates the review skills — [`review-pr`](../.agents/skills/review-pr/SKILL.md) and [`review-spec`](../.agents/skills/review-spec/SKILL.md) — when reviewer feedback suggests the system should adopt a more durable rule.
+The initial companion skills are:
 
-That is why this part of the platform is best described as a self-improvement loop. The repo is not only using agent skills. It is also curating and evolving them based on observed reviewer feedback.
+- [`review-pr-local`](../.agents/skills/review-pr-local/SKILL.md)
+- [`review-spec-local`](../.agents/skills/review-spec-local/SKILL.md)
+- [`triage-issue-local`](../.agents/skills/triage-issue-local/SKILL.md)
+- [`dedupe-issue-local`](../.agents/skills/dedupe-issue-local/SKILL.md)
+
+At prompt assembly time, the Python entrypoints in [`../.github/scripts/`](../.github/scripts/) call `resolve_repo_local_skill_path(workspace, core_skill_name)` to detect a companion in the consuming repository's workspace. When the file exists and contains non-frontmatter body content, the entrypoint appends a fenced "Repository-specific guidance" section to the prompt that *references* the companion path. The companion body is never inlined into the prompt; the agent reads the referenced file directly via its usual skill-read path. When no companion is present, the section is omitted entirely and the agent falls back to the core contract alone.
+
+A consuming repository that has not ingested any repo-specific guidance yet can adopt `oz-for-oss` unchanged: the prompt-construction layer treats absent or effectively empty (frontmatter-only) companions as absent and runs the core skills with no special wiring. See [`bootstrap-issue-config`](../.agents/skills/bootstrap-issue-config/SKILL.md) for how new repositories scaffold empty companion skills during onboarding.
+
+## The self-improvement agents
+
+The last core role is self-improvement. Rather than a single loop, the platform ships a small family of loops, each scoped to a narrow repo-local companion:
+
+- [`update-pr-review`](../.agents/skills/update-pr-review/SKILL.md) writes only to [`review-pr-local`](../.agents/skills/review-pr-local/SKILL.md) and [`review-spec-local`](../.agents/skills/review-spec-local/SKILL.md), implemented by [`update_pr_review.py`](../.github/scripts/update_pr_review.py) and driven by [`update-pr-review.yml`](../.github/workflows/update-pr-review.yml).
+- [`update-triage`](../.agents/skills/update-triage/SKILL.md) writes only to [`triage-issue-local`](../.agents/skills/triage-issue-local/SKILL.md) and [`.github/issue-triage/*`](../.github/issue-triage/), implemented by [`update_triage.py`](../.github/scripts/update_triage.py) and driven by [`update-triage.yml`](../.github/workflows/update-triage.yml).
+- [`update-dedupe`](../.agents/skills/update-dedupe/SKILL.md) writes only to [`dedupe-issue-local`](../.agents/skills/dedupe-issue-local/SKILL.md), implemented by [`update_dedupe.py`](../.github/scripts/update_dedupe.py) and driven by [`update-dedupe.yml`](../.github/workflows/update-dedupe.yml).
+
+These loops do not review application code or specs directly. Instead, each one reads a narrow signal (PR review feedback, maintainer triage overrides, closed-as-duplicate events) and proposes minimum-viable edits to the corresponding companion skill. The Python entrypoint gates the push behind a `git diff` guard: any change outside the declared write surface aborts the run before a PR is opened. The core skill files and the workflow scripts are never writable from a self-improvement loop.
+
+That is why this part of the platform is best described as a family of self-improvement loops. The repo is not only using agent skills — it is curating and evolving each repo-local companion based on observed signal, while keeping the cross-repo contracts stable.
 
 ## The workflows that are not really agents
 
@@ -124,6 +143,8 @@ The reusable workflows are still the integration boundary for other systems. If 
 - [`create-implementation-from-issue.yml`](../.github/workflows/create-implementation-from-issue.yml)
 - [`review-pull-request.yml`](../.github/workflows/review-pull-request.yml)
 - [`update-pr-review.yml`](../.github/workflows/update-pr-review.yml)
+- [`update-triage.yml`](../.github/workflows/update-triage.yml)
+- [`update-dedupe.yml`](../.github/workflows/update-dedupe.yml)
 
 But those workflows make more sense once you see them as wrappers around the agent roles above. They decide when to run, what secrets and permissions to grant, and what repository context to package. The agent skills and prompts are what give the system its actual behavior.
 
@@ -131,4 +152,4 @@ The local adapters in [`../.github/workflows/`](../.github/workflows/) — such 
 
 ## In one sentence
 
-`oz-for-oss` is a reusable OSS automation platform whose workflows mainly exist to feed rich GitHub and repository context into a small set of skill-backed agent roles: triage, spec writing, implementation, review, and review self-improvement.
+`oz-for-oss` is a reusable OSS automation platform whose workflows mainly exist to feed rich GitHub and repository context into a small set of skill-backed agent roles: triage, spec writing, implementation, review, and a family of narrowly scoped self-improvement loops that evolve repo-local companion skills.

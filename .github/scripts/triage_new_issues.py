@@ -27,6 +27,10 @@ from oz_workflows.helpers import (
 )
 from oz_workflows.artifacts import poll_for_artifact
 from oz_workflows.oz_client import build_agent_config, run_agent
+from oz_workflows.repo_local import (
+    format_repo_local_prompt_section,
+    resolve_repo_local_skill_path,
+)
 from oz_workflows.triage import (
     dedupe_strings,
     discover_issue_templates,
@@ -56,22 +60,13 @@ def _lowercase_first(text: str) -> str:
 
 
 def triage_heuristics_prompt(owner: str, repo: str) -> str:
-    """Return repository-specific triage guidance for the agent prompt."""
-    if owner == "warpdotdev" and repo == "Warp":
-        return dedent(
-            """
-            - Distinguish user-observed symptoms from reporter-written diagnoses or proposed fixes. Several Warp issues include speculative root causes or patch sketches that should be treated as hypotheses, not facts.
-            - Before asking any follow-up question, first try to answer it yourself through code inspection, documentation lookup, or web search. Only ask questions that you cannot resolve on your own and that only the reporter would know.
-            - Bias heavily toward requesting visual evidence. When the issue involves UI behavior, rendering glitches, layout problems, or any visual symptom, the first follow-up question should ask the reporter to record a short video or attach a screenshot showing the problem. Prefer this over asking technical or terminology-specific questions upfront.
-            - Be aggressive about asking for missing environment details on platform-sensitive issues: Warp version, OS build, shell, GPU/driver, WSL/Wayland/compositor/window manager, IME/input method, and whether the behavior reproduces outside Warp.
-            - Code present in the main/master branch does not mean the feature or fix has shipped to users. Only suggest that a reporter check their Warp version if the relevant change exists in a release branch, not just in main/master.
-            - For issues involving international keyboard layouts, non-US input sources, or IME/input method behavior that is distinct from settings or keybinding configuration, use the `area:keyboard-layout` label. This label is for the chronic class of non-US input source bugs, not for general keybinding or settings issues.
-            - For auth, account, AI, and backend-response issues, ask for concrete debug breadcrumbs such as timestamps, conversation/debug IDs, logs, exact request sequence, provider/model/BYOK configuration, and whether alternate browser/session/account paths change the result.
-            - For AI-quality complaints, ask for the exact prompt/task or transcript excerpt and what the agent should have done differently; do not accept a vague "the agent was wrong" summary as sufficient evidence.
-            - For feature requests, push toward a concrete workflow, current workaround, desired UX/API shape, and scope boundaries instead of accepting broad aspirational asks.
-            - For automated scan or bot-generated reports, require concrete affected packages, versions, CVEs, file paths, or locally verifiable findings before treating the issue as actionable.
-            """
-        ).strip()
+    """Return the generic cross-repo triage heuristics prompt.
+
+    Repo-specific heuristics are no longer hardcoded here. They live in the
+    consuming repository's ``.agents/skills/triage-issue-local/SKILL.md``
+    companion skill and are referenced at prompt assembly time by
+    ``process_issue`` via the ``resolve_repo_local_skill_path`` helper.
+    """
     return dedent(
         """
         - Distinguish observed symptoms from reporter hypotheses and proposed fixes.
@@ -230,6 +225,8 @@ def process_issue(
     current_body = str(issue.body or "").strip()
     original_report = extract_original_issue_report(current_body)
     recent_issues_text = format_recent_issues_for_dedupe(recent_open_issues, issue_number)
+    triage_companion_path = resolve_repo_local_skill_path(workspace(), "triage-issue")
+    dedupe_companion_path = resolve_repo_local_skill_path(workspace(), "dedupe-issue")
     prompt = dedent(
         f"""
         Triage GitHub issue #{issue_number} in repository {owner}/{repo}.
@@ -309,6 +306,20 @@ def process_issue(
         - After validating the JSON, upload it as an artifact via `oz-dev artifact upload triage_result.json`. The subcommand is `artifact` (singular); do not use `artifacts`.
         """
     ).strip()
+    # Append the fenced repo-local references after the base prompt so a
+    # repository with no companion files yields the same prompt shape as
+    # before the core/local split.
+    companion_sections: list[str] = []
+    if triage_companion_path is not None:
+        companion_sections.append(
+            format_repo_local_prompt_section("triage-issue", triage_companion_path).rstrip()
+        )
+    if dedupe_companion_path is not None:
+        companion_sections.append(
+            format_repo_local_prompt_section("dedupe-issue", dedupe_companion_path).rstrip()
+        )
+    if companion_sections:
+        prompt = prompt + "\n\n" + "\n\n".join(companion_sections)
 
     try:
         run = run_agent(
