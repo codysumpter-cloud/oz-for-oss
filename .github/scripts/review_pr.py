@@ -21,6 +21,11 @@ HUNK_HEADER_PATTERN = re.compile(
     r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))? \+(?P<new_start>\d+)(?:,(?P<new_count>\d+))? @@"
 )
 
+SUGGESTION_BLOCK_PATTERN = re.compile(
+    r"```suggestion[^\n]*\r?\n(?P<content>.*?)\r?\n```",
+    re.DOTALL,
+)
+
 
 def _normalize_review_path(value: Any) -> str:
     path = str(value or "").strip()
@@ -60,17 +65,120 @@ def _commentable_lines_for_patch(patch: str | None) -> dict[str, set[int]]:
     return commentable_lines
 
 
+def _line_content_for_patch(patch: str | None) -> dict[str, dict[int, str]]:
+    """Return file content known from the patch, keyed by side and line number."""
+    line_content: dict[str, dict[int, str]] = {"LEFT": {}, "RIGHT": {}}
+    if not patch:
+        return line_content
+
+    old_line: int | None = None
+    new_line: int | None = None
+
+    for raw_line in patch.splitlines():
+        header_match = HUNK_HEADER_PATTERN.match(raw_line)
+        if header_match:
+            old_line = int(header_match.group("old_start"))
+            new_line = int(header_match.group("new_start"))
+            continue
+        if old_line is None or new_line is None or raw_line.startswith("\\"):
+            continue
+        marker = raw_line[:1]
+        text = raw_line[1:]
+        if marker == "-":
+            line_content["LEFT"][old_line] = text
+            old_line += 1
+        elif marker == "+":
+            line_content["RIGHT"][new_line] = text
+            new_line += 1
+        elif marker == " ":
+            line_content["LEFT"][old_line] = text
+            line_content["RIGHT"][new_line] = text
+            old_line += 1
+            new_line += 1
+
+    return line_content
+
+
+def _build_diff_maps(
+    files: list[Any],
+) -> tuple[dict[str, dict[str, set[int]]], dict[str, dict[str, dict[int, str]]]]:
+    diff_line_map: dict[str, dict[str, set[int]]] = {}
+    diff_content_map: dict[str, dict[str, dict[int, str]]] = {}
+    for file in files:
+        path = _normalize_review_path(file.filename)
+        patch = getattr(file, "patch", None)
+        diff_line_map[path] = _commentable_lines_for_patch(patch)
+        diff_content_map[path] = _line_content_for_patch(patch)
+    return diff_line_map, diff_content_map
+
+
 def _build_diff_line_map(files: list[Any]) -> dict[str, dict[str, set[int]]]:
-    return {
-        _normalize_review_path(file.filename): _commentable_lines_for_patch(
-            getattr(file, "patch", None)
-        )
-        for file in files
-    }
+    diff_line_map, _ = _build_diff_maps(files)
+    return diff_line_map
+
+
+def _extract_suggestion_blocks(body: str | None) -> list[list[str]]:
+    """Extract the line content of each ```suggestion fenced block in the body."""
+    blocks: list[list[str]] = []
+    for match in SUGGESTION_BLOCK_PATTERN.finditer(body or ""):
+        content = match.group("content")
+        # Strip the trailing newline introduced by the closing fence, but keep
+        # any internal blank lines intact. Also strip a trailing CR so that
+        # CRLF-encoded bodies compare equal to patch content, which has CR
+        # stripped by str.splitlines().
+        lines = [line.rstrip("\r") for line in content.split("\n")]
+        blocks.append(lines)
+    return blocks
+
+
+def _validate_suggestion_blocks(
+    comment: dict[str, Any],
+    diff_content_map: dict[str, dict[str, dict[int, str]]],
+) -> list[str]:
+    """Return a list of validation errors for the suggestion blocks in a comment.
+
+    Checks that the suggestion block does not duplicate context lines that
+    sit immediately outside the replaced `start_line`–`line` range on the
+    given side of the diff.
+    """
+    errors: list[str] = []
+    body = comment.get("body") or ""
+    blocks = _extract_suggestion_blocks(body)
+    if not blocks:
+        return errors
+
+    path = comment.get("path") or ""
+    side = comment.get("side") or "RIGHT"
+    line_no = comment.get("line")
+    if not isinstance(line_no, int):
+        return errors
+    start_line = comment.get("start_line") or line_no
+    content_for_side = diff_content_map.get(path, {}).get(side, {})
+
+    for block_index, block_lines in enumerate(blocks):
+        if not block_lines or block_lines == [""]:
+            continue
+        prev_context = content_for_side.get(start_line - 1)
+        next_context = content_for_side.get(line_no + 1)
+        first_line = block_lines[0]
+        last_line = block_lines[-1]
+        if prev_context is not None and first_line == prev_context:
+            errors.append(
+                f"suggestion block {block_index} duplicates the context line immediately above "
+                f"`start_line` ({start_line - 1}); that line is not replaced and will appear twice after the suggestion is applied"
+            )
+        if next_context is not None and last_line == next_context:
+            errors.append(
+                f"suggestion block {block_index} duplicates the context line immediately below "
+                f"`line` ({line_no + 1}); that line is not replaced and will appear twice after the suggestion is applied"
+            )
+    return errors
 
 
 def _normalize_review_payload(
-    review: dict[str, Any], diff_line_map: dict[str, dict[str, set[int]]]
+    review: dict[str, Any],
+    diff_line_map: dict[str, dict[str, set[int]]],
+    diff_content_map: dict[str, dict[str, dict[int, str]]] | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     if not isinstance(review, dict):
         raise ValueError("Review payload must be a JSON object.")
@@ -141,6 +249,17 @@ def _normalize_review_payload(
                 continue
             normalized_comment["start_line"] = start_line
             normalized_comment["start_side"] = side
+
+        if diff_content_map is not None:
+            suggestion_errors = _validate_suggestion_blocks(
+                normalized_comment, diff_content_map
+            )
+            if suggestion_errors:
+                for err in suggestion_errors:
+                    errors.append(
+                        f"`comments[{index}]` for `{path}:{line}` on `{side}` has an invalid suggestion block: {err}."
+                    )
+                continue
 
         normalized_comments.append(normalized_comment)
 
@@ -269,8 +388,12 @@ def main() -> None:
                 on_poll=lambda current_run: record_run_session_link(progress, current_run),
             )
             review = poll_for_artifact(run.run_id, filename="review.json")
-            diff_line_map = _build_diff_line_map(spec_context.get("pr_files", []))
-            summary, comments = _normalize_review_payload(review, diff_line_map)
+            diff_line_map, diff_content_map = _build_diff_maps(
+                spec_context.get("pr_files", [])
+            )
+            summary, comments = _normalize_review_payload(
+                review, diff_line_map, diff_content_map
+            )
             if not summary and not comments:
                 progress.complete("I completed the review and did not identify any actionable feedback for this pull request.")
                 return

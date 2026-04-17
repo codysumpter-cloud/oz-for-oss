@@ -5,8 +5,11 @@ import unittest
 from review_pr import (
     _build_diff_line_map,
     _commentable_lines_for_patch,
+    _extract_suggestion_blocks,
+    _line_content_for_patch,
     _normalize_review_path,
     _normalize_review_payload,
+    _validate_suggestion_blocks,
 )
 
 
@@ -347,6 +350,261 @@ class NormalizeReviewPayloadTest(unittest.TestCase):
         summary, comments = _normalize_review_payload(review, diff_line_map)
         self.assertEqual(len(comments), 1)
         self.assertEqual(comments[0]["side"], "RIGHT")
+
+    def test_drops_comment_with_duplicate_prefix_suggestion(self) -> None:
+        review = {
+            "summary": "",
+            "comments": [
+                {
+                    "path": "src/example.py",
+                    "line": 12,
+                    "start_line": 11,
+                    "side": "RIGHT",
+                    "body": "\u26a0\ufe0f [IMPORTANT] Fix.\n\n```suggestion\n# comment above\nnew_body()\n```",
+                }
+            ],
+        }
+        diff_line_map = {"src/example.py": {"LEFT": set(), "RIGHT": {10, 11, 12, 13}}}
+        diff_content_map = {
+            "src/example.py": {
+                "LEFT": {},
+                "RIGHT": {
+                    10: "# comment above",
+                    11: "old_body()",
+                    12: "}",
+                    13: "next_line",
+                },
+            }
+        }
+        summary, comments = _normalize_review_payload(
+            review, diff_line_map, diff_content_map
+        )
+        self.assertEqual(comments, [])
+
+    def test_drops_comment_with_duplicate_suffix_suggestion(self) -> None:
+        review = {
+            "summary": "",
+            "comments": [
+                {
+                    "path": "src/example.py",
+                    "line": 12,
+                    "start_line": 11,
+                    "side": "RIGHT",
+                    "body": "\u26a0\ufe0f [IMPORTANT] Fix.\n\n```suggestion\nnew_body()\nreturn value\n```",
+                }
+            ],
+        }
+        diff_line_map = {"src/example.py": {"LEFT": set(), "RIGHT": {10, 11, 12, 13}}}
+        diff_content_map = {
+            "src/example.py": {
+                "LEFT": {},
+                "RIGHT": {
+                    10: "before",
+                    11: "old_body()",
+                    12: "other_line",
+                    13: "return value",
+                },
+            }
+        }
+        summary, comments = _normalize_review_payload(
+            review, diff_line_map, diff_content_map
+        )
+        self.assertEqual(comments, [])
+
+    def test_keeps_comment_with_valid_suggestion(self) -> None:
+        review = {
+            "summary": "",
+            "comments": [
+                {
+                    "path": "src/example.py",
+                    "line": 12,
+                    "start_line": 11,
+                    "side": "RIGHT",
+                    "body": "\u26a0\ufe0f [IMPORTANT] Fix.\n\n```suggestion\nnew_body()\nreturn value\n```",
+                }
+            ],
+        }
+        diff_line_map = {"src/example.py": {"LEFT": set(), "RIGHT": {10, 11, 12, 13}}}
+        diff_content_map = {
+            "src/example.py": {
+                "LEFT": {},
+                "RIGHT": {
+                    10: "# unrelated",
+                    11: "old_body()",
+                    12: "old_return",
+                    13: "next_line",
+                },
+            }
+        }
+        summary, comments = _normalize_review_payload(
+            review, diff_line_map, diff_content_map
+        )
+        self.assertEqual(len(comments), 1)
+
+    def test_keeps_comment_when_no_content_map_provided(self) -> None:
+        review = {
+            "summary": "",
+            "comments": [
+                {
+                    "path": "src/example.py",
+                    "line": 12,
+                    "start_line": 11,
+                    "side": "RIGHT",
+                    "body": "```suggestion\n# comment above\nnew_body()\n```",
+                }
+            ],
+        }
+        diff_line_map = {"src/example.py": {"LEFT": set(), "RIGHT": {11, 12}}}
+        summary, comments = _normalize_review_payload(review, diff_line_map)
+        self.assertEqual(len(comments), 1)
+
+    def test_keeps_comment_when_surrounding_context_not_in_diff(self) -> None:
+        # If we don't know what's above start_line or below line, we can't
+        # prove duplication, so keep the comment.
+        review = {
+            "summary": "",
+            "comments": [
+                {
+                    "path": "src/example.py",
+                    "line": 12,
+                    "start_line": 11,
+                    "side": "RIGHT",
+                    "body": "```suggestion\nnew_body()\nreturn value\n```",
+                }
+            ],
+        }
+        diff_line_map = {"src/example.py": {"LEFT": set(), "RIGHT": {11, 12}}}
+        diff_content_map = {
+            "src/example.py": {
+                "LEFT": {},
+                "RIGHT": {11: "old_body()", 12: "old_return"},
+            }
+        }
+        summary, comments = _normalize_review_payload(
+            review, diff_line_map, diff_content_map
+        )
+        self.assertEqual(len(comments), 1)
+
+
+class LineContentForPatchTest(unittest.TestCase):
+    def test_captures_content_for_each_side(self) -> None:
+        patch = """@@ -10,3 +10,4 @@
+ context
+-old_value
++new_value
+ unchanged
+"""
+        result = _line_content_for_patch(patch)
+        self.assertEqual(result["LEFT"], {10: "context", 11: "old_value", 12: "unchanged"})
+        self.assertEqual(
+            result["RIGHT"],
+            {10: "context", 11: "new_value", 12: "unchanged"},
+        )
+
+    def test_empty_patch_returns_empty_content(self) -> None:
+        result = _line_content_for_patch(None)
+        self.assertEqual(result["LEFT"], {})
+        self.assertEqual(result["RIGHT"], {})
+
+
+class ExtractSuggestionBlocksTest(unittest.TestCase):
+    def test_extracts_single_block(self) -> None:
+        body = "Prefix.\n\n```suggestion\nfoo()\nbar()\n```\n\nTrailing text."
+        blocks = _extract_suggestion_blocks(body)
+        self.assertEqual(blocks, [["foo()", "bar()"]])
+
+    def test_extracts_multiple_blocks(self) -> None:
+        body = "```suggestion\nalpha\n```\n\nsecond\n\n```suggestion\nbeta\ngamma\n```\n"
+        blocks = _extract_suggestion_blocks(body)
+        self.assertEqual(blocks, [["alpha"], ["beta", "gamma"]])
+
+    def test_returns_empty_list_when_no_blocks(self) -> None:
+        self.assertEqual(_extract_suggestion_blocks("no suggestion here"), [])
+        self.assertEqual(_extract_suggestion_blocks(""), [])
+        self.assertEqual(_extract_suggestion_blocks(None), [])
+
+    def test_strips_trailing_cr_from_crlf_bodies(self) -> None:
+        body = "Prefix.\r\n\r\n```suggestion\r\nfoo()\r\nbar()\r\n```\r\n"
+        blocks = _extract_suggestion_blocks(body)
+        self.assertEqual(blocks, [["foo()", "bar()"]])
+
+
+class ValidateSuggestionBlocksTest(unittest.TestCase):
+    def test_flags_duplicate_prefix(self) -> None:
+        comment = {
+            "path": "src/example.py",
+            "side": "RIGHT",
+            "line": 12,
+            "start_line": 11,
+            "body": "```suggestion\n# header\nbody()\n```",
+        }
+        diff_content_map = {
+            "src/example.py": {
+                "LEFT": {},
+                "RIGHT": {10: "# header", 11: "old", 12: "end"},
+            }
+        }
+        errors = _validate_suggestion_blocks(comment, diff_content_map)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("duplicates the context line immediately above", errors[0])
+
+    def test_flags_duplicate_suffix(self) -> None:
+        comment = {
+            "path": "src/example.py",
+            "side": "RIGHT",
+            "line": 12,
+            "body": "```suggestion\nbody()\nfooter\n```",
+        }
+        diff_content_map = {
+            "src/example.py": {
+                "LEFT": {},
+                "RIGHT": {12: "old", 13: "footer"},
+            }
+        }
+        errors = _validate_suggestion_blocks(comment, diff_content_map)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("duplicates the context line immediately below", errors[0])
+
+    def test_returns_no_errors_for_valid_block(self) -> None:
+        comment = {
+            "path": "src/example.py",
+            "side": "RIGHT",
+            "line": 12,
+            "start_line": 11,
+            "body": "```suggestion\nalpha\nbeta\n```",
+        }
+        diff_content_map = {
+            "src/example.py": {
+                "LEFT": {},
+                "RIGHT": {10: "# prev", 11: "old1", 12: "old2", 13: "next"},
+            }
+        }
+        self.assertEqual(_validate_suggestion_blocks(comment, diff_content_map), [])
+
+    def test_ignores_comments_without_suggestion_blocks(self) -> None:
+        comment = {
+            "path": "src/example.py",
+            "side": "RIGHT",
+            "line": 12,
+            "body": "No suggestion block here.",
+        }
+        diff_content_map = {
+            "src/example.py": {"LEFT": {}, "RIGHT": {12: "content"}}
+        }
+        self.assertEqual(_validate_suggestion_blocks(comment, diff_content_map), [])
+
+    def test_handles_missing_surrounding_context(self) -> None:
+        comment = {
+            "path": "src/example.py",
+            "side": "RIGHT",
+            "line": 12,
+            "start_line": 11,
+            "body": "```suggestion\nalpha\nbeta\n```",
+        }
+        diff_content_map = {
+            "src/example.py": {"LEFT": {}, "RIGHT": {11: "old", 12: "old2"}}
+        }
+        self.assertEqual(_validate_suggestion_blocks(comment, diff_content_map), [])
 
 
 if __name__ == "__main__":
