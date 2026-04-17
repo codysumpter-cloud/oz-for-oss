@@ -78,6 +78,11 @@ Rules:
 
 - Match the exact indentation of the original file.
 - Include only replacement code.
+- The block content replaces **exactly** the lines `start_line`–`line` inclusive. Every line inside the block becomes the new file content for that range, and GitHub leaves all other lines untouched.
+- Do **not** include lines outside that range. Lines above `start_line` and below `line` remain in the file; repeating them inside the block causes them to appear twice after the suggestion is committed.
+- Never open the block with a line that already appears immediately above `start_line`, and never close the block with a line that already appears immediately below `line`. If you need those lines as anchors, widen `start_line` or `line` so they are actually part of the replaced range.
+- Count brace, bracket, paren, and block-delimiter depth (`{`, `[`, `(`, `end`, etc.) across the original replaced lines and ensure the replacement ends at the same depth. Do not emit phantom closing tokens, and do not drop required ones.
+- When unsure of the surrounding context, widen `start_line`/`line` to include enough real lines from the diff rather than guessing at surrounding tokens.
 - For multi-line suggestions, set `start_line` to the first line and `line` to the last line.
 
 ## Output Format
