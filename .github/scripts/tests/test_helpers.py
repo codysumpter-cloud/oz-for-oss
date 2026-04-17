@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 
+from types import SimpleNamespace
+
 from oz_workflows.helpers import (
     _summarize_commits,
     all_review_comments_text,
@@ -11,10 +13,12 @@ from oz_workflows.helpers import (
     coauthor_prompt_lines,
     conventional_commit_prefix,
     extract_issue_numbers_from_text,
+    find_matching_spec_prs,
     is_automation_user,
     is_spec_only_pr,
     org_member_comments_text,
     resolve_coauthor_line,
+    resolve_issue_number_for_pr,
     resolve_progress_requester_login,
     review_thread_comments_text,
     triggering_comment_prompt_text,
@@ -490,6 +494,103 @@ class FakeGitHubClientWithCompare:
 
     def compare(self, base: str, head: str) -> _FakeComparison:
         return _FakeComparison(self._commits)
+
+
+class ResolveIssueNumberForPrTest(unittest.TestCase):
+    def test_uses_provided_issue_cache_to_avoid_duplicate_calls(self) -> None:
+        call_count = {"n": 0}
+
+        class FakeGitHub:
+            def get_issue(self, number: int) -> SimpleNamespace:
+                call_count["n"] += 1
+                return SimpleNamespace(pull_request=None, number=number)
+
+        github = FakeGitHub()
+        pr = SimpleNamespace(
+            head=SimpleNamespace(ref="oz-agent/implement-issue-42"),
+            body="",
+        )
+        cache: dict[int, object] = {}
+        # First resolution populates the cache.
+        first = resolve_issue_number_for_pr(
+            github, "acme", "widgets", pr, [], issue_cache=cache
+        )
+        # Second resolution should reuse the cache and not issue another call.
+        second = resolve_issue_number_for_pr(
+            github, "acme", "widgets", pr, [], issue_cache=cache
+        )
+        self.assertEqual(first, 42)
+        self.assertEqual(second, 42)
+        self.assertEqual(call_count["n"], 1)
+        self.assertIn(42, cache)
+
+    def test_returns_none_when_no_candidates(self) -> None:
+        class FakeGitHub:
+            def get_issue(self, number: int) -> SimpleNamespace:
+                raise AssertionError("get_issue should not be called when there are no candidates")
+
+        pr = SimpleNamespace(head=SimpleNamespace(ref="main"), body="")
+        self.assertIsNone(
+            resolve_issue_number_for_pr(FakeGitHub(), "acme", "widgets", pr, [])
+        )
+
+    def test_skips_candidates_that_are_pull_requests(self) -> None:
+        class FakeGitHub:
+            def __init__(self) -> None:
+                self.seen: list[int] = []
+
+            def get_issue(self, number: int) -> SimpleNamespace:
+                self.seen.append(number)
+                # First candidate (from branch) looks like a PR, second
+                # (from spec files) is a real issue.
+                pull_request = object() if number == 100 else None
+                return SimpleNamespace(pull_request=pull_request, number=number)
+
+        github = FakeGitHub()
+        pr = SimpleNamespace(
+            head=SimpleNamespace(ref="oz-agent/spec-issue-100"),
+            body="",
+        )
+        result = resolve_issue_number_for_pr(
+            github, "acme", "widgets", pr, ["specs/GH42/product.md"]
+        )
+        self.assertEqual(result, 42)
+        self.assertEqual(github.seen, [100, 42])
+
+
+class FindMatchingSpecPrsTest(unittest.TestCase):
+    def test_reads_labels_directly_without_calling_as_issue(self) -> None:
+        pr_calls = {"as_issue": 0}
+
+        class FakePR:
+            def __init__(self, number: int, label_names: list[str]) -> None:
+                self.number = number
+                self.html_url = f"https://github.com/acme/widgets/pull/{number}"
+                self.updated_at = "2026-04-01T00:00:00Z"
+                self.head = SimpleNamespace(
+                    ref="oz-agent/spec-issue-7",
+                    repo=SimpleNamespace(full_name="acme/widgets"),
+                )
+                self.labels = [SimpleNamespace(name=name) for name in label_names]
+
+            def as_issue(self) -> None:
+                pr_calls["as_issue"] += 1
+                raise AssertionError("find_matching_spec_prs should not call pr.as_issue()")
+
+            def get_files(self) -> list[SimpleNamespace]:
+                return [SimpleNamespace(filename="specs/GH7/product.md")]
+
+        class FakeGitHub:
+            def get_pulls(self, *, state: str, head: str) -> list[FakePR]:
+                return [
+                    FakePR(1, ["plan-approved"]),
+                    FakePR(2, []),
+                ]
+
+        approved, unapproved = find_matching_spec_prs(FakeGitHub(), "acme", "widgets", 7)
+        self.assertEqual([pr["number"] for pr in approved], [1])
+        self.assertEqual([pr["number"] for pr in unapproved], [2])
+        self.assertEqual(pr_calls["as_issue"], 0)
 
 
 if __name__ == "__main__":

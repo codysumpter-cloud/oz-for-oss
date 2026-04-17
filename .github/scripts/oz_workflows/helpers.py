@@ -827,7 +827,11 @@ def find_matching_spec_prs(
     approved: list[dict[str, Any]] = []
     unapproved: list[dict[str, Any]] = []
     for pr in matching:
-        labels = [get_label_name(label) for label in pr.as_issue().labels]
+        # Use ``pr.labels`` directly instead of ``pr.as_issue().labels``.
+        # ``PullRequest.as_issue()`` issues a fresh ``GET /issues/{n}`` call for
+        # every PR, whereas labels are already attached to the ``PullRequest``
+        # object returned by ``get_pulls``.
+        labels = [get_label_name(label) for label in pr.labels]
         files = list(pr.get_files())
         spec_files = [
             str(file.filename)
@@ -973,6 +977,8 @@ def resolve_issue_number_for_pr(
     repo: str,
     pr: Any,
     changed_files: list[str],
+    *,
+    issue_cache: dict[int, Any] | None = None,
 ) -> int | None:
     head_ref = str(get_field(get_field(pr, "head"), "ref") or "")
     branch_issue_matches = [
@@ -988,7 +994,15 @@ def resolve_issue_number_for_pr(
     explicit_issue_numbers = extract_issue_numbers_from_text(owner, repo, str(get_field(pr, "body") or ""))
     candidates = list(dict.fromkeys(branch_issue_matches + spec_file_issue_numbers + explicit_issue_numbers))
     for candidate in candidates:
-        issue = github.get_issue(candidate)
+        # Reuse a caller-provided cache so repeated calls across multiple
+        # PRs in the same process do not re-issue ``GET /issues/{n}`` for
+        # candidate numbers we have already resolved.
+        if issue_cache is not None and candidate in issue_cache:
+            issue = issue_cache[candidate]
+        else:
+            issue = github.get_issue(candidate)
+            if issue_cache is not None:
+                issue_cache[candidate] = issue
         if not issue.pull_request:
             return candidate
     return None
