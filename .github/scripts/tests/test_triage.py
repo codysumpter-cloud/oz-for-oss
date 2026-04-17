@@ -8,27 +8,21 @@ from triage_new_issues import (
     TRIAGE_DISCLAIMER,
     _lowercase_first,
     apply_triage_result,
-    build_duplicate_comment,
     build_duplicate_section,
-    build_follow_up_comment,
     build_follow_up_section,
     build_question_reasoning_section,
-    build_triage_summary_comment,
     extract_duplicate_of,
     extract_follow_up_questions,
     fetch_command_signatures_context,
-    follow_up_comment_metadata,
-    duplicate_comment_metadata,
+    _follow_up_comment_metadata,
+    _duplicate_comment_metadata,
     extract_requested_labels,
     format_recent_issues_for_dedupe,
     format_issue_comments,
     load_recent_issues_for_dedupe,
     resolve_issue_number_override,
-    sync_duplicate_comment,
-    sync_follow_up_comment,
-    sync_triage_summary_comment,
     triage_heuristics_prompt,
-    triage_summary_comment_metadata,
+    _triage_summary_comment_metadata,
     _cleanup_legacy_triage_comments,
 )
 
@@ -580,106 +574,6 @@ class ApplyTriageResultTest(unittest.TestCase):
         self.assertNotIn("triaged", github.added_labels)
 
 
-class SyncFollowUpCommentTest(unittest.TestCase):
-    def test_creates_managed_follow_up_comment(self) -> None:
-        github = FakeTriageGitHubClient()
-        issue = {"number": 42, "user": {"login": "alice"}}
-        sync_follow_up_comment(
-            github,
-            "acme",
-            "widgets",
-            issue,
-            questions=["What Warp version is affected?"],
-        )
-        self.assertEqual(len(github.comments), 1)
-        self.assertEqual(
-            github.comments[0]["body"],
-            build_follow_up_comment(issue, ["What Warp version is affected?"]),
-        )
-
-    def test_deletes_existing_comment_when_questions_empty(self) -> None:
-        github = FakeTriageGitHubClient()
-        issue = {"number": 42, "user": {"login": "alice"}}
-        sync_follow_up_comment(
-            github,
-            "acme",
-            "widgets",
-            issue,
-            questions=["What Warp version is affected?"],
-        )
-        self.assertEqual(len(github.comments), 1)
-        comment_id = int(github.comments[0]["id"])
-        sync_follow_up_comment(github, "acme", "widgets", issue, questions=[])
-        self.assertIn(comment_id, github.deleted_comment_ids)
-        self.assertEqual(len(github.comments), 0)
-
-    def test_noop_when_no_existing_comment_and_questions_empty(self) -> None:
-        github = FakeTriageGitHubClient()
-        issue = {"number": 42, "user": {"login": "alice"}}
-        sync_follow_up_comment(github, "acme", "widgets", issue, questions=[])
-        self.assertEqual(len(github.comments), 0)
-        self.assertEqual(github.deleted_comment_ids, [])
-
-class SyncTriageSummaryCommentTest(unittest.TestCase):
-    def test_creates_managed_summary_comment(self) -> None:
-        github = FakeTriageGitHubClient()
-        issue = {"number": 42}
-        sync_triage_summary_comment(
-            github,
-            "acme",
-            "widgets",
-            issue,
-            issue_body="## Triage summary",
-        )
-        self.assertEqual(len(github.comments), 1)
-        self.assertEqual(
-            github.comments[0]["body"],
-            build_triage_summary_comment(issue, "## Triage summary"),
-        )
-
-    def test_updates_existing_managed_summary_comment(self) -> None:
-        github = FakeTriageGitHubClient()
-        issue = {"number": 42}
-        sync_triage_summary_comment(
-            github,
-            "acme",
-            "widgets",
-            issue,
-            issue_body="## First",
-        )
-        sync_triage_summary_comment(
-            github,
-            "acme",
-            "widgets",
-            issue,
-            issue_body="## Second",
-        )
-        self.assertEqual(len(github.comments), 1)
-        self.assertIn("## Second", str(github.comments[0]["body"]))
-        self.assertIn(triage_summary_comment_metadata(42), str(github.comments[0]["body"]))
-
-    def test_deletes_existing_summary_comment_when_issue_body_empty(self) -> None:
-        github = FakeTriageGitHubClient()
-        issue = {"number": 42}
-        sync_triage_summary_comment(
-            github,
-            "acme",
-            "widgets",
-            issue,
-            issue_body="## First",
-        )
-        comment_id = int(github.comments[0]["id"])
-        sync_triage_summary_comment(
-            github,
-            "acme",
-            "widgets",
-            issue,
-            issue_body="",
-        )
-        self.assertEqual(len(github.comments), 0)
-        self.assertIn(comment_id, github.deleted_comment_ids)
-
-
 class ExtractDuplicateOfTest(unittest.TestCase):
     def test_extracts_valid_duplicate_entries(self) -> None:
         result = {
@@ -735,59 +629,6 @@ class ExtractDuplicateOfTest(unittest.TestCase):
             extract_duplicate_of(result, current_issue_number=42),
             [{"issue_number": 10, "title": "First", "similarity_reason": ""}],
         )
-
-
-class BuildDuplicateCommentTest(unittest.TestCase):
-    def test_builds_comment_with_duplicate_links(self) -> None:
-        issue = {"number": 42, "user": {"login": "alice"}}
-        duplicates = [
-            {"issue_number": 10, "title": "Original bug", "similarity_reason": "Same error message"},
-            {"issue_number": 20, "title": "Another report", "similarity_reason": "Same symptoms"},
-        ]
-        body = build_duplicate_comment(issue, duplicates)
-        self.assertIn("@alice", body)
-        self.assertIn("#10", body)
-        self.assertIn("#20", body)
-        self.assertIn("Original bug", body)
-        self.assertIn("Why it looks similar: Same error message", body)
-        self.assertIn("close it as a duplicate after review", body)
-        self.assertIn("oz-agent-metadata", body)
-
-
-class SyncDuplicateCommentTest(unittest.TestCase):
-    def test_creates_managed_duplicate_comment(self) -> None:
-        github = FakeTriageGitHubClient()
-        issue = {"number": 42, "user": {"login": "alice"}}
-        sync_duplicate_comment(
-            github,
-            "acme",
-            "widgets",
-            issue,
-            duplicates=[
-                {"issue_number": 10, "title": "Original", "similarity_reason": "Same"},
-                {"issue_number": 20, "title": "Another", "similarity_reason": "Same"},
-            ],
-        )
-        self.assertEqual(len(github.comments), 1)
-        self.assertIn("#10", str(github.comments[0]["body"]))
-        self.assertIn("#20", str(github.comments[0]["body"]))
-
-    def test_preserves_existing_comment_when_duplicates_empty(self) -> None:
-        github = FakeTriageGitHubClient()
-        issue = {"number": 42, "user": {"login": "alice"}}
-        sync_duplicate_comment(
-            github,
-            "acme",
-            "widgets",
-            issue,
-            duplicates=[
-                {"issue_number": 10, "title": "Original", "similarity_reason": "Same"},
-            ],
-        )
-        self.assertEqual(len(github.comments), 1)
-        sync_duplicate_comment(github, "acme", "widgets", issue, duplicates=[])
-        self.assertEqual(github.deleted_comment_ids, [])
-        self.assertEqual(len(github.comments), 1)
 
 
 class FormatTriageSessionLinkTest(unittest.TestCase):
@@ -861,15 +702,15 @@ class CleanupLegacyTriageCommentsTest(unittest.TestCase):
         issue_number = 42
         follow_up_body = build_comment_body(
             "follow-up content",
-            follow_up_comment_metadata(issue_number),
+            _follow_up_comment_metadata(issue_number),
         )
         dup_body = build_comment_body(
             "duplicate content",
-            duplicate_comment_metadata(issue_number),
+            _duplicate_comment_metadata(issue_number),
         )
-        summary_body = build_triage_summary_comment(
-            {"number": issue_number},
+        summary_body = build_comment_body(
             "## Triage summary",
+            _triage_summary_comment_metadata(issue_number),
         )
         github.create_comment("acme", "widgets", issue_number, follow_up_body)
         github.create_comment("acme", "widgets", issue_number, dup_body)
