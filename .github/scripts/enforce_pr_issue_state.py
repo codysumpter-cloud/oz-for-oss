@@ -7,7 +7,12 @@ from github import Auth, Github
 
 from oz_workflows.actions import set_output
 from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, workspace
-from oz_workflows.helpers import extract_issue_numbers_from_text, ORG_MEMBER_ASSOCIATIONS, WorkflowProgressComment
+from oz_workflows.helpers import (
+    extract_issue_numbers_from_text,
+    format_enforce_start_line,
+    ORG_MEMBER_ASSOCIATIONS,
+    WorkflowProgressComment,
+)
 from oz_workflows.artifacts import poll_for_artifact
 from oz_workflows.oz_client import build_agent_config, run_agent
 
@@ -55,6 +60,18 @@ def main() -> None:
             if not issue.pull_request:
                 explicit_issue = issue
                 break
+
+        # Post a state-aware start line so the progress comment framing
+        # is consistent with the rest of the Oz workflows even on the
+        # enforce path. When we exit via ``cleanup()`` below (the allow
+        # case) the comment is deleted, so this start line is only
+        # user-visible on the close path.
+        progress.start(
+            format_enforce_start_line(
+                explicit_issue=explicit_issue is not None,
+                change_kind=change_kind,
+            )
+        )
 
         if explicit_issue:
             labels = [label.name for label in explicit_issue.labels]

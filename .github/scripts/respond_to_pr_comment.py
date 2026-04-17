@@ -13,6 +13,7 @@ from oz_workflows.helpers import (
     branch_updated_since,
     build_next_steps_section,
     coauthor_prompt_lines,
+    format_pr_comment_start_line,
     is_automation_user,
     org_member_comments_text,
     record_run_session_link,
@@ -140,6 +141,14 @@ def _run_implementation(
     coauthor_line = resolve_coauthor_line(client, event)
     coauthor_directives = coauthor_prompt_lines(coauthor_line)
 
+    spec_context = resolve_spec_context_for_pr(
+        github,
+        owner,
+        repo,
+        pr,
+        workspace=workspace(),
+    )
+    has_spec_context = bool(spec_context.get("spec_entries"))
     progress = WorkflowProgressComment(
         github,
         owner,
@@ -150,14 +159,11 @@ def _run_implementation(
         requester_login=requester,
         review_reply_target=review_reply_target,
     )
-    progress.start("Oz is working on changes requested in this PR.")
-
-    spec_context = resolve_spec_context_for_pr(
-        github,
-        owner,
-        repo,
-        pr,
-        workspace=workspace(),
+    progress.start(
+        format_pr_comment_start_line(
+            is_review_reply=review_reply_target is not None,
+            has_spec_context=has_spec_context,
+        )
     )
     spec_sections: list[str] = []
     selected_spec_pr = spec_context.get("selected_spec_pr")

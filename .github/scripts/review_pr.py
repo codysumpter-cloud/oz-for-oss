@@ -10,6 +10,7 @@ from github.File import File
 
 from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.helpers import (
+    format_review_start_line,
     is_spec_only_pr,
     record_run_session_link,
     resolve_spec_context_for_pr,
@@ -296,6 +297,23 @@ def main() -> None:
             return
         if comment_id_raw:
             pr.get_issue_comment(int(comment_id_raw)).create_reaction("eyes")
+        spec_context = resolve_spec_context_for_pr(
+            github,
+            owner,
+            repo,
+            pr,
+            workspace=workspace(),
+        )
+        changed_files: list[str] = spec_context.get("changed_files", [])
+        spec_only = is_spec_only_pr(changed_files)
+        # Re-review requests arrive via the `/oz-review` slash command,
+        # which resolves trigger_source to the triggering comment event
+        # (``issue_comment`` or ``pull_request_review_comment``). A first
+        # automated review runs through ``pull_request`` / ``pr-hooks``.
+        is_rereview = trigger_source in {
+            "issue_comment",
+            "pull_request_review_comment",
+        }
         progress = WorkflowProgressComment(
             github,
             owner,
@@ -304,14 +322,12 @@ def main() -> None:
             workflow="review-pull-request",
             requester_login=requester,
         )
-        progress.start("Oz is reviewing this pull request.")
-
-        spec_context = resolve_spec_context_for_pr(
-            github,
-            owner,
-            repo,
-            pr,
-            workspace=workspace(),
+        progress.start(
+            format_review_start_line(
+                spec_only=spec_only,
+                is_rereview=is_rereview,
+                focus=focus,
+            )
         )
         spec_sections = []
         selected_spec_pr = spec_context.get("selected_spec_pr")
@@ -330,8 +346,6 @@ def main() -> None:
             else "No associated issue resolved for spec lookup."
         )
 
-        changed_files: list[str] = spec_context.get("changed_files", [])
-        spec_only = is_spec_only_pr(changed_files)
         skill_name = "review-spec" if spec_only else "review-pr"
 
         focus_line = (

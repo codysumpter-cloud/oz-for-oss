@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 from triage_new_issues import (
     TRIAGE_DISCLAIMER,
     _lowercase_first,
+    _record_triage_session_link,
     apply_triage_result,
     build_duplicate_section,
     build_follow_up_section,
@@ -757,6 +758,47 @@ class CleanupLegacyTriageCommentsTest(unittest.TestCase):
         )
         self.assertEqual(issue.get_comments_calls, 0)
         self.assertEqual(len(github.comments), 0)
+
+
+class RecordTriageSessionLinkTest(unittest.TestCase):
+    def test_first_pass_says_triaging(self) -> None:
+        github = FakeTriageGitHubClient()
+        progress = WorkflowProgressComment(
+            github, "acme", "widgets", 42,
+            workflow="triage-new-issues",
+            event_payload={"sender": {"login": "alice"}},
+        )
+        progress.start("initial")
+        _record_triage_session_link(
+            progress,
+            type("Run", (), {
+                "run_id": "oz-run-1",
+                "session_link": "https://app.warp.dev/session/abc",
+            })(),
+            is_retriage=False,
+        )
+        body = str(github.comments[0]["body"])
+        self.assertIn("Oz is triaging this issue.", body)
+        self.assertNotIn("re-triaging", body)
+
+    def test_retriage_says_re_triaging(self) -> None:
+        github = FakeTriageGitHubClient()
+        progress = WorkflowProgressComment(
+            github, "acme", "widgets", 42,
+            workflow="triage-new-issues",
+            event_payload={"sender": {"login": "alice"}},
+        )
+        progress.start("initial")
+        _record_triage_session_link(
+            progress,
+            type("Run", (), {
+                "run_id": "oz-run-2",
+                "session_link": "https://app.warp.dev/session/abc",
+            })(),
+            is_retriage=True,
+        )
+        body = str(github.comments[0]["body"])
+        self.assertIn("re-triaging", body)
 
 
 class ReplaceBodyTest(unittest.TestCase):

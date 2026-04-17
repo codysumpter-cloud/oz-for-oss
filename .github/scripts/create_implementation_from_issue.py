@@ -3,6 +3,7 @@ from contextlib import closing
 
 from datetime import timedelta
 from textwrap import dedent
+from typing import Any
 from github import Auth, Github
 
 from oz_workflows.actions import append_summary
@@ -13,6 +14,8 @@ from oz_workflows.helpers import (
     build_next_steps_section,
     coauthor_prompt_lines,
     conventional_commit_prefix,
+    format_implementation_complete_line,
+    format_implementation_start_line,
     get_login,
     is_automation_user,
     org_member_comments_text,
@@ -64,6 +67,24 @@ def main() -> None:
             if selected_spec_pr
             else f"oz-agent/implement-issue-{issue_number}"
         )
+        should_noop = (
+            not selected_spec_pr
+            and not spec_context["spec_entries"]
+            and len(spec_context["unapproved_spec_prs"]) > 0
+        )
+        # Detect an existing open implementation PR so the start and
+        # complete lines can say "updating" vs "creating". When the
+        # run targets the linked approved spec PR's branch directly we
+        # treat that as the spec-backed flow instead.
+        existing_implementation_prs: list[Any] = []
+        if not selected_spec_pr:
+            existing_implementation_prs = list(
+                github.get_pulls(state="open", head=f"{owner}:{target_branch}")
+            )
+        has_existing_implementation_pr = bool(existing_implementation_prs)
+        unapproved_numbers = [
+            int(pr["number"]) for pr in spec_context["unapproved_spec_prs"]
+        ]
         progress = WorkflowProgressComment(
             github,
             owner,
@@ -72,11 +93,13 @@ def main() -> None:
             workflow="create-implementation-from-issue",
             event_payload=event,
         )
-        progress.start("Oz is working on an implementation for this issue.")
-        should_noop = (
-            not selected_spec_pr
-            and not spec_context["spec_entries"]
-            and len(spec_context["unapproved_spec_prs"]) > 0
+        progress.start(
+            format_implementation_start_line(
+                spec_context_source=spec_context["spec_context_source"],
+                should_noop=should_noop,
+                existing_implementation_pr=has_existing_implementation_pr,
+                unapproved_spec_pr_numbers=unapproved_numbers,
+            )
         )
         if should_noop:
             progress.complete(
@@ -218,12 +241,13 @@ def main() -> None:
                     body=pr_body,
                 )
                 progress.complete(
-                    f"I pushed implementation updates to the linked approved spec PR: {selected_spec_pr['url']}\n\n"
+                    f"{format_implementation_complete_line(updated_spec_pr=True, existing_implementation_pr=False, pr_url=selected_spec_pr['url'])}\n\n"
                     f"{next_steps_section}"
                 )
                 return
 
             existing_prs = list(github.get_pulls(state="open", head=f"{owner}:{target_branch}"))
+            updated_existing = bool(existing_prs)
             if existing_prs:
                 pr = existing_prs[0]
                 pr.edit(title=pr_title, body=pr_body)
@@ -236,7 +260,7 @@ def main() -> None:
                     draft=True,
                 )
             progress.complete(
-                f"I created or updated a draft implementation PR for this issue: {pr.html_url}\n\n"
+                f"{format_implementation_complete_line(updated_spec_pr=False, existing_implementation_pr=updated_existing, pr_url=pr.html_url)}\n\n"
                 f"{next_steps_section}"
             )
         except Exception:
