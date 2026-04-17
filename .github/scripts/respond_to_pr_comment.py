@@ -4,6 +4,7 @@ from contextlib import closing
 from datetime import timedelta
 from textwrap import dedent
 from github import Auth, Github
+from github.PullRequest import PullRequest
 from github.Repository import Repository
 
 from oz_workflows.env import load_event, optional_env, repo_parts, repo_slug, require_env, workspace
@@ -121,20 +122,20 @@ def _run_implementation(
     github: Repository,
     owner: str,
     repo: str,
-    pr: object,
+    pr: PullRequest,
     *,
     event: dict,
     triggering_body: str,
     additional_context: str,
     context_label: str,
     requester: str,
-    review_reply_target: tuple[object, int] | None = None,
+    review_reply_target: tuple[PullRequest, int] | None = None,
 ) -> None:
-    pr_number = int(getattr(pr, "number"))
-    head_branch = getattr(getattr(pr, "head"), "ref")
-    base_branch = getattr(getattr(pr, "base"), "ref")
-    pr_title = getattr(pr, "title", "") or ""
-    pr_body = getattr(pr, "body", "") or ""
+    pr_number = pr.number
+    head_branch = pr.head.ref
+    base_branch = pr.base.ref
+    pr_title = pr.title or ""
+    pr_body = pr.body or ""
 
     coauthor_line = resolve_coauthor_line(client, event)
     coauthor_directives = coauthor_prompt_lines(coauthor_line)

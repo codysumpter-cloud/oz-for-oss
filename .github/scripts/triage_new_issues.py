@@ -12,10 +12,10 @@ from github.Repository import Repository
 from oz_workflows.actions import append_summary, warning
 from oz_workflows.env import load_event, optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.helpers import (
-    _field,
+    get_field,
     _format_triage_session_link,
-    _label_name,
-    _login,
+    get_label_name,
+    get_login,
     build_comment_body,
     format_issue_comments_for_prompt,
     is_automation_user,
@@ -123,7 +123,7 @@ def main() -> None:
         if not issues:
             append_summary("No recent untriaged issues found.\n")
             return
-        queue_text = ", ".join(f"#{_field(issue, 'number')}" for issue in issues)
+        queue_text = ", ".join(f"#{get_field(issue, 'number')}" for issue in issues)
         append_summary(f"Triage queue: {queue_text}\n")
         template_context = discover_issue_templates(workspace())
         recent_open_issues = load_recent_issues_for_dedupe(github)
@@ -135,7 +135,7 @@ def main() -> None:
         )
 
         for issue in issues:
-            issue_number = int(_field(issue, "number"))
+            issue_number = int(get_field(issue, "number"))
             try:
                 process_issue(
                     github,
@@ -215,8 +215,13 @@ def process_issue(
         event_payload=event_payload,
     )
     progress.start("Oz is starting to work on triaging this issue.")
-    _cleanup_legacy_triage_comments(github, owner, repo, issue)
+    # Fetch the issue comments once and reuse them for legacy-comment cleanup
+    # and the triage prompt so we avoid two back-to-back
+    # ``GET /issues/{n}/comments`` calls on the same issue.
     comments = list(issue.get_comments())
+    _cleanup_legacy_triage_comments(
+        github, owner, repo, issue, comments=comments
+    )
     comments_text = format_issue_comments(comments, exclude_comment_id=triggering_comment_id)
     current_body = str(issue.body or "").strip()
     original_report = extract_original_issue_report(current_body)
@@ -407,7 +412,7 @@ def apply_triage_result(
     repo_labels: dict[str, Any],
 ) -> None:
     """Apply the structured triage result back onto the GitHub issue."""
-    issue_number = int(_field(issue, "number"))
+    issue_number = int(get_field(issue, "number"))
     result_labels = extract_requested_labels(result)
     follow_up_questions = extract_follow_up_questions(result)
     if follow_up_questions and "needs-info" not in result_labels:
@@ -416,7 +421,7 @@ def apply_triage_result(
     requested_labels = dedupe_strings(
         result_labels if has_needs_info else [*result_labels, "triaged"]
     )
-    current_labels = dedupe_strings([_label_name(raw_label) for raw_label in _field(issue, "labels", [])])
+    current_labels = dedupe_strings([get_label_name(raw_label) for raw_label in get_field(issue, "labels", [])])
     managed_labels: list[str] = []
     for label_name in requested_labels:
         if label_name in configured_labels:
@@ -436,15 +441,9 @@ def apply_triage_result(
         warning(f"Skipping unmanaged label '{label_name}' for issue #{issue_number}")
     for label_name in current_labels:
         if should_replace_triage_label(label_name) and label_name not in managed_labels:
-            if hasattr(issue, "remove_from_labels"):
-                issue.remove_from_labels(label_name)
-            else:
-                github.remove_label(owner, repo, issue_number, label_name)
+            issue.remove_from_labels(label_name)
     if managed_labels:
-        if hasattr(issue, "add_to_labels"):
-            issue.add_to_labels(*managed_labels)
-        else:
-            github.add_labels(owner, repo, issue_number, managed_labels)
+        issue.add_to_labels(*managed_labels)
 
 
 def ensure_label_exists(
@@ -520,6 +519,9 @@ def should_replace_triage_label(label_name: str) -> bool:
 
 def _record_triage_session_link(progress: WorkflowProgressComment, run: object) -> None:
     """Triage-specific session link callback that uses replace_body for Stage 2."""
+    oz_run_id = getattr(run, "run_id", None) or ""
+    if oz_run_id:
+        progress.record_oz_run_id(str(oz_run_id))
     session_link = getattr(run, "session_link", None) or ""
     if not session_link.strip():
         return
@@ -535,25 +537,25 @@ def _cleanup_legacy_triage_comments(
     owner: str,
     repo: str,
     issue: Any,
+    *,
+    comments: list[Any] | None = None,
 ) -> None:
-    """Delete orphaned standalone follow-up, duplicate, and summary comments from prior triage runs."""
-    issue_number = int(_field(issue, "number"))
+    """Delete orphaned standalone follow-up, duplicate, and summary comments from prior triage runs.
+
+    Callers that have already fetched the issue's comments may pass them in
+    via *comments* to avoid an extra ``GET /issues/{n}/comments`` API call.
+    """
+    issue_number = int(get_field(issue, "number"))
     follow_up_marker = _follow_up_comment_metadata(issue_number)
     duplicate_marker = _duplicate_comment_metadata(issue_number)
     summary_marker = _triage_summary_comment_metadata(issue_number)
-    comments = (
-        list(issue.get_comments())
-        if hasattr(issue, "get_comments")
-        else github.list_issue_comments(owner, repo, issue_number)
-    )
+    if comments is None:
+        comments = list(issue.get_comments())
     for comment in comments:
-        body = str(_field(comment, "body") or "")
+        body = str(get_field(comment, "body") or "")
         if follow_up_marker in body or duplicate_marker in body or summary_marker in body:
             try:
-                if hasattr(comment, "delete"):
-                    comment.delete()
-                else:
-                    github.delete_comment(owner, repo, int(_field(comment, "id")))
+                comment.delete()
             except Exception:
                 pass
 
@@ -582,7 +584,7 @@ def build_follow_up_section(issue: Any, questions: list[dict[str, str]]) -> str:
     Only the question text is rendered here; reasoning is handled
     separately by ``build_question_reasoning_section`` for the maintainer section.
     """
-    reporter_login = _login(_field(issue, "user")).strip()
+    reporter_login = get_login(get_field(issue, "user")).strip()
     lines: list[str] = []
     if reporter_login:
         lines.append(f"@{reporter_login} — I have a few follow-up questions before I can narrow this down:")
@@ -601,7 +603,7 @@ def build_follow_up_section(issue: Any, questions: list[dict[str, str]]) -> str:
 
 def build_duplicate_section(issue: Any, duplicates: list[dict[str, Any]]) -> str:
     """Build the duplicate detection section for embedding in the progress comment."""
-    reporter_login = _login(_field(issue, "user")).strip()
+    reporter_login = get_login(get_field(issue, "user")).strip()
     lines: list[str] = []
     if reporter_login:
         lines.append(f"@{reporter_login} — this issue appears to overlap with existing issues:")
@@ -707,16 +709,16 @@ def format_recent_issues_for_dedupe(recent_open_issues: list[Any] | None, curren
         return "Unable to fetch recent issues for duplicate detection."
     candidates = [
         issue for issue in recent_open_issues
-        if not _field(issue, "pull_request")
-        and int(_field(issue, "number", 0)) != current_issue_number
+        if not get_field(issue, "pull_request")
+        and int(get_field(issue, "number", 0)) != current_issue_number
     ][:50]
     if not candidates:
         return "No recent open issues found."
     lines: list[str] = []
     for issue in candidates:
-        number = int(_field(issue, "number", 0))
-        title = str(_field(issue, "title") or "").strip()
-        body = str(_field(issue, "body") or "").strip()
+        number = int(get_field(issue, "number", 0))
+        title = str(get_field(issue, "title") or "").strip()
+        body = str(get_field(issue, "body") or "").strip()
         preview = body[:300] + "..." if len(body) > 300 else body
         preview = preview.replace("\n", " ")
         lines.append(f"- #{number}: {title}")

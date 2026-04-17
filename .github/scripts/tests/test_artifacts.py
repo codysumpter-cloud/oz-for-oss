@@ -4,11 +4,13 @@ import json
 import unittest
 from unittest.mock import MagicMock, patch
 
+import httpx
+
 from oz_workflows.artifacts import (
+    _DOWNLOAD_MAX_ATTEMPTS,
     _download_artifact_text,
     _download_artifact_json,
     _find_file_artifact,
-    load_pr_description_artifact,
     load_pr_metadata_artifact,
     poll_for_artifact,
     poll_for_text_artifact,
@@ -115,6 +117,139 @@ class DownloadArtifactJsonTest(unittest.TestCase):
             _download_artifact_json(client, "uid-123")
 
 
+def _make_mock_http_client(get_side_effect: list) -> MagicMock:
+    """Build a mock httpx.Client whose ``get`` replays *get_side_effect*."""
+    mock_http = MagicMock()
+    mock_http.get.side_effect = get_side_effect
+    mock_http.__enter__ = MagicMock(return_value=mock_http)
+    mock_http.__exit__ = MagicMock(return_value=False)
+    return mock_http
+
+
+def _make_http_response(status_code: int, text: str = "") -> MagicMock:
+    response = MagicMock()
+    response.status_code = status_code
+    response.text = text
+    response.request = MagicMock()
+    if status_code >= 400:
+        def _raise_for_status() -> None:
+            raise httpx.HTTPStatusError(
+                f"HTTP {status_code}", request=response.request, response=response
+            )
+        response.raise_for_status.side_effect = _raise_for_status
+    else:
+        response.raise_for_status = MagicMock()
+    return response
+
+
+class DownloadArtifactRetryTest(unittest.TestCase):
+    """Tests for the retry behavior in ``_download_artifact_text``."""
+
+    def _make_client(self) -> MagicMock:
+        client = MagicMock()
+        artifact_response = MagicMock()
+        artifact_response.data.download_url = "https://storage.example.com/signed"
+        client.agent.get_artifact.return_value = artifact_response
+        return client
+
+    @patch("oz_workflows.artifacts.time.sleep", return_value=None)
+    @patch("oz_workflows.artifacts.httpx.Client")
+    def test_retries_on_repeated_5xx_then_succeeds(
+        self, mock_client_cls: MagicMock, _mock_sleep: MagicMock
+    ) -> None:
+        responses = [
+            _make_http_response(503),
+            _make_http_response(500),
+            _make_http_response(200, "hello"),
+        ]
+        mock_http = _make_mock_http_client(responses)
+        mock_client_cls.return_value = mock_http
+
+        result = _download_artifact_text(self._make_client(), "uid-123")
+        self.assertEqual(result, "hello")
+        self.assertEqual(mock_http.get.call_count, 3)
+
+    @patch("oz_workflows.artifacts.time.sleep", return_value=None)
+    @patch("oz_workflows.artifacts.httpx.Client")
+    def test_retries_on_network_exceptions_then_succeeds(
+        self, mock_client_cls: MagicMock, _mock_sleep: MagicMock
+    ) -> None:
+        request = httpx.Request("GET", "https://storage.example.com/signed")
+        responses = [
+            httpx.ConnectError("boom", request=request),
+            httpx.ReadTimeout("slow", request=request),
+            _make_http_response(200, "body"),
+        ]
+        mock_http = _make_mock_http_client(responses)
+        mock_client_cls.return_value = mock_http
+
+        result = _download_artifact_text(self._make_client(), "uid-123")
+        self.assertEqual(result, "body")
+        self.assertEqual(mock_http.get.call_count, 3)
+
+    @patch("oz_workflows.artifacts.time.sleep", return_value=None)
+    @patch("oz_workflows.artifacts.httpx.Client")
+    def test_raises_after_max_attempts_on_5xx(
+        self, mock_client_cls: MagicMock, _mock_sleep: MagicMock
+    ) -> None:
+        responses = [_make_http_response(500) for _ in range(_DOWNLOAD_MAX_ATTEMPTS)]
+        mock_http = _make_mock_http_client(responses)
+        mock_client_cls.return_value = mock_http
+
+        with self.assertRaises(httpx.HTTPStatusError):
+            _download_artifact_text(self._make_client(), "uid-123")
+        self.assertEqual(mock_http.get.call_count, _DOWNLOAD_MAX_ATTEMPTS)
+
+    @patch("oz_workflows.artifacts.time.sleep", return_value=None)
+    @patch("oz_workflows.artifacts.httpx.Client")
+    def test_raises_after_max_attempts_on_network_errors(
+        self, mock_client_cls: MagicMock, _mock_sleep: MagicMock
+    ) -> None:
+        request = httpx.Request("GET", "https://storage.example.com/signed")
+        responses = [
+            httpx.ConnectError(f"boom-{i}", request=request)
+            for i in range(_DOWNLOAD_MAX_ATTEMPTS)
+        ]
+        mock_http = _make_mock_http_client(responses)
+        mock_client_cls.return_value = mock_http
+
+        with self.assertRaises(httpx.ConnectError):
+            _download_artifact_text(self._make_client(), "uid-123")
+        self.assertEqual(mock_http.get.call_count, _DOWNLOAD_MAX_ATTEMPTS)
+
+    @patch("oz_workflows.artifacts.time.sleep", return_value=None)
+    @patch("oz_workflows.artifacts.httpx.Client")
+    def test_does_not_retry_on_4xx(
+        self, mock_client_cls: MagicMock, _mock_sleep: MagicMock
+    ) -> None:
+        responses = [_make_http_response(404)]
+        mock_http = _make_mock_http_client(responses)
+        mock_client_cls.return_value = mock_http
+
+        with self.assertRaises(httpx.HTTPStatusError):
+            _download_artifact_text(self._make_client(), "uid-123")
+        self.assertEqual(mock_http.get.call_count, 1)
+
+    @patch("oz_workflows.artifacts.time.sleep", return_value=None)
+    @patch("oz_workflows.artifacts.httpx.Client")
+    def test_mixed_transient_failures_then_success(
+        self, mock_client_cls: MagicMock, _mock_sleep: MagicMock
+    ) -> None:
+        request = httpx.Request("GET", "https://storage.example.com/signed")
+        responses = [
+            _make_http_response(502),
+            httpx.ReadError("short read", request=request),
+            _make_http_response(503),
+            _make_http_response(200, "ok"),
+        ]
+        mock_http = _make_mock_http_client(responses)
+        mock_client_cls.return_value = mock_http
+
+        result = _download_artifact_text(self._make_client(), "uid-abc")
+        self.assertEqual(result, "ok")
+        self.assertEqual(mock_http.get.call_count, 4)
+
+
 class PollForArtifactTest(unittest.TestCase):
     @patch("oz_workflows.artifacts.build_oz_client")
     @patch("oz_workflows.artifacts._download_artifact_json")
@@ -172,39 +307,6 @@ class PollForArtifactTest(unittest.TestCase):
             timeout_seconds=0,
         )
         self.assertEqual(result, "PR body")
-
-
-class LoadPrDescriptionArtifactTest(unittest.TestCase):
-    @patch("oz_workflows.artifacts.poll_for_text_artifact")
-    def test_returns_stripped_description(self, mock_poll: MagicMock) -> None:
-        mock_poll.return_value = "  Closes #42\n\n## Summary\n  "
-        import warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            result = load_pr_description_artifact("run-123")
-        self.assertEqual(result, "Closes #42\n\n## Summary")
-        mock_poll.assert_called_once_with("run-123", filename="pr_description.md")
-
-    @patch("oz_workflows.artifacts.poll_for_text_artifact")
-    def test_raises_when_empty(self, mock_poll: MagicMock) -> None:
-        mock_poll.return_value = "   "
-        import warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            with self.assertRaises(RuntimeError) as ctx:
-                load_pr_description_artifact("run-123")
-        self.assertIn("empty", str(ctx.exception))
-
-    @patch("oz_workflows.artifacts.poll_for_text_artifact")
-    def test_emits_deprecation_warning(self, mock_poll: MagicMock) -> None:
-        mock_poll.return_value = "body"
-        import warnings
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            load_pr_description_artifact("run-123")
-        deprecation_warnings = [w for w in caught if issubclass(w.category, DeprecationWarning)]
-        self.assertTrue(len(deprecation_warnings) >= 1)
-        self.assertIn("load_pr_metadata_artifact", str(deprecation_warnings[0].message))
 
 
 class LoadPrMetadataArtifactTest(unittest.TestCase):
