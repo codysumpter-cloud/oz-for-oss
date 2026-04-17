@@ -10,6 +10,7 @@ from oz_workflows.env import load_event, repo_parts, repo_slug, require_env, wor
 from oz_workflows.helpers import (
     WorkflowProgressComment,
     format_issue_comments_for_prompt,
+    format_respond_to_triaged_start_line,
     is_automation_user,
     record_run_session_link,
     triggering_comment_prompt_text,
@@ -65,7 +66,7 @@ def main() -> None:
             event_payload=event,
             requester_login=requester,
         )
-        progress.start("Oz is working on a response.")
+        progress.start(format_respond_to_triaged_start_line())
         comments = list(issue.get_comments())
         comments_text = format_visible_issue_comments(
             comments,

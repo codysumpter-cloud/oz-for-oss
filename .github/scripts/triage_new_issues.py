@@ -14,11 +14,14 @@ from oz_workflows.env import load_event, optional_env, repo_parts, repo_slug, re
 from oz_workflows.helpers import (
     get_field,
     _format_triage_session_link,
+    format_triage_session_line,
+    format_triage_start_line,
     get_label_name,
     get_login,
     build_comment_body,
     format_issue_comments_for_prompt,
     is_automation_user,
+    issue_has_prior_triage,
     triggering_comment_prompt_text,
     WorkflowProgressComment,
 )
@@ -206,6 +209,7 @@ def process_issue(
 ) -> None:
     """Run the end-to-end triage flow for a single GitHub issue."""
     issue_number = int(issue.number)
+    is_retriage = issue_has_prior_triage(list(get_field(issue, "labels", []) or []))
     progress = WorkflowProgressComment(
         github,
         owner,
@@ -214,7 +218,7 @@ def process_issue(
         workflow=WORKFLOW_NAME,
         event_payload=event_payload,
     )
-    progress.start("Oz is starting to work on triaging this issue.")
+    progress.start(format_triage_start_line(is_retriage=is_retriage))
     # Fetch the issue comments once and reuse them for legacy-comment cleanup
     # and the triage prompt so we avoid two back-to-back
     # ``GET /issues/{n}/comments`` calls on the same issue.
@@ -312,9 +316,11 @@ def process_issue(
             skill_name="triage-issue",
             title=f"Triage issue #{issue_number}",
             config=agent_config,
-            on_poll=lambda current_run: _record_triage_session_link(progress, current_run),
+            on_poll=lambda current_run: _record_triage_session_link(
+                progress, current_run, is_retriage=is_retriage
+            ),
         )
-        _record_triage_session_link(progress, run)
+        _record_triage_session_link(progress, run, is_retriage=is_retriage)
         result = poll_for_artifact(run.run_id, filename="triage_result.json")
         apply_triage_result(
             github,
@@ -517,7 +523,12 @@ def should_replace_triage_label(label_name: str) -> bool:
     return label_name in PRIMARY_TRIAGE_LABELS or label_name.startswith(REPRO_LABEL_PREFIX)
 
 
-def _record_triage_session_link(progress: WorkflowProgressComment, run: object) -> None:
+def _record_triage_session_link(
+    progress: WorkflowProgressComment,
+    run: object,
+    *,
+    is_retriage: bool = False,
+) -> None:
     """Triage-specific session link callback that uses replace_body for Stage 2."""
     oz_run_id = getattr(run, "run_id", None) or ""
     if oz_run_id:
@@ -528,7 +539,9 @@ def _record_triage_session_link(progress: WorkflowProgressComment, run: object) 
     progress.session_link = session_link.strip()
     link = _format_triage_session_link(progress.session_link)
     progress.replace_body(
-        f"Oz is triaging this issue. You can follow {link}."
+        format_triage_session_line(
+            is_retriage=is_retriage, session_link_markdown=link
+        )
     )
 
 

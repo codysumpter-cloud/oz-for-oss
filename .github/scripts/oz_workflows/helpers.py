@@ -219,6 +219,187 @@ _PROGRESS_LINK_PREFIXES = (
 )
 
 
+# Labels that signal that a prior triage pass has already been performed on
+# this issue. The triage flow attaches ``triaged`` at the end of every
+# completed pass, so its presence is the authoritative signal that Oz has
+# already triaged this issue and the next run is a re-triage (for example
+# because the reporter replied to follow-up questions, the issue body was
+# edited, or a maintainer manually re-triggered triage). Other labels such
+# as ``bug``/``enhancement``/``documentation`` are routinely applied by
+# reporters or maintainers before any triage pass and therefore cannot be
+# treated as prior-triage evidence.
+_PRIOR_TRIAGE_LABELS: frozenset[str] = frozenset({"triaged"})
+
+
+def issue_has_prior_triage(labels: list[Any]) -> bool:
+    """Return True when *labels* indicate a prior triage pass already ran.
+
+    Callers pass the issue's current label objects (or dicts, or plain
+    strings) as returned by the GitHub API so we can reuse the same
+    ``get_label_name`` helper used elsewhere. Only the ``triaged`` label
+    counts, because the triage flow attaches it at the end of every
+    completed pass; labels like ``bug``/``enhancement``/``documentation``
+    are commonly applied before any triage run and would otherwise cause
+    the first triage pass to be misreported as a re-triage.
+    """
+    for label in labels or []:
+        if get_label_name(label).lower() in _PRIOR_TRIAGE_LABELS:
+            return True
+    return False
+
+
+def format_triage_start_line(*, is_retriage: bool) -> str:
+    """State-aware opening line for the triage workflow."""
+    if is_retriage:
+        return (
+            "Oz is re-triaging this issue based on new information."
+        )
+    return "Oz is starting to work on triaging this issue."
+
+
+def format_triage_session_line(
+    *, is_retriage: bool, session_link_markdown: str
+) -> str:
+    """Mid-run status line used once the Oz session link is known."""
+    verb = "re-triaging" if is_retriage else "triaging"
+    return f"Oz is {verb} this issue. You can follow {session_link_markdown}."
+
+
+def format_respond_to_triaged_start_line() -> str:
+    """State-aware opening line for the inline triaged-issue response workflow."""
+    return (
+        "Oz is drafting an inline response to this comment. "
+        "This issue is already triaged, so Oz will reply without changing labels, "
+        "the issue body, or assignees."
+    )
+
+
+def format_spec_start_line(*, is_update: bool) -> str:
+    """State-aware opening line for the create-spec-from-issue workflow."""
+    if is_update:
+        return "Oz is updating the existing spec PR for this issue."
+    return "Oz is starting work on product and tech specs for this issue."
+
+
+def format_spec_complete_line(*, is_update: bool, pr_url: str) -> str:
+    """State-aware completion line for the create-spec-from-issue workflow."""
+    if is_update:
+        return f"I updated the existing spec PR for this issue: {pr_url}"
+    return f"I created a new spec PR for this issue: {pr_url}"
+
+
+def format_implementation_start_line(
+    *,
+    spec_context_source: str,
+    should_noop: bool,
+    existing_implementation_pr: bool,
+    unapproved_spec_pr_numbers: list[int] | None = None,
+) -> str:
+    """State-aware opening line for the implementation workflow.
+
+    *spec_context_source* is the same string produced by
+    ``resolve_spec_context_for_issue``: ``approved-pr``, ``directory``,
+    or empty for no spec context. *should_noop* indicates that
+    unapproved spec PR(s) exist and Oz is refusing to implement them.
+    *existing_implementation_pr* signals an already-open draft PR on the
+    implementation branch so the comment can say "updating" instead of
+    "creating".
+    """
+    if should_noop:
+        numbers = ", ".join(f"#{n}" for n in (unapproved_spec_pr_numbers or []))
+        suffix = f" Linked spec PR(s): {numbers}." if numbers else ""
+        return (
+            "Oz is not starting implementation because the linked spec PR(s) "
+            "have not been marked `plan-approved`."
+            + suffix
+        )
+    updating = " (updating the existing draft PR)" if existing_implementation_pr else ""
+    if spec_context_source == "approved-pr":
+        return (
+            "Oz is implementing this issue on top of the approved spec PR's branch"
+            + updating
+            + "."
+        )
+    if spec_context_source == "directory":
+        return (
+            "Oz is implementing this issue using the repository's directory specs"
+            + updating
+            + "."
+        )
+    return (
+        "Oz is implementing this issue with no spec context"
+        + updating
+        + "."
+    )
+
+
+def format_implementation_complete_line(
+    *,
+    updated_spec_pr: bool,
+    existing_implementation_pr: bool,
+    pr_url: str,
+) -> str:
+    """State-aware completion line for the implementation workflow."""
+    if updated_spec_pr:
+        return (
+            f"I pushed implementation updates to the linked approved spec PR: {pr_url}"
+        )
+    if existing_implementation_pr:
+        return (
+            f"I updated the existing draft implementation PR for this issue: {pr_url}"
+        )
+    return f"I created a new draft implementation PR for this issue: {pr_url}"
+
+
+def format_review_start_line(
+    *, spec_only: bool, is_rereview: bool, focus: str = ""
+) -> str:
+    """State-aware opening line for the review-pull-request workflow."""
+    kind = "spec-only pull request" if spec_only else "pull request"
+    if is_rereview:
+        base = f"Oz is re-reviewing this {kind} in response to a review request."
+    else:
+        base = f"Oz is starting a first review of this {kind}."
+    focus_text = (focus or "").strip()
+    if focus_text:
+        return f"{base} Focus: {focus_text}"
+    return base
+
+
+def format_pr_comment_start_line(
+    *, is_review_reply: bool, has_spec_context: bool
+) -> str:
+    """State-aware opening line for the respond-to-pr-comment workflow."""
+    source = (
+        "an inline review-thread comment"
+        if is_review_reply
+        else "a PR conversation comment"
+    )
+    spec_clause = (
+        " Spec context was found and will be used to ground the change."
+        if has_spec_context
+        else ""
+    )
+    return (
+        f"Oz is working on changes requested in this PR (responding to {source})."
+        + spec_clause
+    )
+
+
+def format_enforce_start_line(
+    *, explicit_issue: bool, change_kind: str
+) -> str:
+    """State-aware opening line for the enforce-pr-issue-state workflow."""
+    association = (
+        "an explicitly linked issue"
+        if explicit_issue
+        else "a likely matching ready issue"
+    )
+    return (
+        f"Oz is checking this {change_kind} PR for association with {association}."
+    )
+
+
 def _workflow_run_url() -> str:
     """Build the GitHub Actions workflow run URL from environment variables."""
     server_url = optional_env("GITHUB_SERVER_URL") or "https://github.com"

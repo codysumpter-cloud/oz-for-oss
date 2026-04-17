@@ -12,6 +12,8 @@ from oz_workflows.helpers import (
     build_next_steps_section,
     build_spec_preview_section,
     coauthor_prompt_lines,
+    format_spec_complete_line,
+    format_spec_start_line,
     get_login,
     is_automation_user,
     org_member_comments_text,
@@ -52,6 +54,10 @@ def main() -> None:
         comments = list(issue_data.get_comments())
         comments_text = org_member_comments_text(comments, exclude_comment_id=triggering_comment_id)
         triggering_comment_text = triggering_comment_prompt_text(event)
+        existing_spec_prs = list(
+            github.get_pulls(state="open", head=f"{owner}:{branch_name}")
+        )
+        is_spec_update = bool(existing_spec_prs)
         progress = WorkflowProgressComment(
             github,
             owner,
@@ -60,7 +66,7 @@ def main() -> None:
             workflow="create-spec-from-issue",
             event_payload=event,
         )
-        progress.start("Oz is starting work on product and tech specs for this issue.")
+        progress.start(format_spec_start_line(is_update=is_spec_update))
         coauthor_line = resolve_coauthor_line(client, event)
         coauthor_directives = coauthor_prompt_lines(coauthor_line)
         spec_driven_implementation_skill_path = skill_file_path(
@@ -132,6 +138,7 @@ def main() -> None:
             metadata = load_pr_metadata_artifact(run.run_id)
             pr_title = metadata.get("pr_title") or f"spec: {issue_title}"
             pr_body = metadata["pr_summary"]
+            updated_existing = bool(existing_prs)
             if existing_prs:
                 pr = existing_prs[0]
                 pr.edit(title=pr_title, body=pr_body)
@@ -151,7 +158,7 @@ def main() -> None:
                 ]
             )
             progress.complete(
-                f"I created a spec PR for this issue: {pr.html_url}\n\n"
+                f"{format_spec_complete_line(is_update=updated_existing, pr_url=pr.html_url)}\n\n"
                 f"{spec_preview_section}\n\n"
                 f"{next_steps_section}"
             )

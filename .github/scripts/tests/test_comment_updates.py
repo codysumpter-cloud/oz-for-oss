@@ -14,6 +14,17 @@ from oz_workflows.helpers import (
     append_comment_sections,
     build_comment_body,
     comment_metadata,
+    format_enforce_start_line,
+    format_implementation_complete_line,
+    format_implementation_start_line,
+    format_pr_comment_start_line,
+    format_respond_to_triaged_start_line,
+    format_review_start_line,
+    format_spec_complete_line,
+    format_spec_start_line,
+    format_triage_session_line,
+    format_triage_start_line,
+    issue_has_prior_triage,
     WorkflowProgressComment,
 )
 
@@ -991,6 +1002,210 @@ class WorkflowProgressCommentMetadataTest(unittest.TestCase):
         self.assertIn("Oz finished triaging.", body)
         self.assertIn('"oz_run_id":"oz-run-xyz"', body)
         self.assertEqual(body.count("<!-- oz-agent-metadata:"), 1)
+
+
+class StateAwareStartLineTest(unittest.TestCase):
+    def test_triage_first_pass_and_retriage(self) -> None:
+        self.assertEqual(
+            format_triage_start_line(is_retriage=False),
+            "Oz is starting to work on triaging this issue.",
+        )
+        self.assertIn(
+            "re-triaging",
+            format_triage_start_line(is_retriage=True),
+        )
+
+    def test_triage_session_line_reflects_retriage(self) -> None:
+        first = format_triage_session_line(
+            is_retriage=False, session_link_markdown="[link](https://x)"
+        )
+        self.assertIn("Oz is triaging this issue.", first)
+        self.assertIn("[link](https://x)", first)
+        again = format_triage_session_line(
+            is_retriage=True, session_link_markdown="[link](https://x)"
+        )
+        self.assertIn("re-triaging", again)
+
+    def test_issue_has_prior_triage_detects_triaged_label(self) -> None:
+        self.assertTrue(issue_has_prior_triage([{"name": "triaged"}]))
+        self.assertTrue(issue_has_prior_triage(["triaged"]))
+        # Case-insensitive match on the triaged label.
+        self.assertTrue(issue_has_prior_triage([{"name": "Triaged"}]))
+
+    def test_issue_has_prior_triage_ignores_non_triage_labels(self) -> None:
+        self.assertFalse(issue_has_prior_triage([]))
+        self.assertFalse(issue_has_prior_triage([{"name": "repro:unknown"}]))
+        self.assertFalse(issue_has_prior_triage(["area:workflow"]))
+        # Labels commonly applied by reporters or maintainers before any
+        # triage run must not be treated as prior-triage evidence.
+        self.assertFalse(issue_has_prior_triage([{"name": "bug"}]))
+        self.assertFalse(issue_has_prior_triage(["enhancement"]))
+        self.assertFalse(issue_has_prior_triage([{"name": "documentation"}]))
+        self.assertFalse(issue_has_prior_triage(["needs-info"]))
+        self.assertFalse(issue_has_prior_triage([{"name": "duplicate"}]))
+
+    def test_respond_to_triaged_start_line_describes_analytical_path(self) -> None:
+        line = format_respond_to_triaged_start_line()
+        self.assertIn("already triaged", line)
+        self.assertIn("inline", line)
+        self.assertIn("without changing labels", line)
+
+    def test_spec_start_line_distinguishes_new_and_update(self) -> None:
+        self.assertIn(
+            "starting work on product and tech specs",
+            format_spec_start_line(is_update=False),
+        )
+        self.assertIn(
+            "updating the existing spec PR",
+            format_spec_start_line(is_update=True),
+        )
+
+    def test_spec_complete_line_distinguishes_new_and_update(self) -> None:
+        self.assertIn(
+            "I created a new spec PR",
+            format_spec_complete_line(is_update=False, pr_url="https://x"),
+        )
+        self.assertIn(
+            "I updated the existing spec PR",
+            format_spec_complete_line(is_update=True, pr_url="https://x"),
+        )
+
+    def test_implementation_start_line_approved_pr(self) -> None:
+        line = format_implementation_start_line(
+            spec_context_source="approved-pr",
+            should_noop=False,
+            existing_implementation_pr=False,
+        )
+        self.assertIn("approved spec PR's branch", line)
+        self.assertNotIn("updating the existing draft PR", line)
+
+    def test_implementation_start_line_directory_spec(self) -> None:
+        line = format_implementation_start_line(
+            spec_context_source="directory",
+            should_noop=False,
+            existing_implementation_pr=False,
+        )
+        self.assertIn("directory specs", line)
+
+    def test_implementation_start_line_no_spec(self) -> None:
+        line = format_implementation_start_line(
+            spec_context_source="",
+            should_noop=False,
+            existing_implementation_pr=False,
+        )
+        self.assertIn("no spec context", line)
+
+    def test_implementation_start_line_noop_mentions_unapproved_prs(self) -> None:
+        line = format_implementation_start_line(
+            spec_context_source="",
+            should_noop=True,
+            existing_implementation_pr=False,
+            unapproved_spec_pr_numbers=[7, 9],
+        )
+        self.assertIn("not starting implementation", line)
+        self.assertIn("`plan-approved`", line)
+        self.assertIn("#7", line)
+        self.assertIn("#9", line)
+
+    def test_implementation_start_line_existing_draft_pr(self) -> None:
+        line = format_implementation_start_line(
+            spec_context_source="",
+            should_noop=False,
+            existing_implementation_pr=True,
+        )
+        self.assertIn("updating the existing draft PR", line)
+
+    def test_implementation_complete_line_variants(self) -> None:
+        self.assertIn(
+            "approved spec PR",
+            format_implementation_complete_line(
+                updated_spec_pr=True,
+                existing_implementation_pr=False,
+                pr_url="https://x",
+            ),
+        )
+        self.assertIn(
+            "I updated the existing draft implementation PR",
+            format_implementation_complete_line(
+                updated_spec_pr=False,
+                existing_implementation_pr=True,
+                pr_url="https://x",
+            ),
+        )
+        self.assertIn(
+            "I created a new draft implementation PR",
+            format_implementation_complete_line(
+                updated_spec_pr=False,
+                existing_implementation_pr=False,
+                pr_url="https://x",
+            ),
+        )
+
+    def test_review_start_line_distinguishes_spec_and_code(self) -> None:
+        self.assertIn(
+            "spec-only pull request",
+            format_review_start_line(spec_only=True, is_rereview=False),
+        )
+        self.assertIn(
+            "first review of this pull request",
+            format_review_start_line(spec_only=False, is_rereview=False),
+        )
+
+    def test_review_start_line_distinguishes_rereview(self) -> None:
+        self.assertIn(
+            "re-reviewing",
+            format_review_start_line(spec_only=False, is_rereview=True),
+        )
+
+    def test_review_start_line_includes_focus(self) -> None:
+        self.assertIn(
+            "Focus: security",
+            format_review_start_line(
+                spec_only=False, is_rereview=True, focus="security"
+            ),
+        )
+
+    def test_pr_comment_start_line_distinguishes_thread_source(self) -> None:
+        self.assertIn(
+            "an inline review-thread comment",
+            format_pr_comment_start_line(
+                is_review_reply=True, has_spec_context=False
+            ),
+        )
+        self.assertIn(
+            "a PR conversation comment",
+            format_pr_comment_start_line(
+                is_review_reply=False, has_spec_context=False
+            ),
+        )
+
+    def test_pr_comment_start_line_mentions_spec_context(self) -> None:
+        self.assertIn(
+            "Spec context was found",
+            format_pr_comment_start_line(
+                is_review_reply=False, has_spec_context=True
+            ),
+        )
+
+    def test_enforce_start_line_distinguishes_match_paths(self) -> None:
+        self.assertIn(
+            "explicitly linked issue",
+            format_enforce_start_line(
+                explicit_issue=True, change_kind="implementation"
+            ),
+        )
+        self.assertIn(
+            "likely matching ready issue",
+            format_enforce_start_line(
+                explicit_issue=False, change_kind="spec"
+            ),
+        )
+        self.assertIn(
+            "spec PR",
+            format_enforce_start_line(
+                explicit_issue=False, change_kind="spec"
+            ),
+        )
 
 
 if __name__ == "__main__":
