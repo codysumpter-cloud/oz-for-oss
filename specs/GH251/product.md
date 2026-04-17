@@ -26,6 +26,7 @@ Repo-specific rules already exist, but they live in the wrong places: hardcoded 
 - The repo-specific layer is loaded as additional prompt context at runtime by the existing `.github/scripts/*` entrypoints and is clearly fenced so the agent knows which guidance is repo-specific.
 - Each self-improvement loop only ever writes to the repo-specific layer and to `.github/issue-triage/*`, never to `.agents/skills/<agent>/SKILL.md` or `.github/scripts/*`.
 - A new `update-triage` self-improvement loop exists and updates repo-specific triage heuristics weekly, following the same shape as `update-pr-review`.
+- A new `update-dedupe` self-improvement loop exists and consumes closed-as-duplicate signals specifically, writing only to the dedupe companion skill.
 - The pattern is documented in `docs/platform.md` so other repos adopting `oz-for-oss` understand how to extend it.
 
 ### Non-goals
@@ -35,7 +36,6 @@ Repo-specific rules already exist, but they live in the wrong places: hardcoded 
 - Rewriting the existing reusable workflow wrappers in `.github/workflows/`. The integration boundary for other systems stays the same.
 - Replacing `.github/issue-triage/config.json` or `.github/STAKEHOLDERS`. Those remain the structured repo-specific state; the new repo-local skills are for prose guidance that does not fit those schemas.
 - Building a discovery UI for repo-specific skills, or renaming upstream skills.
-- Deciding whether closed-as-duplicate signal should feed `update-triage` versus a separate `update-dedupe` loop (tracked as an open question).
 
 ### Figma / design references
 
@@ -77,31 +77,28 @@ Each `<agent>-local/SKILL.md` must:
 - declare which core skill it specializes, by name
 - group its guidance under the categories the core skill marks as overridable
 - be self-contained Markdown that a human can read top-to-bottom without needing to cross-reference the core skill
-- include evidence links (PR URLs, issue URLs, comment URLs) for rules that were added by a self-improvement loop
 
 #### Prompt construction behavior
 
 When a workflow invokes a reusable agent, the script at `.github/scripts/<script>.py` must:
 
-- read the companion skill file if present
-- include its contents in the prompt under a clearly fenced section, for example `## Repository-specific guidance (overrides permitted only where core skill allows)`
-- name the core skill it belongs to and the specific override categories
+- detect whether the companion skill file exists in the consuming repository's workspace
+- if present, include a clearly fenced section in the prompt that *references the companion file by path* (for example `.agents/skills/review-pr-local/SKILL.md` resolved against the consuming repository's checkout), and instructs the agent to read and follow that file, rather than inlining its contents into the prompt
+- name the core skill the companion specializes and the specific override categories
 - omit the section entirely if the companion file does not exist
 
-If the companion file exists but is empty or only contains the frontmatter scaffold, the script must treat it as absent rather than including an empty fenced section in the prompt.
+The referenced path must always point at the companion file in the consuming repository's workspace, never at a companion file that happens to ship inside `oz-for-oss`. If the companion file exists but is empty or only contains the frontmatter scaffold, the script must treat it as absent rather than emitting a reference to an effectively empty file.
 
 #### Self-improvement loop behavior
 
 Each `update-<agent>` self-improvement loop:
 
-- aggregates a time-windowed set of GitHub signals (review comments, label changes, maintainer comments, closes-as-duplicate, re-opens) into a temporary JSON payload
+- aggregates a time-windowed set of GitHub signals (review comments, label changes, maintainer comments, re-opens) into a temporary JSON payload. Closed-as-duplicate signals are the sole input for the `update-dedupe` loop and feed that loop specifically; they do not feed `update-triage`.
 - classifies those signals by which repo-specific skill they should update
 - proposes minimum-viable edits to the repo-specific skill only
 - opens a PR against branch `oz-agent/update-<agent>` with those edits for human approval
 
 The loop must skip producing a PR when there is no repeated signal. "Repeated" means the same repo-specific pattern is corroborated by at least two independent threads or a single explicit maintainer statement. One-off reviewer preferences must not be encoded as rules.
-
-When a loop does produce a PR, the PR description must cite specific threads, labels, or comment URLs that justify each added or changed rule.
 
 The loop's allowed write surface is strictly limited to:
 
@@ -117,7 +114,6 @@ Writes outside that surface — in particular to `.agents/skills/<agent>/SKILL.m
 - The self-improvement loop is a pure function of signals-in → companion-skill-out; it never reaches into workflow scripts.
 - An absent or empty companion file is a supported state, not an error.
 - Running `update-<agent>` when no repeated signal exists produces no branch and no PR.
-- Each self-improvement PR lists its evidence (links or IDs) for every rule change it proposes.
 
 #### Edge cases
 
@@ -141,16 +137,14 @@ Writes outside that surface — in particular to `.agents/skills/<agent>/SKILL.m
 ### Validation
 
 - Unit-level: add tests under `.github/scripts/tests/` that exercise the prompt-construction layer with and without a companion file, including the empty-file case and a missing-file case.
-- Integration-level: run `triage_new_issues.py` against a fixture that exercises `warpdotdev/Warp` heuristics via the companion file and assert the Warp-specific guidance is emitted in the prompt without any Python conditional.
+- Integration-level: run `triage_new_issues.py` against a fixture that exercises `warpdotdev/Warp` heuristics via a companion file present in the consuming workspace and assert the Warp-specific guidance is referenced in the prompt without any Python conditional.
 - Self-improvement write surface: add a test for `update-pr-review` and the new `update-triage` loop that asserts the diff produced by the loop only touches files under `.agents/skills/*-local/` or `.github/issue-triage/`, and fails otherwise.
 - Manual validation: run `update-pr-review-local.yml` via `workflow_dispatch` once after the migration and confirm the resulting PR diff matches the narrowed write surface.
-- Manual validation: run `update-triage` via `workflow_dispatch` at least once against a week where maintainers overrode triage output, and confirm the PR cites concrete issue/comment URLs for each rule change.
-- Regression check: for each migrated agent, diff the prompt emitted before and after the split against a representative fixture; the resulting combined prompt should be equivalent to the pre-split prompt up to ordering and the new fenced section.
+- Manual validation: run `update-triage` via `workflow_dispatch` at least once against a week where maintainers overrode triage output, and confirm the PR's diff is restricted to the companion files.
+- Regression check: for each migrated agent, diff the prompt emitted before and after the split against a representative fixture; the resulting combined prompt should be equivalent to the pre-split prompt up to ordering and the new fenced reference section.
 
 ### Open questions
 
-- Exact file layout for the repo-specific layer: `<agent>-local/SKILL.md` (the current proposal) versus a single flat `local-guidance.md`, versus structured JSON. The spec proposes `<agent>-local/SKILL.md` but keeps it open for review.
 - Whether the repo-specific layer should be shared across related agents (for example a single `review-local` skill consumed by both `review-pr` and `review-spec`) or kept strictly per-agent.
-- Whether closed-as-duplicate signal feeds `update-triage` or a separate `update-dedupe` loop.
 - How to bootstrap the repo-specific layer when a repository first adopts `oz-for-oss`. Current assumption: extend the existing `bootstrap-issue-config` skill to also scaffold empty companion skill files with the correct frontmatter and a short "no rules yet" body.
 - Whether an `update-implementation` loop is worth shipping. This spec defers it until there is clearer signal.

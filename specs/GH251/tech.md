@@ -7,9 +7,9 @@
 The reusable agent skills and the `update-pr-review` self-improvement loop in this repo conflate a stable cross-repo contract with repo-specific preferences. We need a concrete implementation plan that:
 
 - moves repo-specific guidance out of the core skill bodies and out of `.github/scripts/*` conditionals into a repo-local skill layer
-- extends the prompt-construction layer to include that repo-local layer as additional context at runtime
+- extends the prompt-construction layer to reference that repo-local layer as additional context at runtime, without inlining its contents into the prompt
 - narrows the write surface of `update-pr-review` to only the repo-local layer
-- introduces an analogous `update-triage` self-improvement loop
+- introduces analogous `update-triage` and `update-dedupe` self-improvement loops (dedupe signals feed `update-dedupe` specifically)
 - documents the pattern in `docs/platform.md` so other repos can adopt it
 
 This spec translates the product spec at `specs/GH251/product.md` into file-level changes against the current codebase.
@@ -88,65 +88,68 @@ Move only the repo-specific rules out of the core skills and out of `triage_heur
 
 Each core skill gets a short "Repository-specific overrides" section that explicitly enumerates the override categories the companion may specialize (for example "label taxonomy", "recurring follow-up patterns", "user-facing-string norms"). Categories not listed there are non-overridable.
 
-#### 2. Shared helper for loading the repo-local layer
+#### 2. Shared helper for resolving the repo-local layer
 
 Add a new helper in `.github/scripts/oz_workflows/helpers.py` (or a new `repo_local.py` module next to it) with this shape:
 
 ```python
-def load_repo_local_skill(workspace: Path, core_skill_name: str) -> str | None:
-    """Load the repo-local companion skill body for a core skill.
+def resolve_repo_local_skill_path(workspace: Path, core_skill_name: str) -> Path | None:
+    """Resolve the repo-local companion skill path for a core skill.
 
-    Returns the full Markdown body (including frontmatter) when the file
-    exists and contains non-frontmatter content; otherwise returns None.
+    Returns the absolute path to `.agents/skills/<core_skill_name>-local/SKILL.md`
+    in the consuming repository's workspace when the file exists and contains
+    non-frontmatter body content; otherwise returns None.
     """
 ```
 
-- The helper resolves `.agents/skills/<core_skill_name>-local/SKILL.md` relative to `workspace`.
+- The helper resolves `.agents/skills/<core_skill_name>-local/SKILL.md` relative to `workspace`, which is the consuming repository's checkout — never a path inside `oz-for-oss` itself.
 - Missing file → returns `None`.
 - File exists but has only YAML frontmatter or is otherwise empty → returns `None` so the prompt section is silently omitted.
-- File exists with content → returns the full body. The prompt builder is responsible for fencing it with a clearly labeled section header.
+- File exists with non-frontmatter body content → returns the resolved `Path`. The prompt builder is responsible for embedding that path by reference inside a fenced section; it must not inline the file contents.
 
-Expose a second helper that wraps the text in the canonical fenced section:
+Expose a second helper that emits the canonical fenced section as a path reference:
 
 ```python
-def format_repo_local_prompt_section(core_skill_name: str, body: str) -> str:
+def format_repo_local_prompt_section(core_skill_name: str, companion_path: Path) -> str:
     return (
         f"## Repository-specific guidance for `{core_skill_name}`\n"
-        "The following repository-specific guidance may override only the "
+        f"Read and follow the companion skill at `{companion_path}` in the "
+        "consuming repository's checkout. Its guidance may override only the "
         "categories your core skill marks as overridable. It must not change "
-        "the core skill's output schema, severity labels, or safety rules.\n\n"
-        f"{body}"
+        "the core skill's output schema, severity labels, or safety rules.\n"
     )
 ```
+
+The formatted section intentionally contains only the path reference plus the override reminder. The agent loads the companion file itself via the usual skill-read path; the prompt builder never slurps its body into the prompt string.
 
 Add unit tests under `.github/scripts/tests/test_repo_local.py` covering:
 
 - missing file returns `None`
 - empty file returns `None`
 - frontmatter-only file returns `None`
-- file with body returns the full body
-- `format_repo_local_prompt_section` produces the fenced section with the expected header
+- file with body returns the resolved path
+- `format_repo_local_prompt_section` produces the fenced section containing the expected path reference and the override reminder, and does not contain the companion body
 
 #### 3. Wire the prompt-construction layer
 
 Update `.github/scripts/review_pr.py`:
 
-- Call `load_repo_local_skill(workspace(), skill_name)` where `skill_name` is already computed at `.github/scripts/review_pr.py:335`.
-- If non-None, append `format_repo_local_prompt_section(skill_name, body)` to the `prompt` string built at `.github/scripts/review_pr.py (351-389)`, placed after the existing "Spec Context" block but before the "Cloud Workflow Requirements" block.
+- Call `resolve_repo_local_skill_path(workspace(), skill_name)` where `skill_name` is already computed at `.github/scripts/review_pr.py:335` and `workspace()` is the consuming repository's checkout.
+- If non-None, append `format_repo_local_prompt_section(skill_name, companion_path)` to the `prompt` string built at `.github/scripts/review_pr.py (351-389)`, placed after the existing "Spec Context" block but before the "Cloud Workflow Requirements" block. The appended section is a path reference, not the companion body.
 - Keep the rest of the prompt byte-for-byte identical when the companion file is absent.
 
 Update `.github/scripts/triage_new_issues.py`:
 
-- Remove the Warp-specific branch from `triage_heuristics_prompt(owner, repo)` at `.github/scripts/triage_new_issues.py (55-79)`; keep the function returning only the generic rules as the default base.
-- In `process_issue()` at `.github/scripts/triage_new_issues.py (229-340)`, read `load_repo_local_skill(workspace(), "triage-issue")` and `load_repo_local_skill(workspace(), "dedupe-issue")` once per run and pass them in as prompt context.
-- Add the fenced section(s) to the prompt using `format_repo_local_prompt_section("triage-issue", triage_local)` and `format_repo_local_prompt_section("dedupe-issue", dedupe_local)` when present.
+- Remove the Warp-specific branch from `triage_heuristics_prompt(owner, repo)` at `.github/scripts/triage_new_issues.py (55-79)`; keep the function returning only the generic rules as the default base. The Warp-specific prose that used to live in that branch is expected to land in `warpdotdev/Warp`'s own `.agents/skills/triage-issue-local/SKILL.md`, not in `oz-for-oss`. The Python conditional removal must be coordinated so Warp's companion exists in its workspace before the conditional is removed from a released `oz-for-oss` ref; `oz-for-oss`'s own companion ships either with generic content or absent.
+- In `process_issue()` at `.github/scripts/triage_new_issues.py (229-340)`, call `resolve_repo_local_skill_path(workspace(), "triage-issue")` and `resolve_repo_local_skill_path(workspace(), "dedupe-issue")` once per run and pass the results into prompt assembly.
+- Add the fenced section(s) to the prompt using `format_repo_local_prompt_section("triage-issue", triage_local_path)` and `format_repo_local_prompt_section("dedupe-issue", dedupe_local_path)` when present.
 - Leave `fetch_command_signatures_context()` untouched in this change; it is a separate repo-specific concern that is already structured as external repo data rather than skill prose, and re-shaping it would expand scope.
 
 Add/extend tests under `.github/scripts/tests/`:
 
-- A new test for `review_pr.py` that patches `load_repo_local_skill` to confirm the prompt includes the fenced section when the helper returns content, and omits it when the helper returns `None`.
+- A new test for `review_pr.py` that patches `resolve_repo_local_skill_path` to confirm the prompt includes the fenced path-reference section when the helper returns a path, and omits it when the helper returns `None`.
 - A new test for `triage_new_issues.py` `process_issue()` prompt assembly asserting the same behavior for both the triage and dedupe companions.
-- A regression test that loading the `triage-issue-local/SKILL.md` checked in for `oz-for-oss` produces the Warp-specific rules (byte-equivalent up to whitespace) that used to live in `triage_heuristics_prompt()`.
+- A test asserting the emitted fenced section contains only the companion path and the override reminder, never the companion body.
 
 #### 4. Narrow the self-improvement write surface
 
@@ -158,14 +161,14 @@ Update `.agents/skills/update-pr-review/SKILL.md`:
 Update `.github/scripts/update_pr_review.py`:
 
 - Update the dedented prompt to name the `-local` skill files as the write targets.
-- Add a post-run guard (executed in this script, not in the agent) that validates the diff produced on `oz-agent/update-pr-review` before pushing. Reuse `subprocess.run(["git", "diff", "--name-only", ...])` and fail if any path is outside `.agents/skills/review-pr-local/`, `.agents/skills/review-spec-local/`, or `.github/issue-triage/`.
+- Restructure the control flow so the Python entrypoint, not the agent, gates the push. Today the agent commits and pushes `oz-agent/update-pr-review`; that must change. Instruct the agent via its prompt to leave a local commit on `oz-agent/update-pr-review` without pushing and to exit once the commit is staged. Then run `git diff --name-only origin/main...oz-agent/update-pr-review` in `update_pr_review.py` and fail if any path is outside `.agents/skills/review-pr-local/`, `.agents/skills/review-spec-local/`, or `.github/issue-triage/`. Only push the branch when the guard passes.
 
 Add a new script `.github/scripts/update_triage.py` modeled on `update_pr_review.py`:
 
-- Aggregation: add `.agents/skills/update-triage/scripts/aggregate_triage_feedback.py` that queries the GitHub API for signals relevant to triage (issues triaged in the last N days, subsequent label changes by maintainers, closes-as-duplicate, re-opens, follow-up comments). Output a temp JSON payload analogous to `aggregate_review_feedback.py`.
-- Prompt: instruct the `update-triage` skill to propose minimum-viable edits to `.agents/skills/triage-issue-local/SKILL.md` and/or `.agents/skills/dedupe-issue-local/SKILL.md`, and to update `.github/issue-triage/config.json` only when a label taxonomy change is warranted.
+- Aggregation: add `.agents/skills/update-triage/scripts/aggregate_triage_feedback.py` that queries the GitHub API for signals relevant to triage (issues triaged in the last N days, subsequent label changes by maintainers, re-opens, follow-up comments). Closed-as-duplicate signals are intentionally excluded and are handled by the separate `update-dedupe` loop described below. Output a temp JSON payload analogous to `aggregate_review_feedback.py`.
+- Prompt: instruct the `update-triage` skill to propose minimum-viable edits to `.agents/skills/triage-issue-local/SKILL.md`, and to update `.github/issue-triage/config.json` only when a label taxonomy change is warranted.
 - Branch/PR: branch `oz-agent/update-triage`, tag `@captainsafia` for review, reuse the same app-token and Oz-agent plumbing as `update_pr_review.py`.
-- Write-surface guard: same diff-based check as `update_pr_review.py`.
+- Write-surface guard: same push-gating control flow as `update_pr_review.py`, with allowed prefixes `.agents/skills/triage-issue-local/` and `.github/issue-triage/`.
 
 Add new skill `.agents/skills/update-triage/SKILL.md` and bundled aggregation script, following the shape of `.agents/skills/update-pr-review/`.
 
@@ -173,6 +176,12 @@ Add new workflow wrappers:
 
 - `.github/workflows/update-triage.yml`: reusable wrapper modeled on `update-pr-review.yml`.
 - `.github/workflows/update-triage-local.yml`: weekly schedule + workflow_dispatch, modeled on `update-pr-review-local.yml`.
+
+Add a sibling `update-dedupe` loop that owns the closed-as-duplicate signal:
+
+- `.github/scripts/update_dedupe.py` modeled on `update_triage.py`, with aggregation script `.agents/skills/update-dedupe/scripts/aggregate_dedupe_feedback.py` that queries only closed-as-duplicate events and their canonical-issue links.
+- Skill `.agents/skills/update-dedupe/SKILL.md` instructs the agent to propose minimum-viable edits to `.agents/skills/dedupe-issue-local/SKILL.md` only. Its write-surface guard allows only `.agents/skills/dedupe-issue-local/`.
+- Workflow wrappers `.github/workflows/update-dedupe.yml` and `.github/workflows/update-dedupe-local.yml`, scheduled weekly with `workflow_dispatch`.
 
 #### 5. Bootstrap behavior
 
@@ -195,19 +204,21 @@ For a PR review run with repo-local guidance present:
 
 1. `review-pull-request.yml` fires on PR event.
 2. `review_pr.py` resolves `skill_name` (`review-pr` or `review-spec`) at `.github/scripts/review_pr.py:335`.
-3. `review_pr.py` calls `load_repo_local_skill(workspace(), skill_name)`; returns body or `None`.
-4. `review_pr.py` appends a fenced "Repository-specific guidance" section to the prompt if non-None.
-5. Oz runs the core `review-pr` (or `review-spec`) skill, treats the fenced section as additional allowed-override context, and produces `review.json`.
+3. `review_pr.py` calls `resolve_repo_local_skill_path(workspace(), skill_name)`; returns the companion `Path` (in the consuming repo's checkout) or `None`.
+4. `review_pr.py` appends a fenced "Repository-specific guidance" section to the prompt when non-None. The section references the companion path; it does not inline the companion body.
+5. Oz runs the core `review-pr` (or `review-spec`) skill, reads the referenced companion as allowed-override context, and produces `review.json`.
 6. `review_pr.py` posts the review to GitHub as before.
 
 For a self-improvement run after the migration:
 
 1. `update-triage-local.yml` fires weekly.
 2. `update_triage.py` runs `aggregate_triage_feedback.py`, gets a JSON payload in `/tmp`.
-3. `update_triage.py` invokes Oz with the `update-triage` skill, pointing it at `.agents/skills/triage-issue-local/SKILL.md` and `.agents/skills/dedupe-issue-local/SKILL.md` as its only write targets.
-4. Oz proposes minimal evidence-backed edits to those companion files (and optionally `.github/issue-triage/config.json`).
-5. `update_triage.py` enforces the write-surface guard before pushing; a diff outside the allowed prefix aborts the run.
-6. Branch `oz-agent/update-triage` is pushed and a PR is opened tagging `@captainsafia`.
+3. `update_triage.py` invokes Oz with the `update-triage` skill, pointing it at `.agents/skills/triage-issue-local/SKILL.md` as its only write target.
+4. Oz proposes minimal edits to that companion file (and optionally `.github/issue-triage/config.json`) and leaves the change as a local commit on `oz-agent/update-triage` without pushing.
+5. `update_triage.py` runs the write-surface guard against `origin/main...oz-agent/update-triage`; a diff outside the allowed prefixes aborts the run. When the guard passes, the script pushes the branch.
+6. PR is opened tagging `@captainsafia`.
+
+`update-dedupe-local.yml` follows the same flow against closed-as-duplicate aggregation and writes only to `.agents/skills/dedupe-issue-local/SKILL.md`.
 
 For a repo with no companion files yet:
 
@@ -217,29 +228,29 @@ For a repo with no companion files yet:
 
 ### Risks and mitigations
 
-- Regressing behavior because Warp-specific triage rules are no longer hardcoded in Python. Mitigation: seed `triage-issue-local/SKILL.md` in `oz-for-oss` with the exact text currently returned by `triage_heuristics_prompt()`, and add a regression test that compares the two on the `warpdotdev/oz-for-oss` workspace.
-- Self-improvement loops silently expanding their write surface. Mitigation: a post-run diff guard in the Python entrypoint (not in the agent prompt). The guard fails the job if any path outside the allowed prefixes changes.
+- Regressing triage behavior on `warpdotdev/Warp` because the Warp-specific branch in `triage_heuristics_prompt()` is removed before `warpdotdev/Warp` ships its own companion. Mitigation: sequence the rollout so `warpdotdev/Warp`'s `.agents/skills/triage-issue-local/SKILL.md` lands first (populated with the Warp-specific prose formerly in the Python conditional), and only then remove the conditional from `oz-for-oss` in a release tagged for consumers to upgrade to. The regression test runs inside `warpdotdev/Warp` against its own companion file, not inside `oz-for-oss`. `oz-for-oss`'s companion ships either with generic content or is left absent so it does not leak Warp-specific guidance to other consumers.
+- Self-improvement loops silently expanding their write surface. Mitigation: the Python entrypoint (`update_pr_review.py`, `update_triage.py`, `update_dedupe.py`) gates the push behind a `git diff` check against allowed prefixes. The agent leaves a local commit without pushing; the script pushes only if the guard passes.
 - Companion files drifting out of sync with what the core skill marks overridable. Mitigation: the core skill explicitly lists override categories, and the companion template includes section headers matching those categories. Reviewers can catch non-conforming companions during PR review.
-- Prompt bloat if every companion file is large. Mitigation: the fenced section is always short because the self-improvement loop only adds evidence-backed minimal edits; the write-surface guard keeps growth linear with signal volume.
-- Ambiguity about whether a companion file exists but is "effectively empty." Mitigation: the helper uses a strict check (non-frontmatter body length > 0 after trimming) and tests cover empty / frontmatter-only cases explicitly.
+- Prompt bloat if a companion file is large. Mitigation: the fenced prompt section is a short path reference plus an override reminder; the companion body never lands in the prompt string. The agent reads the companion file directly via its usual skill-read path.
+- Ambiguity about whether a companion file exists but is "effectively empty." Mitigation: `resolve_repo_local_skill_path` uses a strict check (non-frontmatter body length > 0 after trimming) and tests cover empty / frontmatter-only cases explicitly.
 - The self-improvement loop running before the migration completes could regress because it still targets the old paths. Mitigation: land the migration and the `update_pr_review.py` prompt change in the same PR; disable the weekly schedule temporarily via `workflow_dispatch`-only until the PR is merged.
 
 ### Testing and validation
 
-- New unit tests for the `load_repo_local_skill` and `format_repo_local_prompt_section` helpers, covering missing / empty / frontmatter-only / populated cases.
-- Extended tests for `review_pr.py` prompt assembly and `triage_new_issues.py` `process_issue()` prompt assembly that patch the helper and assert the prompt includes/excludes the fenced section as expected.
-- Regression test that loads `.agents/skills/triage-issue-local/SKILL.md` from the `oz-for-oss` workspace fixture and asserts the body matches the Warp-specific prose previously returned by `triage_heuristics_prompt()` (up to whitespace and ordering).
-- Diff-guard test for `update_pr_review.py` and `update_triage.py` that simulates a proposed diff touching a core skill file and asserts the job fails.
+- New unit tests for the `resolve_repo_local_skill_path` and `format_repo_local_prompt_section` helpers, covering missing / empty / frontmatter-only / populated cases, and asserting the formatted section contains a path reference without inlining the companion body.
+- Extended tests for `review_pr.py` prompt assembly and `triage_new_issues.py` `process_issue()` prompt assembly that patch the helper and assert the prompt includes/excludes the fenced reference section as expected.
+- Cross-repo regression coverage lives in `warpdotdev/Warp` (not in `oz-for-oss`): a test that loads Warp's own `.agents/skills/triage-issue-local/SKILL.md` and asserts the contents match the Warp-specific prose previously returned by `triage_heuristics_prompt()` (up to whitespace and ordering). `oz-for-oss` tests assert only that the Python conditional is gone and that the helper correctly emits a reference when a companion file is present.
+- Diff-guard test for `update_pr_review.py`, `update_triage.py`, and `update_dedupe.py` that simulates a proposed diff touching a core skill file and asserts the job fails before pushing.
 - Manual validation via `workflow_dispatch`:
   - run `update-pr-review-local.yml` on a recent week's feedback and confirm the resulting PR diff is restricted to the repo-local skills
-  - run `update-triage-local.yml` on a recent week and confirm the produced PR cites concrete issue/comment URLs
+  - run `update-triage-local.yml` on a recent week and confirm the produced PR's diff is restricted to the triage companion and `.github/issue-triage/*`
+  - run `update-dedupe-local.yml` on a recent week and confirm the produced PR's diff is restricted to `.agents/skills/dedupe-issue-local/`
   - run `review-pull-request.yml` against a PR both with and without `review-pr-local/SKILL.md` present and compare the prompts
 - `docs/platform.md` is updated and builds (it is plain Markdown, so this is a read-review step).
 
 ### Follow-ups
 
 - Evaluate whether `review-pr-local` and `review-spec-local` can be collapsed into a single `review-local` companion consumed by both core skills. Track as a follow-up spec once we have usage data.
-- Decide whether a dedicated `update-dedupe` self-improvement loop is worthwhile, or whether dedupe signals should fold into `update-triage`.
 - Extend the pattern to `create-spec-from-issue`, `create-implementation-from-issue`, and `respond-to-*` entrypoints as those accumulate repo-specific prompt guidance.
 - Consider introducing `update-implementation` after the implementation agent has accumulated enough reviewer signal to justify the loop.
 - Investigate factoring `fetch_command_signatures_context()` into a similar "repo-local data source" abstraction; out of scope for this change.
