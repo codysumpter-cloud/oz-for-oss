@@ -151,7 +151,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
       - name: Set up Oz Python environment
         if: steps.resolve.outputs.should_run == 'true'
-        uses: ./.github/actions/setup-oz-python
+        uses: warpdotdev/oz-for-oss/.github/actions/setup-oz-python@main
         with:
           requirements-path: ${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/requirements.txt
       - name: Skip direct trigger because PR hooks are present
