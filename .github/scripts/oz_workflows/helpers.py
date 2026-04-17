@@ -220,13 +220,15 @@ _PROGRESS_LINK_PREFIXES = (
 
 
 # Labels that signal that a prior triage pass has already been performed on
-# this issue. The presence of any one of these on the issue is enough to
-# treat the next triage run as a re-triage (for example because the
-# reporter replied to follow-up questions, the issue body was edited, or a
-# maintainer manually re-triggered triage).
-_PRIOR_TRIAGE_LABELS: frozenset[str] = frozenset(
-    {"triaged", "needs-info", "duplicate", "bug", "enhancement", "documentation"}
-)
+# this issue. The triage flow attaches ``triaged`` at the end of every
+# completed pass, so its presence is the authoritative signal that Oz has
+# already triaged this issue and the next run is a re-triage (for example
+# because the reporter replied to follow-up questions, the issue body was
+# edited, or a maintainer manually re-triggered triage). Other labels such
+# as ``bug``/``enhancement``/``documentation`` are routinely applied by
+# reporters or maintainers before any triage pass and therefore cannot be
+# treated as prior-triage evidence.
+_PRIOR_TRIAGE_LABELS: frozenset[str] = frozenset({"triaged"})
 
 
 def issue_has_prior_triage(labels: list[Any]) -> bool:
@@ -234,10 +236,11 @@ def issue_has_prior_triage(labels: list[Any]) -> bool:
 
     Callers pass the issue's current label objects (or dicts, or plain
     strings) as returned by the GitHub API so we can reuse the same
-    ``get_label_name`` helper used elsewhere. Repro labels are excluded
-    because they are attached during the first triage pass alongside
-    ``triaged``/``needs-info`` and do not independently signal a
-    retriage.
+    ``get_label_name`` helper used elsewhere. Only the ``triaged`` label
+    counts, because the triage flow attaches it at the end of every
+    completed pass; labels like ``bug``/``enhancement``/``documentation``
+    are commonly applied before any triage run and would otherwise cause
+    the first triage pass to be misreported as a re-triage.
     """
     for label in labels or []:
         if get_label_name(label).lower() in _PRIOR_TRIAGE_LABELS:

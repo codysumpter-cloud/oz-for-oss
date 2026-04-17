@@ -1028,13 +1028,21 @@ class StateAwareStartLineTest(unittest.TestCase):
 
     def test_issue_has_prior_triage_detects_triaged_label(self) -> None:
         self.assertTrue(issue_has_prior_triage([{"name": "triaged"}]))
-        self.assertTrue(issue_has_prior_triage([{"name": "needs-info"}]))
-        self.assertTrue(issue_has_prior_triage(["bug"]))
+        self.assertTrue(issue_has_prior_triage(["triaged"]))
+        # Case-insensitive match on the triaged label.
+        self.assertTrue(issue_has_prior_triage([{"name": "Triaged"}]))
 
     def test_issue_has_prior_triage_ignores_non_triage_labels(self) -> None:
         self.assertFalse(issue_has_prior_triage([]))
         self.assertFalse(issue_has_prior_triage([{"name": "repro:unknown"}]))
         self.assertFalse(issue_has_prior_triage(["area:workflow"]))
+        # Labels commonly applied by reporters or maintainers before any
+        # triage run must not be treated as prior-triage evidence.
+        self.assertFalse(issue_has_prior_triage([{"name": "bug"}]))
+        self.assertFalse(issue_has_prior_triage(["enhancement"]))
+        self.assertFalse(issue_has_prior_triage([{"name": "documentation"}]))
+        self.assertFalse(issue_has_prior_triage(["needs-info"]))
+        self.assertFalse(issue_has_prior_triage([{"name": "duplicate"}]))
 
     def test_respond_to_triaged_start_line_describes_analytical_path(self) -> None:
         line = format_respond_to_triaged_start_line()
