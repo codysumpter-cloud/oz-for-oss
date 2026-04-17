@@ -6,9 +6,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from github import Github
 from github.Repository import Repository
 
-from .helpers import parse_datetime
+from .helpers import get_field, parse_datetime
 
 ORIGINAL_REPORT_START = "<!-- oz-agent-original-report-start -->"
 ORIGINAL_REPORT_END = "<!-- oz-agent-original-report-end -->"
@@ -75,15 +76,9 @@ def dedupe_strings(values: list[Any]) -> list[str]:
     return normalized
 
 
-def _field(item: Any, name: str, default: Any = None) -> Any:
-    if isinstance(item, dict):
-        return item.get(name, default)
-    return getattr(item, name, default)
-
-
 def issue_has_label(issue: Any, label_name: str) -> bool:
-    for raw_label in _field(issue, "labels", []):
-        current = raw_label if isinstance(raw_label, str) else _field(raw_label, "name")
+    for raw_label in get_field(issue, "labels", []):
+        current = raw_label if isinstance(raw_label, str) else get_field(raw_label, "name")
         if current == label_name:
             return True
     return False
@@ -98,19 +93,19 @@ def select_recent_untriaged_issues(
     selected = [
         issue
         for issue in issues
-        if not _field(issue, "pull_request")
+        if not get_field(issue, "pull_request")
         and (
-            _field(issue, "created_at") >= cutoff
-            if isinstance(_field(issue, "created_at"), datetime)
-            else parse_datetime(_field(issue, "created_at") or "1970-01-01T00:00:00Z") >= cutoff
+            get_field(issue, "created_at") >= cutoff
+            if isinstance(get_field(issue, "created_at"), datetime)
+            else parse_datetime(get_field(issue, "created_at") or "1970-01-01T00:00:00Z") >= cutoff
         )
         and not issue_has_label(issue, triaged_label)
     ]
     selected.sort(
         key=lambda issue: (
-            _field(issue, "created_at")
-            if isinstance(_field(issue, "created_at"), datetime)
-            else parse_datetime(_field(issue, "created_at") or "1970-01-01T00:00:00Z")
+            get_field(issue, "created_at")
+            if isinstance(get_field(issue, "created_at"), datetime)
+            else parse_datetime(get_field(issue, "created_at") or "1970-01-01T00:00:00Z")
         )
     )
     return selected
@@ -167,7 +162,7 @@ COMMAND_SIGNATURES_MAX_ENTRIES = 200
 logger = logging.getLogger(__name__)
 
 
-def fetch_command_signatures_listing(github_client: Any) -> list[str]:
+def fetch_command_signatures_listing(github_client: Github) -> list[str]:
     """Fetch the top-level directory listing from the command-signatures repo.
 
     Returns a sorted list of command names (directory names) that have

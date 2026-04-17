@@ -149,16 +149,11 @@ jobs:
             printf '%s\n' "$token"
             echo EOF
           } >> "$GITHUB_OUTPUT"
-      - name: Set up Python
+      - name: Set up Oz Python environment
         if: steps.resolve.outputs.should_run == 'true'
-        uses: actions/setup-python@v6
+        uses: ./.github/actions/setup-oz-python
         with:
-          python-version: '3.11'
-      - name: Install Python workflow dependencies
-        if: steps.resolve.outputs.should_run == 'true'
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r "${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/requirements.txt"
+          requirements-path: ${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/requirements.txt
       - name: Skip direct trigger because PR hooks are present
         if: steps.resolve.outputs.should_run != 'true' && steps.resolve.outputs.skip_reason == 'pr-hooks-present'
         run: echo "PR review orchestration skipped because .github/workflows/pr-hooks.yml is present."

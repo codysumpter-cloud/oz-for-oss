@@ -12,10 +12,10 @@ from github.Repository import Repository
 from oz_workflows.actions import append_summary, warning
 from oz_workflows.env import load_event, optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.helpers import (
-    _field,
+    get_field,
     _format_triage_session_link,
-    _label_name,
-    _login,
+    get_label_name,
+    get_login,
     build_comment_body,
     format_issue_comments_for_prompt,
     is_automation_user,
@@ -123,7 +123,7 @@ def main() -> None:
         if not issues:
             append_summary("No recent untriaged issues found.\n")
             return
-        queue_text = ", ".join(f"#{_field(issue, 'number')}" for issue in issues)
+        queue_text = ", ".join(f"#{get_field(issue, 'number')}" for issue in issues)
         append_summary(f"Triage queue: {queue_text}\n")
         template_context = discover_issue_templates(workspace())
         recent_open_issues = load_recent_issues_for_dedupe(github)
@@ -135,7 +135,7 @@ def main() -> None:
         )
 
         for issue in issues:
-            issue_number = int(_field(issue, "number"))
+            issue_number = int(get_field(issue, "number"))
             try:
                 process_issue(
                     github,
@@ -215,8 +215,13 @@ def process_issue(
         event_payload=event_payload,
     )
     progress.start("Oz is starting to work on triaging this issue.")
-    _cleanup_legacy_triage_comments(github, owner, repo, issue)
+    # Fetch the issue comments once and reuse them for legacy-comment cleanup
+    # and the triage prompt so we avoid two back-to-back
+    # ``GET /issues/{n}/comments`` calls on the same issue.
     comments = list(issue.get_comments())
+    _cleanup_legacy_triage_comments(
+        github, owner, repo, issue, comments=comments
+    )
     comments_text = format_issue_comments(comments, exclude_comment_id=triggering_comment_id)
     current_body = str(issue.body or "").strip()
     original_report = extract_original_issue_report(current_body)
@@ -407,7 +412,7 @@ def apply_triage_result(
     repo_labels: dict[str, Any],
 ) -> None:
     """Apply the structured triage result back onto the GitHub issue."""
-    issue_number = int(_field(issue, "number"))
+    issue_number = int(get_field(issue, "number"))
     result_labels = extract_requested_labels(result)
     follow_up_questions = extract_follow_up_questions(result)
     if follow_up_questions and "needs-info" not in result_labels:
@@ -416,7 +421,7 @@ def apply_triage_result(
     requested_labels = dedupe_strings(
         result_labels if has_needs_info else [*result_labels, "triaged"]
     )
-    current_labels = dedupe_strings([_label_name(raw_label) for raw_label in _field(issue, "labels", [])])
+    current_labels = dedupe_strings([get_label_name(raw_label) for raw_label in get_field(issue, "labels", [])])
     managed_labels: list[str] = []
     for label_name in requested_labels:
         if label_name in configured_labels:
@@ -436,15 +441,9 @@ def apply_triage_result(
         warning(f"Skipping unmanaged label '{label_name}' for issue #{issue_number}")
     for label_name in current_labels:
         if should_replace_triage_label(label_name) and label_name not in managed_labels:
-            if hasattr(issue, "remove_from_labels"):
-                issue.remove_from_labels(label_name)
-            else:
-                github.remove_label(owner, repo, issue_number, label_name)
+            issue.remove_from_labels(label_name)
     if managed_labels:
-        if hasattr(issue, "add_to_labels"):
-            issue.add_to_labels(*managed_labels)
-        else:
-            github.add_labels(owner, repo, issue_number, managed_labels)
+        issue.add_to_labels(*managed_labels)
 
 
 def ensure_label_exists(
@@ -520,6 +519,9 @@ def should_replace_triage_label(label_name: str) -> bool:
 
 def _record_triage_session_link(progress: WorkflowProgressComment, run: object) -> None:
     """Triage-specific session link callback that uses replace_body for Stage 2."""
+    oz_run_id = getattr(run, "run_id", None) or ""
+    if oz_run_id:
+        progress.record_oz_run_id(str(oz_run_id))
     session_link = getattr(run, "session_link", None) or ""
     if not session_link.strip():
         return
@@ -535,25 +537,25 @@ def _cleanup_legacy_triage_comments(
     owner: str,
     repo: str,
     issue: Any,
+    *,
+    comments: list[Any] | None = None,
 ) -> None:
-    """Delete orphaned standalone follow-up, duplicate, and summary comments from prior triage runs."""
-    issue_number = int(_field(issue, "number"))
-    follow_up_marker = follow_up_comment_metadata(issue_number)
-    duplicate_marker = duplicate_comment_metadata(issue_number)
-    summary_marker = triage_summary_comment_metadata(issue_number)
-    comments = (
-        list(issue.get_comments())
-        if hasattr(issue, "get_comments")
-        else github.list_issue_comments(owner, repo, issue_number)
-    )
+    """Delete orphaned standalone follow-up, duplicate, and summary comments from prior triage runs.
+
+    Callers that have already fetched the issue's comments may pass them in
+    via *comments* to avoid an extra ``GET /issues/{n}/comments`` API call.
+    """
+    issue_number = int(get_field(issue, "number"))
+    follow_up_marker = _follow_up_comment_metadata(issue_number)
+    duplicate_marker = _duplicate_comment_metadata(issue_number)
+    summary_marker = _triage_summary_comment_metadata(issue_number)
+    if comments is None:
+        comments = list(issue.get_comments())
     for comment in comments:
-        body = str(_field(comment, "body") or "")
+        body = str(get_field(comment, "body") or "")
         if follow_up_marker in body or duplicate_marker in body or summary_marker in body:
             try:
-                if hasattr(comment, "delete"):
-                    comment.delete()
-                else:
-                    github.delete_comment(owner, repo, int(_field(comment, "id")))
+                comment.delete()
             except Exception:
                 pass
 
@@ -582,7 +584,7 @@ def build_follow_up_section(issue: Any, questions: list[dict[str, str]]) -> str:
     Only the question text is rendered here; reasoning is handled
     separately by ``build_question_reasoning_section`` for the maintainer section.
     """
-    reporter_login = _login(_field(issue, "user")).strip()
+    reporter_login = get_login(get_field(issue, "user")).strip()
     lines: list[str] = []
     if reporter_login:
         lines.append(f"@{reporter_login} — I have a few follow-up questions before I can narrow this down:")
@@ -601,7 +603,7 @@ def build_follow_up_section(issue: Any, questions: list[dict[str, str]]) -> str:
 
 def build_duplicate_section(issue: Any, duplicates: list[dict[str, Any]]) -> str:
     """Build the duplicate detection section for embedding in the progress comment."""
-    reporter_login = _login(_field(issue, "user")).strip()
+    reporter_login = get_login(get_field(issue, "user")).strip()
     lines: list[str] = []
     if reporter_login:
         lines.append(f"@{reporter_login} — this issue appears to overlap with existing issues:")
@@ -624,124 +626,27 @@ def build_duplicate_section(issue: Any, duplicates: list[dict[str, Any]]) -> str
     return "\n".join(lines)
 
 
-def triage_summary_comment_metadata(issue_number: int) -> str:
+def _triage_summary_comment_metadata(issue_number: int) -> str:
+    """Metadata marker for legacy standalone triage-summary comments.
+
+    Retained only so ``_cleanup_legacy_triage_comments`` can identify and
+    delete orphaned comments from previous workflow runs.
+    """
     return (
         '<!-- oz-agent-metadata: '
         f'{{"type":"issue-triage-summary","workflow":"{WORKFLOW_NAME}","issue":{issue_number}}} -->'
     )
 
 
-def build_triage_summary_comment(issue: Any, issue_body: str) -> str:
-    return build_comment_body(
-        issue_body.strip(),
-        triage_summary_comment_metadata(int(_field(issue, "number"))),
-    )
+def _follow_up_comment_metadata(issue_number: int) -> str:
+    """Metadata marker for legacy standalone follow-up comments.
 
-
-def sync_triage_summary_comment(
-    github: Repository,
-    owner: str,
-    repo: str,
-    issue: Any,
-    *,
-    issue_body: str,
-) -> None:
-    # Deprecated: triage summary content is now embedded in the progress comment
-    # via process_issue(). Retained for backward compatibility.
-    issue_number = int(_field(issue, "number"))
-    metadata = triage_summary_comment_metadata(issue_number)
-    if not issue_body.strip():
-        comments = (
-            list(issue.get_comments())
-            if hasattr(issue, "get_comments")
-            else github.list_issue_comments(owner, repo, issue_number)
-        )
-        existing = next(
-            (
-                comment
-                for comment in comments
-                if metadata in str(_field(comment, "body") or "")
-            ),
-            None,
-        )
-        if existing is not None:
-            if hasattr(existing, "delete"):
-                existing.delete()
-            else:
-                github.delete_comment(owner, repo, int(_field(existing, "id")))
-        return
-    _sync_managed_issue_comment(
-        github,
-        owner,
-        repo,
-        issue,
-        metadata=metadata,
-        comment_body=build_triage_summary_comment(issue, issue_body),
-    )
-
-
-def follow_up_comment_metadata(issue_number: int) -> str:
+    Retained only so ``_cleanup_legacy_triage_comments`` can identify and
+    delete orphaned comments from previous workflow runs.
+    """
     return (
         '<!-- oz-agent-metadata: '
         f'{{"type":"issue-triage-follow-up","workflow":"{WORKFLOW_NAME}","issue":{issue_number}}} -->'
-    )
-
-
-def build_follow_up_comment(issue: Any, questions: list[str]) -> str:
-    reporter_login = _login(_field(issue, "user")).strip()
-    lines: list[str] = []
-    if reporter_login:
-        lines.append(f"@{reporter_login}")
-        lines.append("")
-    lines.append("Thanks for the report. I’m missing a few issue-specific details before I can narrow this down confidently:")
-    lines.append("")
-    lines.extend(f"{index}. {question}" for index, question in enumerate(questions, start=1))
-    lines.append("")
-    lines.append("Reply in-thread with those details and the triage workflow will automatically re-evaluate the issue and update the diagnosis, labels, and next steps.")
-    lines.append("")
-    lines.append(TRIAGE_DISCLAIMER)
-    return build_comment_body("\n".join(lines), follow_up_comment_metadata(int(_field(issue, "number"))))
-
-
-def sync_follow_up_comment(
-    github: Repository,
-    owner: str,
-    repo: str,
-    issue: Any,
-    *,
-    questions: list[str],
-) -> None:
-    # Deprecated: follow-up content is now embedded in the progress comment
-    # via build_follow_up_section(). Retained for backward compatibility.
-    if not questions:
-        issue_number = int(_field(issue, "number"))
-        metadata = follow_up_comment_metadata(issue_number)
-        comments = (
-            list(issue.get_comments())
-            if hasattr(issue, "get_comments")
-            else github.list_issue_comments(owner, repo, issue_number)
-        )
-        existing = next(
-            (
-                comment
-                for comment in comments
-                if metadata in str(_field(comment, "body") or "")
-            ),
-            None,
-        )
-        if existing is not None:
-            if hasattr(existing, "delete"):
-                existing.delete()
-            else:
-                github.delete_comment(owner, repo, int(_field(existing, "id")))
-        return
-    _sync_managed_issue_comment(
-        github,
-        owner,
-        repo,
-        issue,
-        metadata=follow_up_comment_metadata(int(_field(issue, "number"))),
-        comment_body=build_follow_up_comment(issue, questions),
     )
 
 
@@ -777,61 +682,15 @@ def extract_duplicate_of(
     return duplicates
 
 
-def duplicate_comment_metadata(issue_number: int) -> str:
+def _duplicate_comment_metadata(issue_number: int) -> str:
+    """Metadata marker for legacy standalone duplicate comments.
+
+    Retained only so ``_cleanup_legacy_triage_comments`` can identify and
+    delete orphaned comments from previous workflow runs.
+    """
     return (
         '<!-- oz-agent-metadata: '
         f'{{"type":"issue-triage-duplicate","workflow":"{WORKFLOW_NAME}","issue":{issue_number}}} -->'
-    )
-
-
-def build_duplicate_comment(issue: Any, duplicates: list[dict[str, Any]]) -> str:
-    reporter_login = _login(_field(issue, "user")).strip()
-    lines: list[str] = []
-    if reporter_login:
-        lines.append(f"@{reporter_login}")
-        lines.append("")
-    lines.append("This issue appears likely to overlap with the following existing issues:")
-    lines.append("")
-    for dup in duplicates:
-        num = dup["issue_number"]
-        title = dup.get("title") or ""
-        reason = dup.get("similarity_reason") or ""
-        line = f"- #{num}"
-        if title:
-            line += f" — {title}"
-        lines.append(line)
-        if reason:
-            lines.append(f"  Why it looks similar: {reason}")
-    lines.append("")
-    lines.append(
-        "If this report is meaningfully different, please comment with the additional context "
-        "or distinguishing behavior so a maintainer can review it. Otherwise, a maintainer may "
-        "close it as a duplicate after review."
-    )
-    lines.append("")
-    lines.append(TRIAGE_DISCLAIMER)
-    return build_comment_body("\n".join(lines), duplicate_comment_metadata(int(_field(issue, "number"))))
-
-
-def sync_duplicate_comment(
-    github: Repository,
-    owner: str,
-    repo: str,
-    issue: Any,
-    *,
-    duplicates: list[dict[str, Any]],
-) -> None:
-    # Deprecated: duplicate content is now embedded in the progress comment
-    # via build_duplicate_section(). Retained for backward compatibility.
-    if not duplicates:
-        return
-    _sync_managed_issue_comment(
-        github,
-        owner,
-        repo,
-        issue,
-        metadata=duplicate_comment_metadata(int(_field(issue, "number"))),
-        comment_body=build_duplicate_comment(issue, duplicates),
     )
 
 
@@ -850,16 +709,16 @@ def format_recent_issues_for_dedupe(recent_open_issues: list[Any] | None, curren
         return "Unable to fetch recent issues for duplicate detection."
     candidates = [
         issue for issue in recent_open_issues
-        if not _field(issue, "pull_request")
-        and int(_field(issue, "number", 0)) != current_issue_number
+        if not get_field(issue, "pull_request")
+        and int(get_field(issue, "number", 0)) != current_issue_number
     ][:50]
     if not candidates:
         return "No recent open issues found."
     lines: list[str] = []
     for issue in candidates:
-        number = int(_field(issue, "number", 0))
-        title = str(_field(issue, "title") or "").strip()
-        body = str(_field(issue, "body") or "").strip()
+        number = int(get_field(issue, "number", 0))
+        title = str(get_field(issue, "title") or "").strip()
+        body = str(get_field(issue, "body") or "").strip()
         preview = body[:300] + "..." if len(body) > 300 else body
         preview = preview.replace("\n", " ")
         lines.append(f"- #{number}: {title}")
@@ -879,42 +738,6 @@ def format_issue_comments(
         metadata_prefix=OZ_AGENT_METADATA_PREFIX,
         exclude_comment_id=exclude_comment_id,
     )
-
-
-def _sync_managed_issue_comment(
-    github: Repository,
-    owner: str,
-    repo: str,
-    issue: Any,
-    *,
-    metadata: str,
-    comment_body: str,
-) -> None:
-    issue_number = int(_field(issue, "number"))
-    comments = (
-        list(issue.get_comments())
-        if hasattr(issue, "get_comments")
-        else github.list_issue_comments(owner, repo, issue_number)
-    )
-    existing = next(
-        (
-            comment
-            for comment in comments
-            if metadata in str(_field(comment, "body") or "")
-        ),
-        None,
-    )
-    if existing is None:
-        if hasattr(issue, "create_comment"):
-            issue.create_comment(comment_body)
-        else:
-            github.create_comment(owner, repo, issue_number, comment_body)
-        return
-    if str(_field(existing, "body") or "") != comment_body:
-        if hasattr(existing, "edit"):
-            existing.edit(comment_body)
-        else:
-            github.update_comment(owner, repo, int(_field(existing, "id")), comment_body)
 
 
 if __name__ == "__main__":
