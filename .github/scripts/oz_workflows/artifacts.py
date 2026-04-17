@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import random
 import time
-from typing import Any, Protocol, cast
+from typing import Any, Protocol, TypedDict, cast
 
 import httpx
 from oz_agent_sdk import OzAPI
@@ -33,6 +33,14 @@ _RETRYABLE_NETWORK_EXCEPTIONS: tuple[type[BaseException], ...] = (
     httpx.PoolTimeout,
     httpx.RemoteProtocolError,
 )
+
+
+class PrMetadata(TypedDict):
+    """Structured PR metadata produced by implementation workflows."""
+
+    branch_name: str
+    pr_title: str
+    pr_summary: str
 
 
 class _FileArtifactDataLike(Protocol):
@@ -209,7 +217,7 @@ PR_METADATA_FILENAME = "pr-metadata.json"
 _PR_METADATA_REQUIRED_KEYS = ("branch_name", "pr_title", "pr_summary")
 
 
-def load_pr_metadata_artifact(run_id: str) -> dict[str, Any]:
+def load_pr_metadata_artifact(run_id: str) -> PrMetadata:
     """Load and validate the pr-metadata.json artifact from a completed Oz run.
 
     The artifact must be a JSON object containing at least the keys
@@ -230,4 +238,4 @@ def load_pr_metadata_artifact(run_id: str) -> dict[str, Any]:
         raise RuntimeError(
             f"pr-metadata.json artifact from Oz run {run_id} has an empty pr_summary"
         )
-    return metadata
+    return cast(PrMetadata, metadata)

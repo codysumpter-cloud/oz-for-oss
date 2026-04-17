@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from github import Github
 from github.Repository import Repository
 
 from .helpers import get_field, parse_datetime
@@ -161,7 +162,7 @@ COMMAND_SIGNATURES_MAX_ENTRIES = 200
 logger = logging.getLogger(__name__)
 
 
-def fetch_command_signatures_listing(github_client: Any) -> list[str]:
+def fetch_command_signatures_listing(github_client: Github) -> list[str]:
     """Fetch the top-level directory listing from the command-signatures repo.
 
     Returns a sorted list of command names (directory names) that have
