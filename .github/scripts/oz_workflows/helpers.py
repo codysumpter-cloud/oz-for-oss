@@ -475,12 +475,12 @@ class WorkflowProgressComment:
             existing = self._get_or_find_existing_comment()
             if existing is None:
                 return
-            existing_body = str(_field(existing, "body") or "")
+            existing_body = str(get_field(existing, "body") or "")
             content = _strip_workflow_metadata(existing_body, self._workflow_prefix)
             new_body = build_comment_body(content, self.metadata)
             if new_body == existing_body:
                 return
-            self._update_comment(int(_field(existing, "id")), new_body)
+            self._update_comment(int(get_field(existing, "id")), new_body)
         except Exception:
             # Refreshing the metadata marker is best-effort; a transient
             # GitHub API failure should not abort the workflow run.
