@@ -60,7 +60,7 @@ jobs:
             echo EOF
           } >> "$GITHUB_OUTPUT"
       - name: Set up Oz Python environment
-        uses: ./.github/actions/setup-oz-python
+        uses: warpdotdev/oz-for-oss/.github/actions/setup-oz-python@main
         with:
           requirements-path: ${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/requirements.txt
       - name: Run respond-to-pr-comment workflow
