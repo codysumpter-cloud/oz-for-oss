@@ -520,6 +520,9 @@ def should_replace_triage_label(label_name: str) -> bool:
 
 def _record_triage_session_link(progress: WorkflowProgressComment, run: object) -> None:
     """Triage-specific session link callback that uses replace_body for Stage 2."""
+    oz_run_id = getattr(run, "run_id", None) or ""
+    if oz_run_id:
+        progress.record_oz_run_id(str(oz_run_id))
     session_link = getattr(run, "session_link", None) or ""
     if not session_link.strip():
         return
