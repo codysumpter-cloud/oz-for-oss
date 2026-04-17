@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from datetime import datetime, timezone
@@ -218,15 +219,51 @@ def triggering_comment_prompt_text(event_payload: dict[str, Any]) -> str:
     return f"@{author_login} commented:\n{body}"
 
 
-def comment_metadata(workflow: str, issue_number: int, *, run_id: str = "") -> str:
+def comment_metadata(
+    workflow: str,
+    issue_number: int,
+    *,
+    run_id: str = "",
+    oz_run_id: str = "",
+    github_run_id: str = "",
+) -> str:
+    payload: dict[str, Any] = {
+        "type": "issue-status",
+        "workflow": workflow,
+        "issue": issue_number,
+    }
     if run_id:
-        return f'<!-- oz-agent-metadata: {{"type":"issue-status","workflow":"{workflow}","issue":{issue_number},"run_id":"{run_id}"}} -->'
-    return f'<!-- oz-agent-metadata: {{"type":"issue-status","workflow":"{workflow}","issue":{issue_number}}} -->'
+        payload["run_id"] = run_id
+    if github_run_id:
+        payload["github_run_id"] = github_run_id
+    if oz_run_id:
+        payload["oz_run_id"] = oz_run_id
+    return f"<!-- oz-agent-metadata: {json.dumps(payload, separators=(',', ':'))} -->"
 
 
 def _workflow_metadata_prefix(workflow: str, issue_number: int) -> str:
     """Return the stable metadata prefix shared by all runs of the same workflow on an issue."""
     return f'<!-- oz-agent-metadata: {{"type":"issue-status","workflow":"{workflow}","issue":{issue_number}'
+
+
+def _strip_workflow_metadata(body: str, workflow_prefix: str) -> str:
+    """Remove any metadata marker in *body* whose prefix matches *workflow_prefix*.
+
+    The progress comment metadata marker is rebuilt mid-run when additional
+    identifiers (e.g. the Oz run id) become available. This helper strips any
+    existing marker for the same workflow+issue so callers can rebuild the
+    body with the current metadata.
+    """
+    if not body or not workflow_prefix:
+        return body
+    start = body.find(workflow_prefix)
+    if start == -1:
+        return body
+    end = body.find("-->", start)
+    if end == -1:
+        return body
+    end += len("-->")
+    return (body[:start] + body[end:]).strip()
 
 
 def split_comment_body(body: str, metadata: str) -> tuple[str, str]:
@@ -379,7 +416,14 @@ class WorkflowProgressComment:
         self.event_payload = event_payload or {}
         self.requester_login = requester_login
         self.run_id = uuid.uuid4().hex
-        self.metadata = comment_metadata(workflow, issue_number, run_id=self.run_id)
+        self.github_run_id = optional_env("GITHUB_RUN_ID")
+        self.oz_run_id: str = ""
+        self.metadata = comment_metadata(
+            workflow,
+            issue_number,
+            run_id=self.run_id,
+            github_run_id=self.github_run_id,
+        )
         self._workflow_prefix = _workflow_metadata_prefix(workflow, issue_number)
         self.comment_id: int | None = None
         self.session_link: str = ""
@@ -407,6 +451,40 @@ class WorkflowProgressComment:
             # the entire workflow run; try again on the next poll.
             return
         self.session_link = normalized
+
+    def record_oz_run_id(self, oz_run_id: str) -> None:
+        """Record the Oz agent run id and refresh the metadata marker.
+
+        When the Oz run id becomes known mid-run (after ``client.agent.run``
+        returns its run id), fold it into the comment metadata so the marker
+        on the GitHub comment captures the Oz run id alongside the GitHub
+        Actions run id.
+        """
+        normalized = (oz_run_id or "").strip()
+        if not normalized or normalized == self.oz_run_id:
+            return
+        try:
+            self.oz_run_id = normalized
+            self.metadata = comment_metadata(
+                self.workflow,
+                self.issue_number,
+                run_id=self.run_id,
+                oz_run_id=self.oz_run_id,
+                github_run_id=self.github_run_id,
+            )
+            existing = self._get_or_find_existing_comment()
+            if existing is None:
+                return
+            existing_body = str(_field(existing, "body") or "")
+            content = _strip_workflow_metadata(existing_body, self._workflow_prefix)
+            new_body = build_comment_body(content, self.metadata)
+            if new_body == existing_body:
+                return
+            self._update_comment(int(_field(existing, "id")), new_body)
+        except Exception:
+            # Refreshing the metadata marker is best-effort; a transient
+            # GitHub API failure should not abort the workflow run.
+            return
 
     def complete(self, status_line: str) -> None:
         self._append_sections([status_line])
@@ -625,7 +703,10 @@ class WorkflowProgressComment:
 
 
 def record_run_session_link(progress: WorkflowProgressComment, run: object) -> None:
-    """Record the current Oz session link on a progress comment when available."""
+    """Record the current Oz session link and run id on a progress comment when available."""
+    oz_run_id = getattr(run, "run_id", None) or ""
+    if oz_run_id:
+        progress.record_oz_run_id(str(oz_run_id))
     session_link = getattr(run, "session_link", None) or ""
     progress.record_session_link(session_link)
 
