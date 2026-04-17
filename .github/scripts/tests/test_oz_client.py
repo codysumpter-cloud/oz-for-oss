@@ -238,6 +238,101 @@ class BuildAgentConfigTest(unittest.TestCase):
                 workspace=Path("/tmp"),
             )
 
+    @patch.dict(os.environ, {"WARP_ENVIRONMENT_ID": "default-env"}, clear=True)
+    def test_defaults_session_sharing_to_viewer(self) -> None:
+        config = build_agent_config(
+            config_name="review-pull-request",
+            workspace=Path("/tmp"),
+        )
+        self.assertEqual(
+            dict(config).get("session_sharing"),
+            {"public_access": "VIEWER"},
+        )
+
+    @patch.dict(
+        os.environ,
+        {
+            "WARP_ENVIRONMENT_ID": "default-env",
+            "WARP_SESSION_SHARING_PUBLIC_ACCESS": "EDITOR",
+        },
+        clear=True,
+    )
+    def test_session_sharing_can_be_set_to_editor(self) -> None:
+        config = build_agent_config(
+            config_name="review-pull-request",
+            workspace=Path("/tmp"),
+        )
+        self.assertEqual(
+            dict(config).get("session_sharing"),
+            {"public_access": "EDITOR"},
+        )
+
+    @patch.dict(
+        os.environ,
+        {
+            "WARP_ENVIRONMENT_ID": "default-env",
+            "WARP_SESSION_SHARING_PUBLIC_ACCESS": "viewer",
+        },
+        clear=True,
+    )
+    def test_session_sharing_is_case_insensitive(self) -> None:
+        config = build_agent_config(
+            config_name="review-pull-request",
+            workspace=Path("/tmp"),
+        )
+        self.assertEqual(
+            dict(config).get("session_sharing"),
+            {"public_access": "VIEWER"},
+        )
+
+    @patch.dict(
+        os.environ,
+        {
+            "WARP_ENVIRONMENT_ID": "default-env",
+            "WARP_SESSION_SHARING_PUBLIC_ACCESS": "none",
+        },
+        clear=True,
+    )
+    def test_session_sharing_can_be_disabled(self) -> None:
+        config = build_agent_config(
+            config_name="review-pull-request",
+            workspace=Path("/tmp"),
+        )
+        self.assertNotIn("session_sharing", dict(config))
+
+    @patch.dict(
+        os.environ,
+        {
+            "WARP_ENVIRONMENT_ID": "default-env",
+            "WARP_SESSION_SHARING_PUBLIC_ACCESS": "off",
+        },
+        clear=True,
+    )
+    def test_session_sharing_off_also_disables(self) -> None:
+        config = build_agent_config(
+            config_name="review-pull-request",
+            workspace=Path("/tmp"),
+        )
+        self.assertNotIn("session_sharing", dict(config))
+
+    @patch.dict(
+        os.environ,
+        {
+            "WARP_ENVIRONMENT_ID": "default-env",
+            "WARP_SESSION_SHARING_PUBLIC_ACCESS": "bogus",
+        },
+        clear=True,
+    )
+    def test_unknown_session_sharing_value_falls_back_to_default(self) -> None:
+        config = build_agent_config(
+            config_name="review-pull-request",
+            workspace=Path("/tmp"),
+        )
+        self.assertEqual(
+            dict(config).get("session_sharing"),
+            {"public_access": "VIEWER"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
