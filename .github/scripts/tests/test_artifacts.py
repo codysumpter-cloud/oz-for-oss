@@ -8,7 +8,6 @@ from oz_workflows.artifacts import (
     _download_artifact_text,
     _download_artifact_json,
     _find_file_artifact,
-    load_pr_description_artifact,
     load_pr_metadata_artifact,
     poll_for_artifact,
     poll_for_text_artifact,
@@ -172,39 +171,6 @@ class PollForArtifactTest(unittest.TestCase):
             timeout_seconds=0,
         )
         self.assertEqual(result, "PR body")
-
-
-class LoadPrDescriptionArtifactTest(unittest.TestCase):
-    @patch("oz_workflows.artifacts.poll_for_text_artifact")
-    def test_returns_stripped_description(self, mock_poll: MagicMock) -> None:
-        mock_poll.return_value = "  Closes #42\n\n## Summary\n  "
-        import warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            result = load_pr_description_artifact("run-123")
-        self.assertEqual(result, "Closes #42\n\n## Summary")
-        mock_poll.assert_called_once_with("run-123", filename="pr_description.md")
-
-    @patch("oz_workflows.artifacts.poll_for_text_artifact")
-    def test_raises_when_empty(self, mock_poll: MagicMock) -> None:
-        mock_poll.return_value = "   "
-        import warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            with self.assertRaises(RuntimeError) as ctx:
-                load_pr_description_artifact("run-123")
-        self.assertIn("empty", str(ctx.exception))
-
-    @patch("oz_workflows.artifacts.poll_for_text_artifact")
-    def test_emits_deprecation_warning(self, mock_poll: MagicMock) -> None:
-        mock_poll.return_value = "body"
-        import warnings
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            load_pr_description_artifact("run-123")
-        deprecation_warnings = [w for w in caught if issubclass(w.category, DeprecationWarning)]
-        self.assertTrue(len(deprecation_warnings) >= 1)
-        self.assertIn("load_pr_metadata_artifact", str(deprecation_warnings[0].message))
 
 
 class LoadPrMetadataArtifactTest(unittest.TestCase):
