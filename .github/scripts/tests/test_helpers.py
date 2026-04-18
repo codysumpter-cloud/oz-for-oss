@@ -327,7 +327,7 @@ class BuildPrBodyTest(unittest.TestCase):
             session_link="https://example.com/session",
             closing_keyword="Fixes",
         )
-        self.assertIn("Session: https://example.com/session", body)
+        self.assertIn("Session: [view on Warp](https://example.com/session)", body)
 
     def test_no_changes_section_when_no_commits(self) -> None:
         github = FakeGitHubClientWithCompare([])

@@ -333,7 +333,7 @@ def main() -> None:
         selected_spec_pr = spec_context.get("selected_spec_pr")
         if spec_context.get("spec_context_source") == "approved-pr" and selected_spec_pr:
             spec_sections.append(
-                f"Linked approved spec PR: #{selected_spec_pr['number']} ({selected_spec_pr['url']})"
+                f"Linked approved spec PR: [#{selected_spec_pr['number']}]({selected_spec_pr['url']})"
             )
         elif spec_context.get("spec_context_source") == "directory":
             spec_sections.append("Repository spec context was found in `specs/`.")
@@ -425,9 +425,9 @@ def main() -> None:
                 progress.complete("I completed the review and did not identify any actionable feedback for this pull request.")
                 return
             if comments:
-                pr.create_review(body=summary or "Automated review by Oz", event="COMMENT", comments=comments)
+                pr.create_review(body=summary or "Automated review", event="COMMENT", comments=comments)
             else:
-                pr.create_review(body=summary or "Automated review by Oz", event="COMMENT")
+                pr.create_review(body=summary or "Automated review", event="COMMENT")
             progress.complete("I completed the review and posted feedback on this pull request.")
         except Exception:
             progress.report_error()
