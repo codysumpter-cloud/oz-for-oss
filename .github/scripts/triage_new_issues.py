@@ -49,8 +49,16 @@ TRIAGE_DISCLAIMER = "*This is an automated analysis by Oz and may be incorrect. 
 
 
 def _lowercase_first(text: str) -> str:
-    """Lowercase the first character of *text* so it reads naturally mid-sentence."""
+    """Lowercase the first character of *text* so it reads naturally mid-sentence.
+
+    Preserves likely acronyms (e.g. "API", "CLI", "PR") by leaving the text
+    unchanged when the second character is also uppercase.
+    """
     if not text:
+        return text
+    if len(text) > 1 and text[1].isupper():
+        # Looks like an acronym (e.g., "API"); leave as-is so we don't
+        # produce output like "aPI request validation fails".
         return text
     return text[0].lower() + text[1:]
 

@@ -1002,6 +1002,36 @@ class LowercaseFirstTest(unittest.TestCase):
     def test_preserves_rest_of_string(self) -> None:
         self.assertEqual(_lowercase_first("The GPU driver is outdated"), "the GPU driver is outdated")
 
+    def test_preserves_leading_acronym(self) -> None:
+        # "API ..." must not become "aPI ..." when embedded mid-sentence.
+        self.assertEqual(
+            _lowercase_first("API request validation fails on empty bodies"),
+            "API request validation fails on empty bodies",
+        )
+
+    def test_preserves_two_letter_acronym(self) -> None:
+        self.assertEqual(
+            _lowercase_first("PR comments are duplicated"),
+            "PR comments are duplicated",
+        )
+
+    def test_preserves_cli_acronym(self) -> None:
+        self.assertEqual(
+            _lowercase_first("CLI flag is ignored"),
+            "CLI flag is ignored",
+        )
+
+    def test_lowercases_proper_noun_followed_by_lowercase(self) -> None:
+        # Heuristic: second character is lowercase, so it's treated as a
+        # regular word and the first character is lowercased.
+        self.assertEqual(
+            _lowercase_first("Python 3.11 compatibility"),
+            "python 3.11 compatibility",
+        )
+
+    def test_single_uppercase_character_is_lowercased(self) -> None:
+        self.assertEqual(_lowercase_first("A"), "a")
+
 
 class SummaryCasingInStage3Test(unittest.TestCase):
     """Verify that the summary is lowercased when embedded mid-sentence."""
