@@ -7,6 +7,7 @@ from github import Auth, Github
 from github.PullRequest import PullRequest
 from github.Repository import Repository
 
+from oz_workflows.artifacts import try_load_resolved_review_comments_artifact
 from oz_workflows.env import load_event, optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.helpers import (
     all_review_comments_text,
@@ -16,6 +17,7 @@ from oz_workflows.helpers import (
     format_pr_comment_start_line,
     is_automation_user,
     org_member_comments_text,
+    post_resolved_review_comment_replies,
     record_run_session_link,
     resolve_coauthor_line,
     resolve_spec_context_for_pr,
@@ -209,6 +211,21 @@ def _run_implementation(
         - If you produce changes, commit them to `{head_branch}` and push that branch to origin.
         - Do not open or update the pull request yourself.
         - If no implementation diff is warranted, do not push the branch.
+
+        Resolved Review Comment Reporting:
+        - If any of your changes addresses one or more existing PR review comments (inline comments on the code in this PR, as surfaced in the review context above), record them so the workflow can close the loop on those review threads.
+        - Only include review comments whose underlying concern is actually resolved by the change you produced in this run. Do not guess or speculate.
+        - Limit reported comment ids to numeric GitHub review comment ids drawn from the review context above. Do not invent ids and do not include issue-comment ids.
+        - Write the report to `resolved_review_comments.json` at the repository root with exactly this shape:
+          {{
+            "resolved_review_comments": [
+              {{"comment_id": <int: GitHub review comment id>, "summary": "<markdown summary of how the comment was addressed, referencing files/changes>"}}
+            ]
+          }}
+        - Each `summary` must be a short, reviewer-facing explanation (1-3 sentences) describing what changed.
+        - Validate the JSON with `jq` after writing it.
+        - Upload it as an artifact via `oz-dev artifact upload resolved_review_comments.json`. The subcommand is `artifact` (singular); do not use `artifacts`.
+        - Do not upload the artifact when no review comments were resolved. Omitting the file is the correct signal that no review threads need to be closed.
         {coauthor_directives}
         """
     ).strip()
@@ -244,9 +261,31 @@ def _run_implementation(
             progress.complete("I analyzed the request but did not produce any changes.")
             return
 
-        progress.complete(
-            f"I pushed changes to this PR based on the comment.\n\n{next_steps_section}"
-        )
+        # Only honor the resolved-review-comments payload when the branch
+        # was actually updated. Without a code change there is nothing to
+        # tie the "resolved" claim back to, so skip replies/thread
+        # resolution rather than noisily closing threads for a no-op run.
+        resolved_review_comments = try_load_resolved_review_comments_artifact(run.run_id)
+        if resolved_review_comments:
+            post_resolved_review_comment_replies(
+                client,
+                owner,
+                repo,
+                pr,
+                resolved_review_comments,
+            )
+
+        completion_sections = [
+            "I pushed changes to this PR based on the comment.",
+        ]
+        if resolved_review_comments:
+            count = len(resolved_review_comments)
+            noun = "review comment" if count == 1 else "review comments"
+            completion_sections.append(
+                f"Replied to and attempted to resolve {count} {noun} that this run addressed."
+            )
+        completion_sections.append(next_steps_section)
+        progress.complete("\n\n".join(completion_sections))
     except Exception:
         progress.report_error()
         raise

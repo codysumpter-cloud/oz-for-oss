@@ -43,6 +43,13 @@ class PrMetadata(TypedDict):
     pr_summary: str
 
 
+class ResolvedReviewComment(TypedDict):
+    """A single PR review comment that the agent reported as resolved."""
+
+    comment_id: int
+    summary: str
+
+
 class _FileArtifactDataLike(Protocol):
     artifact_uid: str
     filename: str | None
@@ -239,3 +246,110 @@ def load_pr_metadata_artifact(run_id: str) -> PrMetadata:
             f"pr-metadata.json artifact from Oz run {run_id} has an empty pr_summary"
         )
     return cast(PrMetadata, metadata)
+
+
+RESOLVED_REVIEW_COMMENTS_FILENAME = "resolved_review_comments.json"
+
+
+def _normalize_resolved_review_comment_entry(
+    entry: Any, *, index: int
+) -> ResolvedReviewComment | None:
+    """Normalize a raw ``resolved_review_comments`` entry from the artifact.
+
+    Returns ``None`` (logging a warning) when the entry cannot be coerced into
+    the documented ``{"comment_id": int, "summary": str}`` shape rather than
+    raising, so a single malformed entry does not abort the workflow.
+    """
+    if not isinstance(entry, dict):
+        print(
+            f"[resolved-review-comments] Dropped entry {index}: expected object, got {type(entry).__name__}"
+        )
+        return None
+    raw_comment_id = entry.get("comment_id")
+    comment_id: int | None
+    if isinstance(raw_comment_id, bool):
+        # ``bool`` is a subclass of ``int``; treat it as invalid.
+        comment_id = None
+    elif isinstance(raw_comment_id, int):
+        comment_id = raw_comment_id
+    elif isinstance(raw_comment_id, str) and raw_comment_id.strip().isdigit():
+        comment_id = int(raw_comment_id.strip())
+    else:
+        comment_id = None
+    if comment_id is None or comment_id <= 0:
+        print(
+            f"[resolved-review-comments] Dropped entry {index}: missing or invalid `comment_id`"
+        )
+        return None
+    summary = entry.get("summary")
+    if not isinstance(summary, str):
+        summary = ""
+    summary = summary.strip()
+    if not summary:
+        print(
+            f"[resolved-review-comments] Dropped entry {index} for comment {comment_id}: missing `summary`"
+        )
+        return None
+    return {"comment_id": comment_id, "summary": summary}
+
+
+def normalize_resolved_review_comments_payload(
+    payload: Any,
+) -> list[ResolvedReviewComment]:
+    """Validate and normalize a ``resolved_review_comments.json`` payload.
+
+    Accepts either an object with a ``resolved_review_comments`` list or a
+    bare list of entries. Dropped entries (malformed or duplicate
+    ``comment_id``) are logged and skipped so the rest of the workflow
+    continues uninterrupted.
+    """
+    if isinstance(payload, dict):
+        raw_entries = payload.get("resolved_review_comments")
+    else:
+        raw_entries = payload
+    if raw_entries in (None, ""):
+        return []
+    if not isinstance(raw_entries, list):
+        print(
+            "[resolved-review-comments] Dropping payload: `resolved_review_comments` must be a list"
+        )
+        return []
+    seen: set[int] = set()
+    resolved: list[ResolvedReviewComment] = []
+    for index, entry in enumerate(raw_entries):
+        normalized = _normalize_resolved_review_comment_entry(entry, index=index)
+        if normalized is None:
+            continue
+        if normalized["comment_id"] in seen:
+            print(
+                f"[resolved-review-comments] Dropped duplicate entry for comment {normalized['comment_id']}"
+            )
+            continue
+        seen.add(normalized["comment_id"])
+        resolved.append(normalized)
+    return resolved
+
+
+def try_load_resolved_review_comments_artifact(
+    run_id: str,
+    *,
+    timeout_seconds: int = 10,
+    poll_interval_seconds: int = 2,
+) -> list[ResolvedReviewComment]:
+    """Try to load the optional ``resolved_review_comments.json`` artifact.
+
+    The artifact is emitted by the agent only when it resolved one or more
+    PR review comments as part of the run. When it is absent (or cannot be
+    parsed), this returns an empty list rather than raising so callers can
+    fall back to their existing completion behavior.
+    """
+    try:
+        payload = poll_for_artifact(
+            run_id,
+            filename=RESOLVED_REVIEW_COMMENTS_FILENAME,
+            timeout_seconds=timeout_seconds,
+            poll_interval_seconds=poll_interval_seconds,
+        )
+    except RuntimeError:
+        return []
+    return normalize_resolved_review_comments_payload(payload)

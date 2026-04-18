@@ -1158,8 +1158,10 @@ def _format_review_comment(comment: Any) -> str:
     created = get_timestamp_text(get_field(comment, "created_at"))
     body = get_field(comment, "body") or ""
     path = get_field(comment, "path") or ""
+    comment_id = get_field(comment, "id")
+    id_prefix = f"[id={comment_id}] " if comment_id else ""
     prefix = f"{path}: " if path else ""
-    return f"- {prefix}{login} ({created}): {body}"
+    return f"- {id_prefix}{prefix}{login} ({created}): {body}"
 
 
 def review_thread_comments_text(
@@ -1192,9 +1194,161 @@ def all_review_comments_text(review_comments: list[Any]) -> str:
             login = get_login(get_field(c, "user")) or "unknown"
             created = get_timestamp_text(get_field(c, "created_at"))
             body = get_field(c, "body") or ""
-            lines.append(f"  - {login} ({created}): {body}")
+            comment_id = get_field(c, "id")
+            id_prefix = f"[id={comment_id}] " if comment_id else ""
+            lines.append(f"  - {id_prefix}{login} ({created}): {body}")
         sections.append("\n".join(lines))
     return "\n\n".join(sections)
+
+
+def _resolve_review_thread_ids_for_comments(
+    github_client: Github,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    comment_ids: list[int],
+) -> dict[int, str]:
+    """Map review comment REST ids to their GraphQL review thread node ids.
+
+    GitHub only exposes ``resolveReviewThread`` via GraphQL, and the REST
+    review-comment id (``databaseId`` in GraphQL) is not itself a thread id.
+    We walk the PR's review threads and record the thread node id for each
+    comment we care about. Threads without any matching comment are ignored.
+    """
+    if not comment_ids:
+        return {}
+    wanted: set[int] = {int(cid) for cid in comment_ids}
+    query = (
+        "query($owner: String!, $name: String!, $number: Int!, $after: String) {"
+        " repository(owner: $owner, name: $name) {"
+        " pullRequest(number: $number) {"
+        " reviewThreads(first: 100, after: $after) {"
+        " pageInfo { hasNextPage endCursor }"
+        " nodes {"
+        " id isResolved"
+        " comments(first: 100) { nodes { databaseId } }"
+        " } } } } }"
+    )
+    mapping: dict[int, str] = {}
+    cursor: str | None = None
+    requester = github_client.requester
+    while True:
+        variables = {
+            "owner": owner,
+            "name": repo,
+            "number": int(pr_number),
+            "after": cursor,
+        }
+        _headers, data = requester.graphql_query(query, variables)
+        repository = (data.get("data") or {}).get("repository") or {}
+        pr_data = repository.get("pullRequest") or {}
+        review_threads = pr_data.get("reviewThreads") or {}
+        for thread in review_threads.get("nodes") or []:
+            thread_id = thread.get("id")
+            if not thread_id:
+                continue
+            thread_comments = (thread.get("comments") or {}).get("nodes") or []
+            for comment_node in thread_comments:
+                db_id = comment_node.get("databaseId")
+                if isinstance(db_id, int) and db_id in wanted:
+                    mapping[db_id] = thread_id
+                    # A thread can satisfy multiple requested ids; don't break here.
+        page_info = review_threads.get("pageInfo") or {}
+        if not page_info.get("hasNextPage") or set(mapping.keys()) >= wanted:
+            break
+        cursor = page_info.get("endCursor")
+        if not cursor:
+            break
+    return mapping
+
+
+def _resolve_review_thread(github_client: Github, thread_id: str) -> bool:
+    """Mark a single review thread as resolved via GraphQL.
+
+    Returns ``True`` on success and ``False`` on any failure so callers can
+    treat resolution as best-effort.
+    """
+    try:
+        requester = github_client.requester
+        requester.graphql_named_mutation(
+            "resolveReviewThread",
+            {"threadId": thread_id},
+            "thread { id isResolved }",
+        )
+        return True
+    except Exception:
+        logger.exception(
+            "Failed to resolve review thread %s via GraphQL", thread_id
+        )
+        return False
+
+
+def post_resolved_review_comment_replies(
+    github_client: Github,
+    owner: str,
+    repo: str,
+    pr: PullRequest,
+    resolved: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Post replies and resolve review threads for agent-reported fixes.
+
+    For each entry in *resolved* (``{"comment_id": int, "summary": str}``),
+    post a reply on the original review thread explaining how the comment
+    was addressed and, when possible, mark the thread as resolved via
+    GraphQL. Failures for a single comment are logged and skipped so one
+    bad reference does not abort the broader workflow.
+
+    Returns a list of per-entry result records describing what happened so
+    callers can surface them in progress comments or logs.
+    """
+    if not resolved:
+        return []
+    comment_ids = [int(entry["comment_id"]) for entry in resolved]
+    try:
+        thread_ids = _resolve_review_thread_ids_for_comments(
+            github_client, owner, repo, pr.number, comment_ids
+        )
+    except Exception:
+        logger.exception(
+            "Failed to resolve review thread ids for PR #%s; replies will be posted without thread resolution",
+            pr.number,
+        )
+        thread_ids = {}
+    results: list[dict[str, Any]] = []
+    for entry in resolved:
+        comment_id = int(entry["comment_id"])
+        summary = str(entry.get("summary") or "").strip()
+        reply_posted = False
+        thread_resolved = False
+        reply_body = (
+            f"Oz addressed this review comment as part of the current run.\n\n{summary}"
+            if summary
+            else "Oz addressed this review comment as part of the current run."
+        )
+        try:
+            pr.create_review_comment_reply(comment_id, reply_body)
+            reply_posted = True
+        except Exception:
+            logger.exception(
+                "Failed to post reply on review comment %s for PR #%s",
+                comment_id,
+                pr.number,
+            )
+        thread_id = thread_ids.get(comment_id)
+        # Skip thread resolution when the reply itself failed so we don't
+        # silently close a review thread whose "resolved" status the
+        # reviewer can no longer match up to a visible explanation.
+        if thread_id and reply_posted:
+            thread_resolved = _resolve_review_thread(github_client, thread_id)
+        results.append(
+            {
+                "comment_id": comment_id,
+                "thread_id": thread_id or "",
+                "reply_posted": reply_posted,
+                "thread_resolved": thread_resolved,
+            }
+        )
+    return results
 
 
 def extract_issue_numbers_from_text(owner: str, repo: str, text: str) -> list[int]:
