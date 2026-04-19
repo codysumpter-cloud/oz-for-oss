@@ -17,6 +17,7 @@ from github.Repository import Repository
 from oz_agent_sdk.types.agent import RunItem
 
 from . import actions
+from .artifacts import ResolvedReviewComment
 from .env import optional_env
 
 logger = logging.getLogger(__name__)
@@ -1288,7 +1289,7 @@ def post_resolved_review_comment_replies(
     owner: str,
     repo: str,
     pr: PullRequest,
-    resolved: list[dict[str, Any]],
+    resolved: list[ResolvedReviewComment],
 ) -> list[dict[str, Any]]:
     """Post replies and resolve review threads for agent-reported fixes.
 

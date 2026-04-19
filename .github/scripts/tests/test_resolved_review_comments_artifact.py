@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+import httpx
 
 from oz_workflows.artifacts import (
     RESOLVED_REVIEW_COMMENTS_FILENAME,
@@ -167,6 +170,34 @@ class TryLoadResolvedReviewCommentsArtifactTest(unittest.TestCase):
     @patch("oz_workflows.artifacts.poll_for_artifact")
     def test_returns_empty_list_when_artifact_missing(self, mock_poll) -> None:
         mock_poll.side_effect = RuntimeError("Timed out waiting for FILE artifact")
+        result = try_load_resolved_review_comments_artifact(
+            "run-abc", timeout_seconds=0, poll_interval_seconds=0
+        )
+        self.assertEqual(result, [])
+
+    @patch("oz_workflows.artifacts.poll_for_artifact")
+    def test_returns_empty_list_on_malformed_json(self, mock_poll) -> None:
+        mock_poll.side_effect = json.JSONDecodeError("malformed", "doc", 0)
+        result = try_load_resolved_review_comments_artifact(
+            "run-abc", timeout_seconds=0, poll_interval_seconds=0
+        )
+        self.assertEqual(result, [])
+
+    @patch("oz_workflows.artifacts.poll_for_artifact")
+    def test_returns_empty_list_on_http_status_error(self, mock_poll) -> None:
+        request = httpx.Request("GET", "https://example.test/signed")
+        response = Mock(spec=httpx.Response, status_code=404, request=request)
+        mock_poll.side_effect = httpx.HTTPStatusError(
+            "not found", request=request, response=response
+        )
+        result = try_load_resolved_review_comments_artifact(
+            "run-abc", timeout_seconds=0, poll_interval_seconds=0
+        )
+        self.assertEqual(result, [])
+
+    @patch("oz_workflows.artifacts.poll_for_artifact")
+    def test_returns_empty_list_on_transient_http_error(self, mock_poll) -> None:
+        mock_poll.side_effect = httpx.ReadTimeout("timeout")
         result = try_load_resolved_review_comments_artifact(
             "run-abc", timeout_seconds=0, poll_interval_seconds=0
         )

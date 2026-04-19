@@ -307,7 +307,7 @@ def normalize_resolved_review_comments_payload(
         raw_entries = payload.get("resolved_review_comments")
     else:
         raw_entries = payload
-    if raw_entries in (None, ""):
+    if raw_entries is None:
         return []
     if not isinstance(raw_entries, list):
         print(
@@ -350,6 +350,12 @@ def try_load_resolved_review_comments_artifact(
             timeout_seconds=timeout_seconds,
             poll_interval_seconds=poll_interval_seconds,
         )
-    except RuntimeError:
+    except (RuntimeError, ValueError, httpx.HTTPError):
+        # ``RuntimeError``: poll timeouts or non-object JSON payloads.
+        # ``ValueError``: malformed JSON (``json.JSONDecodeError`` is a subclass).
+        # ``httpx.HTTPError``: 4xx responses or other transport-level failures
+        # that survived the download retries in ``_download_artifact_text``.
+        # Any of these should degrade to an empty list so a broken optional
+        # artifact never aborts the surrounding workflow's success path.
         return []
     return normalize_resolved_review_comments_payload(payload)

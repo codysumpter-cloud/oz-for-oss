@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import unittest
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from oz_workflows.helpers import (
@@ -352,10 +351,6 @@ class PostResolvedReviewCommentRepliesTest(unittest.TestCase):
         self.assertFalse(results[0]["reply_posted"])
         self.assertTrue(results[1]["reply_posted"])
         self.assertTrue(results[1]["thread_resolved"])
-
-
-class _FakeReviewComment(SimpleNamespace):
-    """Minimal review-comment stand-in for formatting tests."""
 
 
 if __name__ == "__main__":
