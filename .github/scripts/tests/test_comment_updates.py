@@ -25,6 +25,7 @@ from oz_workflows.helpers import (
     format_triage_session_line,
     format_triage_start_line,
     issue_has_prior_triage,
+    POWERED_BY_SUFFIX,
     WorkflowProgressComment,
 )
 
@@ -37,6 +38,9 @@ class CommentUpdateTest(unittest.TestCase):
         self.assertIn("You can follow along in [the session on Warp](https://example.test/session/123).", updated)
         self.assertIn("I created a [spec PR](https://example.test/pr/1) for this issue.", updated)
         self.assertTrue(updated.endswith(metadata))
+        # Suffix is present exactly once and sits immediately above the metadata.
+        self.assertEqual(updated.count(POWERED_BY_SUFFIX), 1)
+        self.assertIn(f"{POWERED_BY_SUFFIX}\n\n{metadata}", updated)
     def test_replaces_existing_session_link_when_url_changes(self) -> None:
         metadata = "<!-- meta -->"
         existing = build_comment_body("@alice\n\nI'm working on this issue.\n\nYou can follow along in [the session on Warp](https://example.test/session/123).", metadata)
@@ -64,6 +68,8 @@ class CommentUpdateTest(unittest.TestCase):
         self.assertIn("I'm starting work on product and tech specs for this issue.", body)
         self.assertIn("You can follow along in [the session on Warp](https://example.test/session/123).", body)
         self.assertIn("I created a new [spec PR](https://example.test/pr/1) for this issue.", body)
+        # Suffix should appear exactly once even after multiple appends.
+        self.assertEqual(body.count(POWERED_BY_SUFFIX), 1)
     def test_progress_comment_replaces_session_link_when_run_moves_to_conversation(self) -> None:
         github = FakeGitHubClient()
         progress = WorkflowProgressComment(

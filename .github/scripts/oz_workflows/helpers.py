@@ -205,12 +205,25 @@ def split_comment_body(body: str, metadata: str) -> tuple[str, str]:
     return body.strip(), metadata
 
 
+# Italicized suffix appended to every Oz-authored progress comment and
+# auto-generated PR body so readers can tell the message came from the Oz
+# agent and click through to the Oz landing page for more context.
+POWERED_BY_SUFFIX = "_Powered by [Oz](https://oz.warp.dev)_"
+
+
 def build_comment_body(content: str, metadata: str) -> str:
     content = content.strip()
+    # Strip any previously-appended suffix so the one added below stays a
+    # single, trailing section regardless of how many times the body is
+    # rebuilt (e.g. across append/edit cycles).
+    if content.endswith(POWERED_BY_SUFFIX):
+        content = content[: -len(POWERED_BY_SUFFIX)].rstrip()
+    if content:
+        content = f"{content}\n\n{POWERED_BY_SUFFIX}"
+    else:
+        content = POWERED_BY_SUFFIX
     if metadata:
-        if content:
-            return f"{content}\n\n{metadata}"
-        return metadata
+        return f"{content}\n\n{metadata}"
     return content
 
 _PROGRESS_LINK_PREFIXES = (
@@ -429,6 +442,9 @@ def append_comment_sections(existing_body: str, metadata: str, sections: list[st
     if not content:
         return build_comment_body("\n\n".join(normalized_sections), metadata)
     updated_sections = [section.strip() for section in content.split("\n\n") if section.strip()]
+    # Drop any prior "Powered by" suffix so ``build_comment_body`` can
+    # re-add it as the last section after new sections are appended.
+    updated_sections = [s for s in updated_sections if s != POWERED_BY_SUFFIX]
     for section in normalized_sections:
         if section.startswith(_PROGRESS_LINK_PREFIXES):
             updated_sections = [
@@ -1013,6 +1029,7 @@ def build_pr_body(
     if session_link:
         sections.append(f"Session: [view on Warp]({session_link})")
 
+    sections.append(POWERED_BY_SUFFIX)
     return "\n\n".join(sections)
 
 
