@@ -214,6 +214,15 @@ class ReviewThreadCommentsTextTest(unittest.TestCase):
         self.assertIn("bob", result)
         self.assertNotIn("carol", result)
 
+    def test_includes_comment_id_prefix(self) -> None:
+        comments = [
+            {"id": 10, "author_association": "MEMBER", "user": {"login": "alice"}, "created_at": "2026-01-01T00:00:00Z", "body": "Root comment", "path": "src/main.py"},
+            {"id": 11, "in_reply_to_id": 10, "author_association": "MEMBER", "user": {"login": "bob"}, "created_at": "2026-01-01T01:00:00Z", "body": "Reply", "path": "src/main.py"},
+        ]
+        result = review_thread_comments_text(comments, trigger_comment_id=11)
+        self.assertIn("[id=10]", result)
+        self.assertIn("[id=11]", result)
+
     def test_filters_non_org_members(self) -> None:
         comments = [
             {"id": 10, "author_association": "MEMBER", "user": {"login": "alice"}, "created_at": "2026-01-01T00:00:00Z", "body": "Root", "path": "f.py"},
@@ -241,6 +250,15 @@ class AllReviewCommentsTextTest(unittest.TestCase):
         self.assertIn("File: src/b.py", result)
         self.assertIn("alice", result)
         self.assertIn("bob", result)
+
+    def test_includes_comment_id_prefix(self) -> None:
+        comments = [
+            {"id": 1, "author_association": "MEMBER", "user": {"login": "alice"}, "created_at": "2026-01-01T00:00:00Z", "body": "Fix here", "path": "src/a.py"},
+            {"id": 2, "author_association": "MEMBER", "user": {"login": "bob"}, "created_at": "2026-01-01T01:00:00Z", "body": "And here", "path": "src/a.py"},
+        ]
+        result = all_review_comments_text(comments)
+        self.assertIn("[id=1]", result)
+        self.assertIn("[id=2]", result)
 
     def test_filters_non_org_members(self) -> None:
         comments = [
