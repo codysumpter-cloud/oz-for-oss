@@ -17,6 +17,7 @@ from oz_workflows.helpers import (
     is_automation_user,
     is_spec_only_pr,
     org_member_comments_text,
+    POWERED_BY_SUFFIX,
     resolve_coauthor_line,
     resolve_issue_number_for_pr,
     resolve_progress_requester_login,
@@ -345,7 +346,7 @@ class BuildPrBodyTest(unittest.TestCase):
             session_link="https://example.com/session",
             closing_keyword="Fixes",
         )
-        self.assertIn("Session: https://example.com/session", body)
+        self.assertIn("Session: [view on Warp](https://example.com/session)", body)
 
     def test_no_changes_section_when_no_commits(self) -> None:
         github = FakeGitHubClientWithCompare([])
@@ -358,6 +359,22 @@ class BuildPrBodyTest(unittest.TestCase):
         )
         self.assertNotIn("## Changes", body)
         self.assertIn("Closes #7", body)
+
+    def test_includes_powered_by_suffix(self) -> None:
+        github = FakeGitHubClientWithCompare([])
+        body = build_pr_body(
+            github, "acme", "widgets",
+            issue_number=7,
+            head="branch",
+            base="main",
+            session_link="https://example.com/session",
+            closing_keyword="Closes",
+        )
+        self.assertTrue(
+            body.endswith(POWERED_BY_SUFFIX),
+            msg=f"PR body should end with the suffix, got: {body!r}",
+        )
+        self.assertEqual(body.count(POWERED_BY_SUFFIX), 1)
 
 
 class _FakeIssueWithEvents:

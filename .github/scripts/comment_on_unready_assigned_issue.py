@@ -22,9 +22,9 @@ def main() -> None:
             workflow="comment-on-unready-assigned-issue",
             event_payload=event,
         )
-        progress.start("Oz is checking whether this assignment is ready for work.")
+        progress.start("I'm checking whether this assignment is ready for work.")
         progress.complete(
-            "This issue is assigned to Oz, but it is not labeled `ready-to-spec` or `ready-to-implement`, so there is no work to do yet.",
+            "This issue is assigned to me, but it is not labeled `ready-to-spec` or `ready-to-implement`, so there is no work to do yet.",
         )
         issue.remove_from_assignees(assignee_login)
 

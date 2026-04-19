@@ -171,7 +171,7 @@ def _run_implementation(
     selected_spec_pr = spec_context.get("selected_spec_pr")
     if spec_context.get("spec_context_source") == "approved-pr" and selected_spec_pr:
         spec_sections.append(
-            f"Linked approved spec PR: #{selected_spec_pr['number']} ({selected_spec_pr['url']})"
+            f"Linked approved spec PR: [#{selected_spec_pr['number']}]({selected_spec_pr['url']})"
         )
     elif spec_context.get("spec_context_source") == "directory":
         spec_sections.append("Repository spec context was found in `specs/`.")

@@ -206,17 +206,30 @@ def split_comment_body(body: str, metadata: str) -> tuple[str, str]:
     return body.strip(), metadata
 
 
+# Italicized suffix appended to every Oz-authored progress comment and
+# auto-generated PR body so readers can tell the message came from the Oz
+# agent and click through to the Oz landing page for more context.
+POWERED_BY_SUFFIX = "_Powered by [Oz](https://oz.warp.dev)_"
+
+
 def build_comment_body(content: str, metadata: str) -> str:
     content = content.strip()
+    # Strip any previously-appended suffix so the one added below stays a
+    # single, trailing section regardless of how many times the body is
+    # rebuilt (e.g. across append/edit cycles).
+    if content.endswith(POWERED_BY_SUFFIX):
+        content = content[: -len(POWERED_BY_SUFFIX)].rstrip()
+    if content:
+        content = f"{content}\n\n{POWERED_BY_SUFFIX}"
+    else:
+        content = POWERED_BY_SUFFIX
     if metadata:
-        if content:
-            return f"{content}\n\n{metadata}"
-        return metadata
+        return f"{content}\n\n{metadata}"
     return content
 
 _PROGRESS_LINK_PREFIXES = (
-    "Sharing session at: ",
-    "View the Oz conversation: ",
+    "You can follow along in [the session on Warp]",
+    "You can view [the conversation on Warp]",
 )
 
 
@@ -253,9 +266,9 @@ def format_triage_start_line(*, is_retriage: bool) -> str:
     """State-aware opening line for the triage workflow."""
     if is_retriage:
         return (
-            "Oz is re-triaging this issue based on new information."
+            "I'm re-triaging this issue based on new information."
         )
-    return "Oz is starting to work on triaging this issue."
+    return "I'm starting to work on triaging this issue."
 
 
 def format_triage_session_line(
@@ -263,14 +276,14 @@ def format_triage_session_line(
 ) -> str:
     """Mid-run status line used once the Oz session link is known."""
     verb = "re-triaging" if is_retriage else "triaging"
-    return f"Oz is {verb} this issue. You can follow {session_link_markdown}."
+    return f"I'm {verb} this issue. You can follow {session_link_markdown}."
 
 
 def format_respond_to_triaged_start_line() -> str:
     """State-aware opening line for the inline triaged-issue response workflow."""
     return (
-        "Oz is drafting an inline response to this comment. "
-        "This issue is already triaged, so Oz will reply without changing labels, "
+        "I'm drafting an inline response to this comment. "
+        "This issue is already triaged, so I'll reply without changing labels, "
         "the issue body, or assignees."
     )
 
@@ -278,15 +291,15 @@ def format_respond_to_triaged_start_line() -> str:
 def format_spec_start_line(*, is_update: bool) -> str:
     """State-aware opening line for the create-spec-from-issue workflow."""
     if is_update:
-        return "Oz is updating the existing spec PR for this issue."
-    return "Oz is starting work on product and tech specs for this issue."
+        return "I'm updating the existing spec PR for this issue."
+    return "I'm starting work on product and tech specs for this issue."
 
 
 def format_spec_complete_line(*, is_update: bool, pr_url: str) -> str:
     """State-aware completion line for the create-spec-from-issue workflow."""
     if is_update:
-        return f"I updated the existing spec PR for this issue: {pr_url}"
-    return f"I created a new spec PR for this issue: {pr_url}"
+        return f"I updated the existing [spec PR]({pr_url}) for this issue."
+    return f"I created a new [spec PR]({pr_url}) for this issue."
 
 
 def format_implementation_start_line(
@@ -310,25 +323,25 @@ def format_implementation_start_line(
         numbers = ", ".join(f"#{n}" for n in (unapproved_spec_pr_numbers or []))
         suffix = f" Linked spec PR(s): {numbers}." if numbers else ""
         return (
-            "Oz is not starting implementation because the linked spec PR(s) "
+            "I'm not starting implementation because the linked spec PR(s) "
             "have not been marked `plan-approved`."
             + suffix
         )
     updating = " (updating the existing draft PR)" if existing_implementation_pr else ""
     if spec_context_source == "approved-pr":
         return (
-            "Oz is implementing this issue on top of the approved spec PR's branch"
+            "I'm implementing this issue on top of the approved spec PR's branch"
             + updating
             + "."
         )
     if spec_context_source == "directory":
         return (
-            "Oz is implementing this issue using the repository's directory specs"
+            "I'm implementing this issue using the repository's directory specs"
             + updating
             + "."
         )
     return (
-        "Oz is implementing this issue with no spec context"
+        "I'm implementing this issue with no spec context"
         + updating
         + "."
     )
@@ -343,13 +356,13 @@ def format_implementation_complete_line(
     """State-aware completion line for the implementation workflow."""
     if updated_spec_pr:
         return (
-            f"I pushed implementation updates to the linked approved spec PR: {pr_url}"
+            f"I pushed implementation updates to the linked approved [spec PR]({pr_url})."
         )
     if existing_implementation_pr:
         return (
-            f"I updated the existing draft implementation PR for this issue: {pr_url}"
+            f"I updated the existing draft [implementation PR]({pr_url}) for this issue."
         )
-    return f"I created a new draft implementation PR for this issue: {pr_url}"
+    return f"I created a new draft [implementation PR]({pr_url}) for this issue."
 
 
 def format_review_start_line(
@@ -358,9 +371,9 @@ def format_review_start_line(
     """State-aware opening line for the review-pull-request workflow."""
     kind = "spec-only pull request" if spec_only else "pull request"
     if is_rereview:
-        base = f"Oz is re-reviewing this {kind} in response to a review request."
+        base = f"I'm re-reviewing this {kind} in response to a review request."
     else:
-        base = f"Oz is starting a first review of this {kind}."
+        base = f"I'm starting a first review of this {kind}."
     focus_text = (focus or "").strip()
     if focus_text:
         return f"{base} Focus: {focus_text}"
@@ -382,7 +395,7 @@ def format_pr_comment_start_line(
         else ""
     )
     return (
-        f"Oz is working on changes requested in this PR (responding to {source})."
+        f"I'm working on changes requested in this PR (responding to {source})."
         + spec_clause
     )
 
@@ -397,7 +410,7 @@ def format_enforce_start_line(
         else "a likely matching ready issue"
     )
     return (
-        f"Oz is checking this {change_kind} PR for association with {association}."
+        f"I'm checking this {change_kind} PR for association with {association}."
     )
 
 
@@ -414,8 +427,8 @@ def _workflow_run_url() -> str:
 def _format_progress_link_section(session_link: str) -> str:
     normalized_link = session_link.strip()
     if "/conversation/" in normalized_link:
-        return f"View the Oz conversation: {normalized_link}"
-    return f"Sharing session at: {normalized_link}"
+        return f"You can view [the conversation on Warp]({normalized_link})."
+    return f"You can follow along in [the session on Warp]({normalized_link})."
 
 
 def _format_triage_session_link(session_link: str) -> str:
@@ -430,6 +443,9 @@ def append_comment_sections(existing_body: str, metadata: str, sections: list[st
     if not content:
         return build_comment_body("\n\n".join(normalized_sections), metadata)
     updated_sections = [section.strip() for section in content.split("\n\n") if section.strip()]
+    # Drop any prior "Powered by" suffix so ``build_comment_body`` can
+    # re-add it as the last section after new sections are appended.
+    updated_sections = [s for s in updated_sections if s != POWERED_BY_SUFFIX]
     for section in normalized_sections:
         if section.startswith(_PROGRESS_LINK_PREFIXES):
             updated_sections = [
@@ -620,11 +636,11 @@ class WorkflowProgressComment:
         run_url = _workflow_run_url()
         if run_url:
             message = (
-                "Oz ran into an unexpected error while working on this. "
-                f"You can view the [workflow run]({run_url}) for more details."
+                "I ran into an unexpected error while working on this. "
+                f"You can view [the workflow run]({run_url}) for more details."
             )
         else:
-            message = "Oz ran into an unexpected error while working on this."
+            message = "I ran into an unexpected error while working on this."
         sections: list[str] = []
         normalized_requester = self.requester_login.strip().removeprefix("@")
         if normalized_requester:
@@ -1012,8 +1028,9 @@ def build_pr_body(
         sections.append(f"## Changes\n{summary}")
 
     if session_link:
-        sections.append(f"Session: {session_link}")
+        sections.append(f"Session: [view on Warp]({session_link})")
 
+    sections.append(POWERED_BY_SUFFIX)
     return "\n\n".join(sections)
 
 

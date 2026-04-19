@@ -45,7 +45,7 @@ PRIMARY_TRIAGE_LABELS = {"bug", "duplicate", "enhancement", "documentation", "ne
 REPRO_LABEL_PREFIX = "repro:"
 AGENT_PROHIBITED_LABELS = {"ready-to-implement", "ready-to-spec"}
 OZ_AGENT_METADATA_PREFIX = "<!-- oz-agent-metadata:"
-TRIAGE_DISCLAIMER = "*This is an automated analysis by Oz and may be incorrect. A maintainer will verify the details.*"
+TRIAGE_DISCLAIMER = "*This is my automated analysis and may be incorrect. A maintainer will verify the details.*"
 
 
 def _lowercase_first(text: str) -> str:
@@ -358,12 +358,12 @@ def process_issue(
             if session_link:
                 link_text = _format_triage_session_link(session_link)
                 parts.append(
-                    "Oz has finished triaging this issue. "
+                    "I've finished triaging this issue. "
                     "A maintainer will verify the details shortly. "
                     f"You can view {link_text}."
                 )
             else:
-                parts.append("Oz has completed the triage of this issue.")
+                parts.append("I've completed the triage of this issue.")
         elif session_link:
             # Follow-up questions or duplicates are present; show session link
             # on its own line before the user-facing content.
@@ -380,7 +380,7 @@ def process_issue(
 
         # Maintainer-facing content collapsed behind <details>.
         maintainer_parts: list[str] = []
-        maintainer_parts.append(f"Oz concluded that {summary}.")
+        maintainer_parts.append(f"I concluded that {summary}.")
         if not duplicates and issue_body:
             maintainer_parts.append(issue_body)
         if duplicates:

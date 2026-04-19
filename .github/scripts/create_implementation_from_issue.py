@@ -121,7 +121,7 @@ def main() -> None:
         spec_sections = []
         if spec_context["spec_context_source"] == "approved-pr" and selected_spec_pr:
             spec_sections.append(
-                f"Linked approved spec PR: #{selected_spec_pr['number']} ({selected_spec_pr['url']})"
+                f"Linked approved spec PR: [#{selected_spec_pr['number']}]({selected_spec_pr['url']})"
             )
         elif spec_context["spec_context_source"] == "directory":
             spec_sections.append("Repository spec file(s) associated with this issue were found in `specs/`.")

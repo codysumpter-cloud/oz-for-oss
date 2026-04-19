@@ -25,6 +25,7 @@ from oz_workflows.helpers import (
     format_triage_session_line,
     format_triage_start_line,
     issue_has_prior_triage,
+    POWERED_BY_SUFFIX,
     WorkflowProgressComment,
 )
 
@@ -32,17 +33,20 @@ from oz_workflows.helpers import (
 class CommentUpdateTest(unittest.TestCase):
     def test_appends_instead_of_replacing(self) -> None:
         metadata = "<!-- meta -->"
-        existing = build_comment_body("@alice\n\nOz is working on this issue.\n\nSharing session at: https://example.test/session/123", metadata)
-        updated = append_comment_sections(existing, metadata, ["I created a spec PR for this issue: https://example.test/pr/1"])
-        self.assertIn("Sharing session at: https://example.test/session/123", updated)
-        self.assertIn("I created a spec PR for this issue: https://example.test/pr/1", updated)
+        existing = build_comment_body("@alice\n\nI'm working on this issue.\n\nYou can follow along in [the session on Warp](https://example.test/session/123).", metadata)
+        updated = append_comment_sections(existing, metadata, ["I created a [spec PR](https://example.test/pr/1) for this issue."])
+        self.assertIn("You can follow along in [the session on Warp](https://example.test/session/123).", updated)
+        self.assertIn("I created a [spec PR](https://example.test/pr/1) for this issue.", updated)
         self.assertTrue(updated.endswith(metadata))
+        # Suffix is present exactly once and sits immediately above the metadata.
+        self.assertEqual(updated.count(POWERED_BY_SUFFIX), 1)
+        self.assertIn(f"{POWERED_BY_SUFFIX}\n\n{metadata}", updated)
     def test_replaces_existing_session_link_when_url_changes(self) -> None:
         metadata = "<!-- meta -->"
-        existing = build_comment_body("@alice\n\nOz is working on this issue.\n\nSharing session at: https://example.test/session/123", metadata)
-        updated = append_comment_sections(existing, metadata, ["View the Oz conversation: https://example.test/conversation/456"])
+        existing = build_comment_body("@alice\n\nI'm working on this issue.\n\nYou can follow along in [the session on Warp](https://example.test/session/123).", metadata)
+        updated = append_comment_sections(existing, metadata, ["You can view [the conversation on Warp](https://example.test/conversation/456)."])
         self.assertNotIn("https://example.test/session/123", updated)
-        self.assertIn("View the Oz conversation: https://example.test/conversation/456", updated)
+        self.assertIn("You can view [the conversation on Warp](https://example.test/conversation/456).", updated)
         self.assertTrue(updated.endswith(metadata))
     def test_progress_comment_keeps_history_in_single_comment(self) -> None:
         github = FakeGitHubClient()
@@ -54,16 +58,18 @@ class CommentUpdateTest(unittest.TestCase):
             workflow="create-spec-from-issue",
             requester_login="alice",
         )
-        progress.start("Oz is starting work on product and tech specs for this issue.")
+        progress.start("I'm starting work on product and tech specs for this issue.")
         progress.record_session_link("https://example.test/session/123")
-        progress.complete("I created a spec PR for this issue: https://example.test/pr/1")
+        progress.complete("I created a new [spec PR](https://example.test/pr/1) for this issue.")
 
         self.assertEqual(len(github.comments), 1)
         body = github.comments[0]["body"]
         self.assertIn("@alice", body)
-        self.assertIn("Oz is starting work on product and tech specs for this issue.", body)
-        self.assertIn("Sharing session at: https://example.test/session/123", body)
-        self.assertIn("I created a spec PR for this issue: https://example.test/pr/1", body)
+        self.assertIn("I'm starting work on product and tech specs for this issue.", body)
+        self.assertIn("You can follow along in [the session on Warp](https://example.test/session/123).", body)
+        self.assertIn("I created a new [spec PR](https://example.test/pr/1) for this issue.", body)
+        # Suffix should appear exactly once even after multiple appends.
+        self.assertEqual(body.count(POWERED_BY_SUFFIX), 1)
     def test_progress_comment_replaces_session_link_when_run_moves_to_conversation(self) -> None:
         github = FakeGitHubClient()
         progress = WorkflowProgressComment(
@@ -74,14 +80,14 @@ class CommentUpdateTest(unittest.TestCase):
             workflow="create-spec-from-issue",
             requester_login="alice",
         )
-        progress.start("Oz is starting work on product and tech specs for this issue.")
+        progress.start("I'm starting work on product and tech specs for this issue.")
         progress.record_session_link("https://example.test/session/123")
         progress.record_session_link("https://example.test/conversation/456")
 
         self.assertEqual(len(github.comments), 1)
         body = github.comments[0]["body"]
         self.assertNotIn("https://example.test/session/123", body)
-        self.assertIn("View the Oz conversation: https://example.test/conversation/456", body)
+        self.assertIn("You can view [the conversation on Warp](https://example.test/conversation/456).", body)
 
     def test_separate_runs_create_separate_comments(self) -> None:
         github = FakeGitHubClient()
@@ -93,7 +99,7 @@ class CommentUpdateTest(unittest.TestCase):
             workflow="triage-new-issues",
             requester_login="alice",
         )
-        run1.start("Oz has started triaging this issue.")
+        run1.start("I've started triaging this issue.")
         run1.record_session_link("https://example.test/session/run1")
 
         run2 = WorkflowProgressComment(
@@ -104,7 +110,7 @@ class CommentUpdateTest(unittest.TestCase):
             workflow="triage-new-issues",
             requester_login="alice",
         )
-        run2.start("Oz has started triaging this issue.")
+        run2.start("I've started triaging this issue.")
         run2.record_session_link("https://example.test/session/run2")
 
         self.assertEqual(len(github.comments), 2)
@@ -154,14 +160,14 @@ class ReviewReplyProgressCommentTest(unittest.TestCase):
             requester_login="alice",
             review_reply_target=(pr, 100),
         )
-        progress.start("Oz is working on changes requested in this PR.")
+        progress.start("I'm working on changes requested in this PR.")
 
         # No issue-level comments should have been created.
         self.assertEqual(github.comments, [])
         # A reply was posted within the review thread.
         replies = [c for c in pr.review_comments if c.get("in_reply_to_id") == 100]
         self.assertEqual(len(replies), 1)
-        self.assertIn("Oz is working on changes", replies[0]["body"])
+        self.assertIn("I'm working on changes", replies[0]["body"])
 
     def test_keeps_appending_to_same_review_reply(self) -> None:
         github = FakeGitHubClient()
@@ -175,7 +181,7 @@ class ReviewReplyProgressCommentTest(unittest.TestCase):
             requester_login="alice",
             review_reply_target=(pr, 100),
         )
-        progress.start("Oz is working on changes requested in this PR.")
+        progress.start("I'm working on changes requested in this PR.")
         progress.record_session_link("https://example.test/session/123")
         progress.complete("I pushed changes to this PR based on the comment.")
 
@@ -183,8 +189,8 @@ class ReviewReplyProgressCommentTest(unittest.TestCase):
         self.assertEqual(len(replies), 1)
         body = replies[0]["body"]
         self.assertIn("@alice", body)
-        self.assertIn("Oz is working on changes", body)
-        self.assertIn("Sharing session at: https://example.test/session/123", body)
+        self.assertIn("I'm working on changes", body)
+        self.assertIn("You can follow along in [the session on Warp](https://example.test/session/123).", body)
         self.assertIn("I pushed changes to this PR based on the comment.", body)
 
     def test_report_error_updates_reply_within_review_thread(self) -> None:
@@ -199,7 +205,7 @@ class ReviewReplyProgressCommentTest(unittest.TestCase):
             requester_login="alice",
             review_reply_target=(pr, 100),
         )
-        progress.start("Oz is starting to work on this.")
+        progress.start("I'm starting to work on this.")
         progress.report_error()
 
         self.assertEqual(github.comments, [])
@@ -226,8 +232,8 @@ class ReviewReplyProgressCommentTest(unittest.TestCase):
             requester_login="alice",
             review_reply_target=(pr, 100),
         )
-        progress.start("Oz is starting.")
-        progress.complete("Oz finished.")
+        progress.start("I'm starting.")
+        progress.complete("I finished.")
 
         # Comments in the other thread were not modified or deleted.
         other = [c for c in pr.review_comments if c["id"] in (200, 201)]
@@ -283,11 +289,11 @@ class ReviewReplyProgressCommentTest(unittest.TestCase):
             requester_login="alice",
             review_reply_target=(pr, 100),
         )
-        progress.start("Oz is working on changes requested in this PR.")
+        progress.start("I'm working on changes requested in this PR.")
 
         replies = [c for c in pr.review_comments if c.get("in_reply_to_id") == 100]
         self.assertEqual(len(replies), 1)
-        self.assertIn("Oz is working on changes", replies[0]["body"])
+        self.assertIn("I'm working on changes", replies[0]["body"])
 
     def test_session_link_update_survives_transient_patch_failure(self) -> None:
         # The poll loop calls record_session_link every tick. If a single
@@ -304,7 +310,7 @@ class ReviewReplyProgressCommentTest(unittest.TestCase):
             requester_login="alice",
             review_reply_target=(pr, 100),
         )
-        progress.start("Oz is working.")
+        progress.start("I'm working.")
         pr.fail_next_edit = True
         progress.record_session_link("https://example.test/session/abc")
         # The first attempt failed, so the session link should not be
@@ -314,7 +320,7 @@ class ReviewReplyProgressCommentTest(unittest.TestCase):
         # The next poll retries with the same link and succeeds.
         progress.record_session_link("https://example.test/session/abc")
         replies = [c for c in pr.review_comments if c.get("in_reply_to_id") == 100]
-        self.assertIn("Sharing session at: https://example.test/session/abc", replies[0]["body"])
+        self.assertIn("You can follow along in [the session on Warp](https://example.test/session/abc).", replies[0]["body"])
 
     def test_session_link_skips_patch_when_link_unchanged(self) -> None:
         # Poll loops call record_session_link on every tick with the same
@@ -331,7 +337,7 @@ class ReviewReplyProgressCommentTest(unittest.TestCase):
             requester_login="alice",
             review_reply_target=(pr, 100),
         )
-        progress.start("Oz is working.")
+        progress.start("I'm working.")
         progress.record_session_link("https://example.test/session/abc")
         edits_after_first = pr.edit_count
         progress.record_session_link("https://example.test/session/abc")
@@ -402,7 +408,7 @@ class ReportErrorTest(unittest.TestCase):
                 workflow="test-workflow",
                 requester_login="alice",
             )
-            progress.start("Oz is starting to work on this.")
+            progress.start("I'm starting to work on this.")
             progress.report_error()
 
             self.assertEqual(len(github.comments), 1)
@@ -429,14 +435,14 @@ class ReportErrorTest(unittest.TestCase):
                 workflow="test-workflow",
                 requester_login="alice",
             )
-            progress.start("Oz is starting.")
+            progress.start("I'm starting.")
             progress.record_session_link("https://example.test/conversation/abc")
             progress.report_error()
 
             self.assertEqual(len(github.comments), 1)
             body = github.comments[0]["body"]
             self.assertIn("unexpected error", body)
-            self.assertIn("View the Oz conversation: https://example.test/conversation/abc", body)
+            self.assertIn("You can view [the conversation on Warp](https://example.test/conversation/abc).", body)
         finally:
             for key in env:
                 os.environ.pop(key, None)
@@ -451,7 +457,7 @@ class ReportErrorTest(unittest.TestCase):
             workflow="test-workflow",
             requester_login="alice",
         )
-        progress.start("Oz is starting.")
+        progress.start("I'm starting.")
         progress.report_error()
 
         self.assertEqual(len(github.comments), 1)
@@ -499,7 +505,7 @@ class ReportErrorTest(unittest.TestCase):
                 workflow="test-workflow",
                 requester_login="alice",
             )
-            progress.start("Oz is starting.")
+            progress.start("I'm starting.")
             progress.report_error()
 
             body = github.comments[0]["body"]
@@ -525,7 +531,7 @@ class ReportErrorTest(unittest.TestCase):
             workflow="test-workflow",
             event_payload={"sender": {"login": "alice"}},
         )
-        progress.start("Oz is starting.")
+        progress.start("I'm starting.")
         # The requester should have been cached from the event payload on
         # the successful first update.
         self.assertEqual(progress.requester_login, "alice")
@@ -934,7 +940,7 @@ class WorkflowProgressCommentMetadataTest(unittest.TestCase):
                 workflow="triage-new-issues",
                 requester_login="alice",
             )
-            progress.start("Oz is starting to triage this issue.")
+            progress.start("I'm starting to triage this issue.")
             progress.record_oz_run_id("oz-run-xyz")
 
             self.assertEqual(len(github.comments), 1)
@@ -942,7 +948,7 @@ class WorkflowProgressCommentMetadataTest(unittest.TestCase):
             self.assertIn('"oz_run_id":"oz-run-xyz"', body)
             self.assertIn('"github_run_id":"555"', body)
             # Body content is preserved alongside the refreshed marker.
-            self.assertIn("Oz is starting to triage this issue.", body)
+            self.assertIn("I'm starting to triage this issue.", body)
             # Only one metadata marker remains after the refresh.
             self.assertEqual(body.count("<!-- oz-agent-metadata:"), 1)
         finally:
@@ -958,7 +964,7 @@ class WorkflowProgressCommentMetadataTest(unittest.TestCase):
             workflow="triage-new-issues",
             requester_login="alice",
         )
-        progress.start("Oz is starting.")
+        progress.start("I'm starting.")
         progress.record_oz_run_id("oz-run-xyz")
         body_first = str(github.comments[0]["body"])
         progress.record_oz_run_id("oz-run-xyz")
@@ -992,14 +998,14 @@ class WorkflowProgressCommentMetadataTest(unittest.TestCase):
             workflow="triage-new-issues",
             requester_login="alice",
         )
-        progress.start("Oz is starting.")
+        progress.start("I'm starting.")
         progress.record_oz_run_id("oz-run-xyz")
-        progress.complete("Oz finished triaging.")
+        progress.complete("I finished triaging.")
 
         self.assertEqual(len(github.comments), 1)
         body = str(github.comments[0]["body"])
-        self.assertIn("Oz is starting.", body)
-        self.assertIn("Oz finished triaging.", body)
+        self.assertIn("I'm starting.", body)
+        self.assertIn("I finished triaging.", body)
         self.assertIn('"oz_run_id":"oz-run-xyz"', body)
         self.assertEqual(body.count("<!-- oz-agent-metadata:"), 1)
 
@@ -1008,7 +1014,7 @@ class StateAwareStartLineTest(unittest.TestCase):
     def test_triage_first_pass_and_retriage(self) -> None:
         self.assertEqual(
             format_triage_start_line(is_retriage=False),
-            "Oz is starting to work on triaging this issue.",
+            "I'm starting to work on triaging this issue.",
         )
         self.assertIn(
             "re-triaging",
@@ -1019,7 +1025,7 @@ class StateAwareStartLineTest(unittest.TestCase):
         first = format_triage_session_line(
             is_retriage=False, session_link_markdown="[link](https://x)"
         )
-        self.assertIn("Oz is triaging this issue.", first)
+        self.assertIn("I'm triaging this issue.", first)
         self.assertIn("[link](https://x)", first)
         again = format_triage_session_line(
             is_retriage=True, session_link_markdown="[link](https://x)"
@@ -1062,11 +1068,11 @@ class StateAwareStartLineTest(unittest.TestCase):
 
     def test_spec_complete_line_distinguishes_new_and_update(self) -> None:
         self.assertIn(
-            "I created a new spec PR",
+            "I created a new [spec PR](https://x)",
             format_spec_complete_line(is_update=False, pr_url="https://x"),
         )
         self.assertIn(
-            "I updated the existing spec PR",
+            "I updated the existing [spec PR](https://x)",
             format_spec_complete_line(is_update=True, pr_url="https://x"),
         )
 
@@ -1117,7 +1123,7 @@ class StateAwareStartLineTest(unittest.TestCase):
 
     def test_implementation_complete_line_variants(self) -> None:
         self.assertIn(
-            "approved spec PR",
+            "approved [spec PR](https://x)",
             format_implementation_complete_line(
                 updated_spec_pr=True,
                 existing_implementation_pr=False,
@@ -1125,7 +1131,7 @@ class StateAwareStartLineTest(unittest.TestCase):
             ),
         )
         self.assertIn(
-            "I updated the existing draft implementation PR",
+            "I updated the existing draft [implementation PR](https://x)",
             format_implementation_complete_line(
                 updated_spec_pr=False,
                 existing_implementation_pr=True,
@@ -1133,7 +1139,7 @@ class StateAwareStartLineTest(unittest.TestCase):
             ),
         )
         self.assertIn(
-            "I created a new draft implementation PR",
+            "I created a new draft [implementation PR](https://x)",
             format_implementation_complete_line(
                 updated_spec_pr=False,
                 existing_implementation_pr=False,

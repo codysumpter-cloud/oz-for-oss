@@ -171,7 +171,7 @@ def main() -> None:
             raise RuntimeError("Oz returned no issue match without a close_comment")
         final_sections = [close_comment]
         if session_links:
-            final_sections.append(f"Session: {session_links[-1]}")
+            final_sections.append(f"Session: [view on Warp]({session_links[-1]})")
         progress.complete("\n\n".join(final_sections))
         pr.edit(state="closed")
         set_output("allow_review", "false")

@@ -778,7 +778,7 @@ class RecordTriageSessionLinkTest(unittest.TestCase):
             is_retriage=False,
         )
         body = str(github.comments[0]["body"])
-        self.assertIn("Oz is triaging this issue.", body)
+        self.assertIn("I'm triaging this issue.", body)
         self.assertNotIn("re-triaging", body)
 
     def test_retriage_says_re_triaging(self) -> None:
@@ -869,13 +869,13 @@ class MutualExclusivityTest(unittest.TestCase):
 
         parts: list[str] = []
         if not follow_up_questions and not duplicates:
-            parts.append("Oz has completed the triage of this issue.")
+            parts.append("I've completed the triage of this issue.")
         elif duplicates:
             parts.append(build_duplicate_section(issue, duplicates))
         elif follow_up_questions:
             parts.append(build_follow_up_section(issue, follow_up_questions))
 
-        maintainer_parts: list[str] = [f"Oz concluded that {summary}."]
+        maintainer_parts: list[str] = [f"I concluded that {summary}."]
         if not duplicates and issue_body:
             maintainer_parts.append(issue_body)
         if duplicates:
@@ -925,8 +925,8 @@ class MutualExclusivityTest(unittest.TestCase):
         self.assertIn("**Duplicate reasoning**", body)
         self.assertIn("- #10: Same", body)
         # No fallback text when duplicates are present
-        self.assertNotIn("Oz has completed the triage of this issue", body)
-        self.assertNotIn("Oz has finished triaging this issue", body)
+        self.assertNotIn("I've completed the triage of this issue", body)
+        self.assertNotIn("I've finished triaging this issue", body)
 
     def test_follow_up_when_no_duplicates(self) -> None:
         issue = {"number": 42, "user": {"login": "alice"}}
@@ -945,8 +945,8 @@ class MutualExclusivityTest(unittest.TestCase):
         self.assertIn("<details>", body)
         self.assertIn(TRIAGE_DISCLAIMER, body)
         # No fallback text when follow-up questions are present
-        self.assertNotIn("Oz has completed the triage of this issue", body)
-        self.assertNotIn("Oz has finished triaging this issue", body)
+        self.assertNotIn("I've completed the triage of this issue", body)
+        self.assertNotIn("I've finished triaging this issue", body)
 
     def test_follow_up_reasoning_in_maintainer_section(self) -> None:
         issue = {"number": 42, "user": {"login": "alice"}}
@@ -983,7 +983,7 @@ class MutualExclusivityTest(unittest.TestCase):
         self.assertIn("<details>", body)
         self.assertIn(TRIAGE_DISCLAIMER, body)
         # Fallback text present when no user-facing content
-        self.assertIn("Oz has completed the triage of this issue.", body)
+        self.assertIn("I've completed the triage of this issue.", body)
 
 
 class LowercaseFirstTest(unittest.TestCase):

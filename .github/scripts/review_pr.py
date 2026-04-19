@@ -12,6 +12,7 @@ from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, w
 from oz_workflows.helpers import (
     format_review_start_line,
     is_spec_only_pr,
+    POWERED_BY_SUFFIX,
     record_run_session_link,
     resolve_spec_context_for_pr,
     WorkflowProgressComment,
@@ -333,7 +334,7 @@ def main() -> None:
         selected_spec_pr = spec_context.get("selected_spec_pr")
         if spec_context.get("spec_context_source") == "approved-pr" and selected_spec_pr:
             spec_sections.append(
-                f"Linked approved spec PR: #{selected_spec_pr['number']} ({selected_spec_pr['url']})"
+                f"Linked approved spec PR: [#{selected_spec_pr['number']}]({selected_spec_pr['url']})"
             )
         elif spec_context.get("spec_context_source") == "directory":
             spec_sections.append("Repository spec context was found in `specs/`.")
@@ -424,10 +425,11 @@ def main() -> None:
             if not summary and not comments:
                 progress.complete("I completed the review and did not identify any actionable feedback for this pull request.")
                 return
+            review_body = f"{summary or 'Automated review'}\n\n{POWERED_BY_SUFFIX}"
             if comments:
-                pr.create_review(body=summary or "Automated review by Oz", event="COMMENT", comments=comments)
+                pr.create_review(body=review_body, event="COMMENT", comments=comments)
             else:
-                pr.create_review(body=summary or "Automated review by Oz", event="COMMENT")
+                pr.create_review(body=review_body, event="COMMENT")
             progress.complete("I completed the review and posted feedback on this pull request.")
         except Exception:
             progress.report_error()
