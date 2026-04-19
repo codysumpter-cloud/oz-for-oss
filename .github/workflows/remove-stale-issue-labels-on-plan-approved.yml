@@ -1,0 +1,86 @@
+name: Remove Stale Issue Labels on Plan Approved
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        description: Pull request number that was labeled plan-approved
+        required: true
+        type: string
+    secrets:
+      OZ_MGMT_GHA_APP_ID:
+        required: true
+      OZ_MGMT_GHA_PRIVATE_KEY:
+        required: true
+jobs:
+  remove_stale_labels:
+    name: Remove stale issue labels
+    runs-on: ubuntu-slim
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Create GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.OZ_MGMT_GHA_APP_ID }}
+          owner: ${{ github.repository_owner }}
+          private-key: ${{ secrets.OZ_MGMT_GHA_PRIVATE_KEY }}
+      - name: Remove stale issue labels
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app_token.outputs.token }}
+          script: |
+            const prNumber = parseInt('${{ inputs.pr_number }}');
+            const { owner, repo } = context.repo;
+
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+            if (pr.state !== 'open') {
+              core.info('PR is not open, skipping.');
+              return;
+            }
+
+            // Resolve issue number from branch name, spec file paths, and PR body
+            const headRef = pr.head.ref || '';
+            const branchMatches = [...headRef.matchAll(/(?:^|\/)(?:spec|implement)-issue-(\d+)(?:$|[\/\-])/g)].map(m => parseInt(m[1]));
+
+            const { data: files } = await github.rest.pulls.listFiles({ owner, repo, pull_number: prNumber });
+            const specFileMatches = files
+              .map(f => f.filename.match(/^specs\/GH(\d+)\/(?:product|tech)\.md$/))
+              .filter(Boolean)
+              .map(m => parseInt(m[1]));
+
+            const body = pr.body || '';
+            const bodyRefMatches = [...body.matchAll(/#(\d+)/g)].map(m => parseInt(m[1]));
+            const urlPattern = new RegExp(`https://github\.com/${owner}/${repo}/issues/(\\d+)`, 'gi');
+            const bodyUrlMatches = [...body.matchAll(urlPattern)].map(m => parseInt(m[1]));
+
+            const candidates = [...new Set([...branchMatches, ...specFileMatches, ...bodyRefMatches, ...bodyUrlMatches])];
+
+            let issueNumber = null;
+            for (const candidate of candidates) {
+              try {
+                const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number: candidate });
+                if (!issue.pull_request) {
+                  issueNumber = candidate;
+                  break;
+                }
+              } catch {
+                // Issue doesn't exist, skip
+              }
+            }
+
+            if (!issueNumber) {
+              core.info('No associated issue found.');
+              return;
+            }
+
+            const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
+            const staleLabel = 'ready-to-spec';
+            if (issue.labels.some(l => l.name === staleLabel)) {
+              await github.rest.issues.removeLabel({ owner, repo, issue_number: issueNumber, name: staleLabel });
+              core.info(`Removed '${staleLabel}' from issue #${issueNumber}`);
+            } else {
+              core.info(`Issue #${issueNumber} does not have '${staleLabel}' label.`);
+            }
