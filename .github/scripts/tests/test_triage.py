@@ -14,7 +14,6 @@ from triage_new_issues import (
     build_question_reasoning_section,
     extract_duplicate_of,
     extract_follow_up_questions,
-    fetch_command_signatures_context,
     _follow_up_comment_metadata,
     _duplicate_comment_metadata,
     extract_requested_labels,
@@ -40,8 +39,6 @@ from oz_workflows.triage import (
     dedupe_strings,
     discover_issue_templates,
     extract_original_issue_report,
-    fetch_command_signatures_listing,
-    format_command_signatures_for_prompt,
     format_stakeholders_for_prompt,
     load_stakeholders,
     load_triage_config,
@@ -1066,70 +1063,6 @@ class TriageHeuristicsPromptTest(unittest.TestCase):
         self.assertNotIn("area:keyboard-layout", heuristics)
         self.assertNotIn("release branch", heuristics)
         self.assertNotIn("Warpify", heuristics)
-
-
-class FetchCommandSignaturesContextTest(unittest.TestCase):
-    def test_returns_not_applicable_for_non_warp_repos(self) -> None:
-        result = fetch_command_signatures_context(None, "acme", "widgets")
-        self.assertEqual(result, "Not applicable for this repository.")
-
-
-class FormatCommandSignaturesForPromptTest(unittest.TestCase):
-    def test_formats_command_names(self) -> None:
-        result = format_command_signatures_for_prompt(["git", "curl", "docker"])
-        self.assertIn("3 commands", result)
-        self.assertIn("git", result)
-        self.assertIn("curl", result)
-        self.assertIn("docker", result)
-        self.assertIn("command-signatures", result)
-
-    def test_returns_fallback_for_empty(self) -> None:
-        result = format_command_signatures_for_prompt([])
-        self.assertEqual(result, "Unable to fetch command-signatures context.")
-
-
-class FetchCommandSignaturesListingTest(unittest.TestCase):
-    def test_returns_empty_list_on_error(self) -> None:
-        result = fetch_command_signatures_listing(FakeFailingGitHubClient())
-        self.assertEqual(result, [])
-
-    def test_returns_sorted_directory_names(self) -> None:
-        client = FakeCommandSignaturesGitHubClient([
-            FakeContentFile("curl", "dir"),
-            FakeContentFile("git", "dir"),
-            FakeContentFile(".github", "dir"),
-            FakeContentFile("README.md", "file"),
-            FakeContentFile("apt", "dir"),
-        ])
-        result = fetch_command_signatures_listing(client)
-        self.assertEqual(result, ["apt", "curl", "git"])
-
-
-class FakeFailingGitHubClient:
-    def get_repo(self, repo: str) -> None:
-        raise RuntimeError("boom")
-
-
-class FakeContentFile:
-    def __init__(self, name: str, file_type: str) -> None:
-        self.name = name
-        self.type = file_type
-
-
-class FakeCommandSignaturesRepo:
-    def __init__(self, contents: list[FakeContentFile]) -> None:
-        self.contents = contents
-
-    def get_contents(self, path: str, ref: str = "") -> list[FakeContentFile]:
-        return list(self.contents)
-
-
-class FakeCommandSignaturesGitHubClient:
-    def __init__(self, contents: list[FakeContentFile]) -> None:
-        self.repo = FakeCommandSignaturesRepo(contents)
-
-    def get_repo(self, repo: str) -> FakeCommandSignaturesRepo:
-        return self.repo
 
 
 class FakeTriageComment:
