@@ -30,7 +30,6 @@ def main() -> None:
     with closing(Github(auth=Auth.Token(require_env("GH_TOKEN")))) as client:
         github = client.get_repo(repo_slug())
         pr = github.get_pull(pr_number)
-        pr_issue = pr.as_issue()
         if pr.state != "open":
             set_output("allow_review", "false")
             return
@@ -48,10 +47,15 @@ def main() -> None:
         files = list(pr.get_files())
         changed_files = [str(file.filename) for file in files]
         has_code_changes = any(not filename.lower().endswith(".md") for filename in changed_files)
-        change_kind = "implementation" if has_code_changes else "spec"
-        required_label = "ready-to-implement" if has_code_changes else "ready-to-spec"
-        pr_labels = [label.name for label in pr_issue.labels]
-        has_plan_approved = "plan-approved" in pr_labels
+        # Markdown-only (spec) PRs are not enforced against a
+        # ``ready-to-spec`` issue label. Spec PRs are free-form and do
+        # not require a matching ready issue to be reviewable.
+        if not has_code_changes:
+            progress.cleanup()
+            set_output("allow_review", "true")
+            return
+        change_kind = "implementation"
+        required_label = "ready-to-implement"
         contribution_docs_url = f"https://github.com/{owner}/{repo}/blob/main/CONTRIBUTING.md"
 
         explicit_issue = None
@@ -73,7 +77,7 @@ def main() -> None:
         # the same PR are removed.
         if explicit_issue:
             labels = [label.name for label in explicit_issue.labels]
-            if required_label in labels or (not has_code_changes and has_plan_approved):
+            if required_label in labels:
                 progress.cleanup()
                 set_output("allow_review", "true")
                 return
@@ -92,11 +96,6 @@ def main() -> None:
             progress.complete(close_comment)
             pr.edit(state="closed")
             set_output("allow_review", "false")
-            return
-
-        if not has_code_changes and has_plan_approved:
-            progress.cleanup()
-            set_output("allow_review", "true")
             return
 
         progress.start(
