@@ -1048,24 +1048,24 @@ class SummaryCasingInStage3Test(unittest.TestCase):
 
 
 class TriageHeuristicsPromptTest(unittest.TestCase):
-    def test_warp_heuristics_include_video_screenshot_guidance(self) -> None:
-        heuristics = triage_heuristics_prompt("warpdotdev", "Warp")
-        self.assertIn("video", heuristics)
-        self.assertIn("screenshot", heuristics)
+    def test_prompt_is_generic_regardless_of_repo(self) -> None:
+        # Repo-specific heuristics have been moved to the
+        # ``triage-issue-local`` companion skill. ``triage_heuristics_prompt``
+        # now returns only the cross-repo baseline for every repository.
+        warp = triage_heuristics_prompt("warpdotdev", "Warp")
+        other = triage_heuristics_prompt("acme", "widgets")
+        self.assertEqual(warp, other)
 
-    def test_warp_heuristics_include_release_versioning_context(self) -> None:
-        heuristics = triage_heuristics_prompt("warpdotdev", "Warp")
-        self.assertIn("release branch", heuristics)
-        self.assertIn("main/master", heuristics)
-
-    def test_warp_heuristics_include_keyboard_layout_label(self) -> None:
-        heuristics = triage_heuristics_prompt("warpdotdev", "Warp")
-        self.assertIn("area:keyboard-layout", heuristics)
-
-    def test_non_warp_heuristics_do_not_include_warp_specific_content(self) -> None:
+    def test_prompt_contains_generic_guidance(self) -> None:
         heuristics = triage_heuristics_prompt("acme", "widgets")
-        self.assertNotIn("Warpify", heuristics)
+        self.assertIn("observed symptoms from reporter hypotheses", heuristics)
+        self.assertIn("issue-specific questions", heuristics)
+
+    def test_prompt_does_not_embed_warp_specific_rules(self) -> None:
+        heuristics = triage_heuristics_prompt("warpdotdev", "Warp")
         self.assertNotIn("area:keyboard-layout", heuristics)
+        self.assertNotIn("release branch", heuristics)
+        self.assertNotIn("Warpify", heuristics)
 
 
 class FetchCommandSignaturesContextTest(unittest.TestCase):

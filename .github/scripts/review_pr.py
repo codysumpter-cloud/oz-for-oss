@@ -19,6 +19,10 @@ from oz_workflows.helpers import (
 )
 from oz_workflows.artifacts import poll_for_artifact
 from oz_workflows.oz_client import build_agent_config, run_agent
+from oz_workflows.repo_local import (
+    format_repo_local_prompt_section,
+    resolve_repo_local_skill_path,
+)
 
 
 class ReviewComment(TypedDict, total=False):
@@ -363,6 +367,13 @@ def main() -> None:
             if spec_only
             else "Also apply the repository's local `security-review-pr` skill as a supplemental security pass and fold any security findings into the same combined `review.json`. Do not produce a separate security review output."
         )
+        companion_path = resolve_repo_local_skill_path(workspace(), skill_name)
+        if companion_path is not None:
+            repo_local_section = format_repo_local_prompt_section(
+                skill_name, companion_path
+            )
+        else:
+            repo_local_section = ""
         prompt = dedent(
             f"""
             Review pull request #{pr_number} in repository {owner}/{repo}.
@@ -402,6 +413,17 @@ def main() -> None:
             - After you create and validate `review.json`, upload it as an artifact via `oz-dev artifact upload review.json`. The subcommand is `artifact` (singular); do not use `artifacts`.
             """
         ).strip()
+        if repo_local_section:
+            # Insert the repo-local reference between the Spec Context block
+            # and the Cloud Workflow Requirements block. When no companion
+            # file is present the prompt is byte-for-byte identical to the
+            # pre-split shape; when one is present the agent is pointed at
+            # the companion path without inlining its body.
+            prompt = prompt.replace(
+                "\n\nCloud Workflow Requirements:",
+                "\n\n" + repo_local_section.rstrip() + "\n\nCloud Workflow Requirements:",
+                1,
+            )
 
         config = build_agent_config(
             config_name="review-pull-request",

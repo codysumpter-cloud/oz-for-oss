@@ -65,12 +65,26 @@ This skill produces two files:
   ```
 - Skip labels that already exist (the `gh label create` command will error on duplicates — ignore those errors).
 
-### 6. Validate and summarize
+### 6. Note repo-local companion skills (do not scaffold)
+
+The reusable agent roles that support a repo-specific companion are:
+
+- `.agents/skills/review-pr-local/SKILL.md`
+- `.agents/skills/review-spec-local/SKILL.md`
+- `.agents/skills/triage-issue-local/SKILL.md`
+- `.agents/skills/dedupe-issue-local/SKILL.md`
+
+Do **not** create these files during bootstrap. The prompt-construction layer treats a missing companion file and a body-only frontmatter stub the same way, so there is no value in materializing an empty file during bootstrap. Each file gets created on-demand by the matching `update-<agent>` self-improvement loop (or by a maintainer) the first time there is evidence-backed content to add. Bootstrap only needs to ensure the directory convention is documented; the files themselves stay absent until a real rule lands.
+
+If a companion file already exists in the repo, leave it untouched; bootstrap is additive.
+
+### 7. Validate and summarize
 
 - Re-validate `config.json` with `jq`.
 - Print a short summary of:
   - How many labels were discovered vs. newly created.
   - How many stakeholder entries were written.
+  - Which repo-local companion skills are already present in the repo (if any).
   - Any warnings (e.g. no issues found, no CODEOWNERS file).
 
 ## Idempotency

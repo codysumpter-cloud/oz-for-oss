@@ -1,13 +1,30 @@
 ---
 name: update-pr-review
-description: Update the local review-pr and review-spec skills using human feedback left on pull request conversations. Use when aggregating replies to agent-authored PR review comments, incorporating broader human review comments, extracting repeated reviewer feedback, and refining .agents/skills/review-pr/SKILL.md and .agents/skills/review-spec/SKILL.md with evidence-backed adjustments.
+description: Update the repo-local review-pr-local and review-spec-local companion skills using human feedback left on pull request conversations. Use when aggregating replies to agent-authored PR review comments, incorporating broader human review comments, extracting repeated reviewer feedback, and refining .agents/skills/review-pr-local/SKILL.md and .agents/skills/review-spec-local/SKILL.md with evidence-backed adjustments.
 ---
 
 # Update PR Review
 
-Use this skill to improve `.agents/skills/review-pr/SKILL.md` and `.agents/skills/review-spec/SKILL.md` from real reviewer feedback instead of intuition.
+Use this skill to improve the repo-local review companions `.agents/skills/review-pr-local/SKILL.md` and `.agents/skills/review-spec-local/SKILL.md` from real reviewer feedback. The core skills at `.agents/skills/review-pr/SKILL.md` and `.agents/skills/review-spec/SKILL.md` are the cross-repo contract and are read-only from this loop.
 
-The repository uses two separate review skills: `review-pr` for code pull requests and `review-spec` for spec-only pull requests (PRs where every changed file lives under `specs/`). Feedback from each category of PR should be routed to the corresponding skill.
+The repository uses two separate review skills: `review-pr` for code pull requests and `review-spec` for spec-only pull requests (PRs where every changed file lives under `specs/`). Feedback from each category of PR should be routed to the corresponding repo-local companion.
+
+## Write surface
+
+This self-improvement loop may only write to:
+
+- `.agents/skills/review-pr-local/` (and `SKILL.md` inside it)
+- `.agents/skills/review-spec-local/` (and `SKILL.md` inside it)
+
+It must NOT touch:
+
+- `.agents/skills/review-pr/SKILL.md` (the core contract)
+- `.agents/skills/review-spec/SKILL.md` (the core contract)
+- any file under `.github/scripts/`
+- any file under `.github/issue-triage/` (that taxonomy is owned by the `update-triage` loop)
+- any other core skill
+
+The Python entrypoint (`update_pr_review.py`) enforces this via a `git diff` check against allowed prefixes before pushing. A violation aborts the run.
 
 ## Inputs
 
@@ -44,12 +61,12 @@ Each pull request in the output includes a `review_type` field that is either `"
 
 4. Partition the feedback by `review_type`:
 
-- Feedback from `"code"` PRs applies to `.agents/skills/review-pr/SKILL.md`.
-- Feedback from `"spec"` PRs applies to `.agents/skills/review-spec/SKILL.md`.
-- Update each skill independently with the smallest rule change that explains the feedback for that category.
-- If feedback for one category is empty, skip that skill.
+- Feedback from `"code"` PRs applies to `.agents/skills/review-pr-local/SKILL.md`.
+- Feedback from `"spec"` PRs applies to `.agents/skills/review-spec-local/SKILL.md`.
+- Update each companion skill independently with the smallest rule change that explains the feedback for that category.
+- If feedback for one category is empty, skip that companion.
 
-5. Keep the review contract stable for each skill unless the downstream workflow also changed.
+5. Keep the core review contract stable — never edit `review-pr/SKILL.md` or `review-spec/SKILL.md`. Only the `-local` companions evolve from feedback.
 
 ## Evidence Rules
 
@@ -76,7 +93,8 @@ Use that temporary data as evidence when refining the skills, then remove it bef
 
 ## Final Checks
 
-- Re-read the updated `review-pr` and/or `review-spec` skills and confirm any new rules are explicit.
-- Keep each skill concise; do not turn them into long style guides.
-- If the skill updates warrant a PR, open one and explicitly tag `@captainsafia` on that PR.
+- Re-read the updated `review-pr-local` and/or `review-spec-local` companion skills and confirm any new rules are explicit.
+- Keep each companion concise; do not turn them into long style guides.
+- Commit any changes on a local branch named `oz-agent/update-pr-review`. Do NOT push the branch; the Python entrypoint will run a write-surface guard and push only when the guard passes.
+- If the updates warrant a PR, it will be opened from the pushed branch. Tag `@captainsafia` as a reviewer on that PR.
 - Validate any temporary JSON with `jq` before relying on it.

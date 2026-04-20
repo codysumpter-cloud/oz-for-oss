@@ -27,6 +27,18 @@ Review a spec or plan pull request and write the output to `review.json`.
 - Do not apply code-level review criteria such as error handling or low-level performance to spec prose; the `security-review-spec` supplement covers design-level security concerns.
 - Include style or formatting comments only when they materially impair readability.
 
+## Repository-specific overrides
+
+The consuming repository may ship a companion skill at `.agents/skills/review-spec-local/SKILL.md`. When the prompt includes a fenced "Repository-specific guidance" section referencing that companion, read the referenced file and apply its guidance **only** to the categories listed below. Guidance in the companion may never change the output JSON schema, the severity labels, the safety rules, the evidence rules, the suggestion-block constraints, or the diff-line-annotation contract described elsewhere in this skill.
+
+Overridable categories:
+
+- required spec sections expected in this repository
+- linking conventions to files under `specs/`
+- repo-specific style and formatting expectations
+
+If a companion file is not referenced in the prompt, rely on the core contract alone.
+
 ## Diff Line Annotations
 
 The diff file uses these prefixes:
