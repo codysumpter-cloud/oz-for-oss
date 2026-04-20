@@ -28,7 +28,7 @@ from oz_workflows.oz_client import build_agent_config, run_agent, skill_file_pat
 IMPLEMENT_SPECS_SKILL = "implement-specs"
 SPEC_DRIVEN_IMPLEMENTATION_SKILL = "spec-driven-implementation"
 IMPLEMENT_ISSUE_SKILL = "implement-issue"
-FETCH_CONTEXT_SCRIPT = ".github/scripts/fetch_github_context.py"
+FETCH_CONTEXT_SCRIPT = ".agents/skills/implement-specs/scripts/fetch_github_context.py"
 
 
 def main() -> None:

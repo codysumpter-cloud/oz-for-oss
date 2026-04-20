@@ -138,7 +138,7 @@ class CreateImplementationFromIssuePromptTest(unittest.TestCase):
         self.assertNotIn(ATTACKER_BODY, prompt)
         # The agent must be directed at the fetch script with the right repo/number.
         self.assertIn(
-            ".github/scripts/fetch_github_context.py issue --repo owner/repo --number 123",
+            ".agents/skills/implement-specs/scripts/fetch_github_context.py issue --repo owner/repo --number 123",
             prompt,
         )
         self.assertIn("--include-untrusted", prompt)

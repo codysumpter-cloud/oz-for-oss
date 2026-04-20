@@ -26,7 +26,7 @@ from oz_workflows.helpers import (
 )
 from oz_workflows.oz_client import build_agent_config, run_agent
 
-FETCH_CONTEXT_SCRIPT = ".github/scripts/fetch_github_context.py"
+FETCH_CONTEXT_SCRIPT = ".agents/skills/implement-specs/scripts/fetch_github_context.py"
 
 
 def main() -> None:

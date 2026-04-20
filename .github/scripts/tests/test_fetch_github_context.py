@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import io
 import sys
 import unittest
@@ -7,15 +8,32 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-# Ensure the .github/scripts directory is importable. The production tests
-# already rely on the pytest/unittest invocation running from that directory,
-# but add a defensive ``sys.path`` entry so this module can be run in
-# isolation too.
-_SCRIPTS_DIR = Path(__file__).resolve().parent.parent
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
 
-import fetch_github_context as fgc  # noqa: E402
+def _load_fetch_github_context_module():
+    # The script lives inside the implement-specs skill directory so it
+    # sits next to the skill it supports instead of in the generic
+    # ``.github/scripts`` tree. Load it via importlib from that path so
+    # this test file does not need to be co-located with the script.
+    repo_root = Path(__file__).resolve().parents[3]
+    script_path = (
+        repo_root
+        / ".agents"
+        / "skills"
+        / "implement-specs"
+        / "scripts"
+        / "fetch_github_context.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "fetch_github_context", script_path
+    )
+    assert spec and spec.loader  # for type checkers
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("fetch_github_context", module)
+    spec.loader.exec_module(module)
+    return module
+
+
+fgc = _load_fetch_github_context_module()
 
 
 def _make_comment(

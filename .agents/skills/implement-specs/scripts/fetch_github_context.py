@@ -31,13 +31,13 @@ Usage
 
 Set ``GH_TOKEN`` or ``GITHUB_TOKEN`` in the environment. Then::
 
-    python .github/scripts/fetch_github_context.py issue \\
+    python .agents/skills/implement-specs/scripts/fetch_github_context.py issue \\
         --repo OWNER/REPO --number N
 
-    python .github/scripts/fetch_github_context.py pr \\
+    python .agents/skills/implement-specs/scripts/fetch_github_context.py pr \\
         --repo OWNER/REPO --number N [--include-diff]
 
-    python .github/scripts/fetch_github_context.py pr-diff \\
+    python .agents/skills/implement-specs/scripts/fetch_github_context.py pr-diff \\
         --repo OWNER/REPO --number N
 
 Add ``--include-untrusted`` to any subcommand to include comments from
