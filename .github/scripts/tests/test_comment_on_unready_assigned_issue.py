@@ -11,30 +11,25 @@ from comment_on_unready_assigned_issue import (
 class ResolveAssigneeLoginTest(unittest.TestCase):
     """Tests for resolve_assignee_login, which must tolerate null/missing values."""
 
-    def test_returns_login_when_assignee_present(self) -> None:
-        event = {"assignee": {"login": "alice"}}
-        self.assertEqual(resolve_assignee_login(event), "alice")
-
-    def test_defaults_when_assignee_key_missing(self) -> None:
-        self.assertEqual(resolve_assignee_login({}), DEFAULT_ASSIGNEE_LOGIN)
-
-    def test_defaults_when_assignee_is_none(self) -> None:
+    def test_assignee_shapes(self) -> None:
         # GitHub webhook payloads can set "assignee" to null (e.g. on an
-        # unassignment event). This must not raise AttributeError.
-        self.assertEqual(
-            resolve_assignee_login({"assignee": None}), DEFAULT_ASSIGNEE_LOGIN
-        )
-
-    def test_defaults_when_assignee_has_no_login(self) -> None:
-        self.assertEqual(
-            resolve_assignee_login({"assignee": {}}), DEFAULT_ASSIGNEE_LOGIN
-        )
-
-    def test_defaults_when_login_is_empty_string(self) -> None:
-        self.assertEqual(
-            resolve_assignee_login({"assignee": {"login": ""}}),
-            DEFAULT_ASSIGNEE_LOGIN,
-        )
+        # unassignment event). That and other shapes must not raise
+        # AttributeError and should fall back to ``DEFAULT_ASSIGNEE_LOGIN``
+        # except when a concrete login is present.
+        cases = [
+            ("login_present", {"assignee": {"login": "alice"}}, "alice"),
+            ("missing_key", {}, DEFAULT_ASSIGNEE_LOGIN),
+            ("assignee_none", {"assignee": None}, DEFAULT_ASSIGNEE_LOGIN),
+            ("no_login_key", {"assignee": {}}, DEFAULT_ASSIGNEE_LOGIN),
+            (
+                "empty_login_string",
+                {"assignee": {"login": ""}},
+                DEFAULT_ASSIGNEE_LOGIN,
+            ),
+        ]
+        for label, event, expected in cases:
+            with self.subTest(label=label):
+                self.assertEqual(resolve_assignee_login(event), expected)
 
 
 if __name__ == "__main__":

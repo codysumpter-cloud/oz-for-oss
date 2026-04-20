@@ -5,58 +5,28 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from enforce_pr_issue_state import _is_pr_author_org_member, main
-from oz_workflows.helpers import ORG_MEMBER_ASSOCIATIONS
-
-
-class IsOrgMemberAssociationsTest(unittest.TestCase):
-    def test_member_association_is_recognized(self) -> None:
-        self.assertIn("MEMBER", ORG_MEMBER_ASSOCIATIONS)
-
-    def test_owner_association_is_recognized(self) -> None:
-        self.assertIn("OWNER", ORG_MEMBER_ASSOCIATIONS)
-
-    def test_collaborator_association_is_recognized(self) -> None:
-        self.assertIn("COLLABORATOR", ORG_MEMBER_ASSOCIATIONS)
-
-    def test_contributor_is_not_recognized(self) -> None:
-        self.assertNotIn("CONTRIBUTOR", ORG_MEMBER_ASSOCIATIONS)
-
-    def test_none_is_not_recognized(self) -> None:
-        self.assertNotIn("NONE", ORG_MEMBER_ASSOCIATIONS)
 
 
 class IsPrAuthorOrgMemberTest(unittest.TestCase):
-    def test_member_returns_true(self) -> None:
-        pr = {"author_association": "MEMBER"}
-        self.assertTrue(_is_pr_author_org_member(pr))
-
-    def test_owner_returns_true(self) -> None:
-        pr = {"author_association": "OWNER"}
-        self.assertTrue(_is_pr_author_org_member(pr))
-
-    def test_contributor_returns_false(self) -> None:
-        pr = {"author_association": "CONTRIBUTOR"}
-        self.assertFalse(_is_pr_author_org_member(pr))
-
-    def test_none_association_returns_false(self) -> None:
-        pr = {"author_association": "NONE"}
-        self.assertFalse(_is_pr_author_org_member(pr))
-
-    def test_collaborator_returns_true(self) -> None:
-        pr = {"author_association": "COLLABORATOR"}
-        self.assertTrue(_is_pr_author_org_member(pr))
+    def test_association_table(self) -> None:
+        cases = [
+            ("MEMBER", True),
+            ("OWNER", True),
+            ("COLLABORATOR", True),
+            ("CONTRIBUTOR", False),
+            ("NONE", False),
+            ("FIRST_TIMER", False),
+            ("", False),
+        ]
+        for association, expected in cases:
+            with self.subTest(association=association):
+                self.assertEqual(
+                    _is_pr_author_org_member({"author_association": association}),
+                    expected,
+                )
 
     def test_missing_field_returns_false(self) -> None:
-        pr: dict[str, str] = {}
-        self.assertFalse(_is_pr_author_org_member(pr))
-
-    def test_empty_string_returns_false(self) -> None:
-        pr = {"author_association": ""}
-        self.assertFalse(_is_pr_author_org_member(pr))
-
-    def test_first_timer_returns_false(self) -> None:
-        pr = {"author_association": "FIRST_TIMER"}
-        self.assertFalse(_is_pr_author_org_member(pr))
+        self.assertFalse(_is_pr_author_org_member({}))
 
 class MainTest(unittest.TestCase):
     def _build_basic_pr(

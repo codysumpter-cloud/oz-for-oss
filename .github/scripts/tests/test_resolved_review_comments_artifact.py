@@ -168,40 +168,38 @@ class TryLoadResolvedReviewCommentsArtifactTest(unittest.TestCase):
         )
 
     @patch("oz_workflows.artifacts.poll_for_artifact")
-    def test_returns_empty_list_when_artifact_missing(self, mock_poll) -> None:
-        mock_poll.side_effect = RuntimeError("Timed out waiting for FILE artifact")
-        result = try_load_resolved_review_comments_artifact(
-            "run-abc", timeout_seconds=0, poll_interval_seconds=0
-        )
-        self.assertEqual(result, [])
-
-    @patch("oz_workflows.artifacts.poll_for_artifact")
-    def test_returns_empty_list_on_malformed_json(self, mock_poll) -> None:
-        mock_poll.side_effect = json.JSONDecodeError("malformed", "doc", 0)
-        result = try_load_resolved_review_comments_artifact(
-            "run-abc", timeout_seconds=0, poll_interval_seconds=0
-        )
-        self.assertEqual(result, [])
-
-    @patch("oz_workflows.artifacts.poll_for_artifact")
-    def test_returns_empty_list_on_http_status_error(self, mock_poll) -> None:
+    def test_returns_empty_list_on_recoverable_load_failures(self, mock_poll) -> None:
+        """Every recoverable failure path returns ``[]`` instead of raising."""
         request = httpx.Request("GET", "https://example.test/signed")
         response = Mock(spec=httpx.Response, status_code=404, request=request)
-        mock_poll.side_effect = httpx.HTTPStatusError(
-            "not found", request=request, response=response
-        )
-        result = try_load_resolved_review_comments_artifact(
-            "run-abc", timeout_seconds=0, poll_interval_seconds=0
-        )
-        self.assertEqual(result, [])
-
-    @patch("oz_workflows.artifacts.poll_for_artifact")
-    def test_returns_empty_list_on_transient_http_error(self, mock_poll) -> None:
-        mock_poll.side_effect = httpx.ReadTimeout("timeout")
-        result = try_load_resolved_review_comments_artifact(
-            "run-abc", timeout_seconds=0, poll_interval_seconds=0
-        )
-        self.assertEqual(result, [])
+        cases = [
+            (
+                "artifact_missing_timeout",
+                RuntimeError("Timed out waiting for FILE artifact"),
+            ),
+            (
+                "malformed_json",
+                json.JSONDecodeError("malformed", "doc", 0),
+            ),
+            (
+                "http_status_error",
+                httpx.HTTPStatusError(
+                    "not found", request=request, response=response
+                ),
+            ),
+            (
+                "transient_http_error",
+                httpx.ReadTimeout("timeout"),
+            ),
+        ]
+        for label, exc in cases:
+            with self.subTest(label=label):
+                mock_poll.reset_mock()
+                mock_poll.side_effect = exc
+                result = try_load_resolved_review_comments_artifact(
+                    "run-abc", timeout_seconds=0, poll_interval_seconds=0
+                )
+                self.assertEqual(result, [])
 
 
 if __name__ == "__main__":

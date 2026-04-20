@@ -37,29 +37,25 @@ class FindFileArtifactTest(unittest.TestCase):
         ]
         self.assertEqual(_find_file_artifact(run, "review.json"), "uid-review")
 
-    def test_returns_none_when_no_match(self) -> None:
-        run = MagicMock()
-        run.artifacts = [
-            _make_artifact("FILE", "other.json", "uid-other"),
+    def test_returns_none_when_artifact_not_found(self) -> None:
+        """``_find_file_artifact`` returns ``None`` for every no-artifact case."""
+        cases = [
+            (
+                "no_matching_filename",
+                [_make_artifact("FILE", "other.json", "uid-other")],
+            ),
+            ("empty_artifact_list", []),
+            ("artifacts_is_none", None),
+            (
+                "non_file_artifact_type",
+                [_make_artifact("SCREENSHOT", "review.json", "uid-screenshot")],
+            ),
         ]
-        self.assertIsNone(_find_file_artifact(run, "review.json"))
-
-    def test_returns_none_when_no_artifacts(self) -> None:
-        run = MagicMock()
-        run.artifacts = []
-        self.assertIsNone(_find_file_artifact(run, "review.json"))
-
-    def test_returns_none_when_artifacts_is_none(self) -> None:
-        run = MagicMock()
-        run.artifacts = None
-        self.assertIsNone(_find_file_artifact(run, "review.json"))
-
-    def test_skips_non_file_artifacts(self) -> None:
-        run = MagicMock()
-        run.artifacts = [
-            _make_artifact("SCREENSHOT", "review.json", "uid-screenshot"),
-        ]
-        self.assertIsNone(_find_file_artifact(run, "review.json"))
+        for label, artifacts in cases:
+            with self.subTest(label=label):
+                run = MagicMock()
+                run.artifacts = artifacts
+                self.assertIsNone(_find_file_artifact(run, "review.json"))
 
 
 class DownloadArtifactJsonTest(unittest.TestCase):
@@ -368,6 +364,15 @@ class LoadPrMetadataArtifactTest(unittest.TestCase):
 
 
 class TryLoadPrMetadataArtifactTest(unittest.TestCase):
+    """Tests covering exception-handling for ``try_load_pr_metadata_artifact``.
+
+    Validation of well-formed payloads (missing keys, empty strings, and
+    accepted metadata shapes) is covered by ``LoadPrMetadataArtifactTest``
+    against the underlying ``load_pr_metadata_artifact``; these tests focus
+    on the ``try_*`` wrapper's contract of returning ``None`` instead of
+    raising when the underlying load fails.
+    """
+
     @patch("oz_workflows.artifacts.poll_for_artifact")
     def test_returns_metadata_when_artifact_valid(self, mock_poll: MagicMock) -> None:
         expected = {
@@ -388,70 +393,36 @@ class TryLoadPrMetadataArtifactTest(unittest.TestCase):
         )
 
     @patch("oz_workflows.artifacts.poll_for_artifact")
-    def test_returns_none_when_artifact_missing(self, mock_poll: MagicMock) -> None:
-        mock_poll.side_effect = RuntimeError("Timed out waiting for FILE artifact")
-        result = try_load_pr_metadata_artifact(
-            "run-abc", timeout_seconds=0, poll_interval_seconds=0
-        )
-        self.assertIsNone(result)
-
-    @patch("oz_workflows.artifacts.poll_for_artifact")
-    def test_returns_none_on_malformed_json(self, mock_poll: MagicMock) -> None:
-        mock_poll.side_effect = json.JSONDecodeError("malformed", "doc", 0)
-        result = try_load_pr_metadata_artifact(
-            "run-abc", timeout_seconds=0, poll_interval_seconds=0
-        )
-        self.assertIsNone(result)
-
-    @patch("oz_workflows.artifacts.poll_for_artifact")
-    def test_returns_none_on_http_error(self, mock_poll: MagicMock) -> None:
-        request = httpx.Request("GET", "https://example.test/signed")
-        response = MagicMock(spec=httpx.Response, status_code=404, request=request)
-        mock_poll.side_effect = httpx.HTTPStatusError(
-            "not found", request=request, response=response
-        )
-        result = try_load_pr_metadata_artifact(
-            "run-abc", timeout_seconds=0, poll_interval_seconds=0
-        )
-        self.assertIsNone(result)
-
-    @patch("oz_workflows.artifacts.poll_for_artifact")
-    def test_returns_none_when_required_keys_missing(
+    def test_returns_none_on_recoverable_load_failures(
         self, mock_poll: MagicMock
     ) -> None:
-        # Missing pr_summary
-        mock_poll.return_value = {
-            "branch_name": "oz-agent/spec-issue-42",
-            "pr_title": "feat: implement spec",
-        }
-        result = try_load_pr_metadata_artifact(
-            "run-abc", timeout_seconds=0, poll_interval_seconds=0
-        )
-        self.assertIsNone(result)
-
-    @patch("oz_workflows.artifacts.poll_for_artifact")
-    def test_returns_none_when_pr_summary_empty(self, mock_poll: MagicMock) -> None:
-        mock_poll.return_value = {
-            "branch_name": "oz-agent/spec-issue-42",
-            "pr_title": "feat: implement spec",
-            "pr_summary": "   ",
-        }
-        result = try_load_pr_metadata_artifact(
-            "run-abc", timeout_seconds=0, poll_interval_seconds=0
-        )
-        self.assertIsNone(result)
-
-    @patch("oz_workflows.artifacts.poll_for_artifact")
-    def test_returns_none_when_pr_title_empty(self, mock_poll: MagicMock) -> None:
-        mock_poll.return_value = {
-            "branch_name": "oz-agent/spec-issue-42",
-            "pr_title": "   ",
-            "pr_summary": "Closes #42\n\nSummary.",
-        }
-        result = try_load_pr_metadata_artifact(
-            "run-abc", timeout_seconds=0, poll_interval_seconds=0
-        )
-        self.assertIsNone(result)
+        """All recoverable load failures return ``None`` instead of raising."""
+        request = httpx.Request("GET", "https://example.test/signed")
+        response = MagicMock(spec=httpx.Response, status_code=404, request=request)
+        cases = [
+            (
+                "artifact_missing_timeout",
+                RuntimeError("Timed out waiting for FILE artifact"),
+            ),
+            (
+                "malformed_json",
+                json.JSONDecodeError("malformed", "doc", 0),
+            ),
+            (
+                "http_status_error",
+                httpx.HTTPStatusError(
+                    "not found", request=request, response=response
+                ),
+            ),
+        ]
+        for label, exc in cases:
+            with self.subTest(label=label):
+                mock_poll.reset_mock()
+                mock_poll.side_effect = exc
+                result = try_load_pr_metadata_artifact(
+                    "run-abc", timeout_seconds=0, poll_interval_seconds=0
+                )
+                self.assertIsNone(result)
 
 
 if __name__ == "__main__":
