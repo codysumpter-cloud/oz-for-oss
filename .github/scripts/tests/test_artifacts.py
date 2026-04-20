@@ -14,6 +14,7 @@ from oz_workflows.artifacts import (
     load_pr_metadata_artifact,
     poll_for_artifact,
     poll_for_text_artifact,
+    try_load_pr_metadata_artifact,
 )
 
 
@@ -364,6 +365,93 @@ class LoadPrMetadataArtifactTest(unittest.TestCase):
         mock_poll.return_value = metadata
         result = load_pr_metadata_artifact("run-456")
         self.assertEqual(result, metadata)
+
+
+class TryLoadPrMetadataArtifactTest(unittest.TestCase):
+    @patch("oz_workflows.artifacts.poll_for_artifact")
+    def test_returns_metadata_when_artifact_valid(self, mock_poll: MagicMock) -> None:
+        expected = {
+            "branch_name": "oz-agent/spec-issue-42",
+            "pr_title": "feat: implement spec",
+            "pr_summary": "Closes #42\n\n## Summary\nImplemented the spec.",
+        }
+        mock_poll.return_value = expected
+        result = try_load_pr_metadata_artifact(
+            "run-abc", timeout_seconds=0, poll_interval_seconds=0
+        )
+        self.assertEqual(result, expected)
+        mock_poll.assert_called_once_with(
+            "run-abc",
+            filename="pr-metadata.json",
+            timeout_seconds=0,
+            poll_interval_seconds=0,
+        )
+
+    @patch("oz_workflows.artifacts.poll_for_artifact")
+    def test_returns_none_when_artifact_missing(self, mock_poll: MagicMock) -> None:
+        mock_poll.side_effect = RuntimeError("Timed out waiting for FILE artifact")
+        result = try_load_pr_metadata_artifact(
+            "run-abc", timeout_seconds=0, poll_interval_seconds=0
+        )
+        self.assertIsNone(result)
+
+    @patch("oz_workflows.artifacts.poll_for_artifact")
+    def test_returns_none_on_malformed_json(self, mock_poll: MagicMock) -> None:
+        mock_poll.side_effect = json.JSONDecodeError("malformed", "doc", 0)
+        result = try_load_pr_metadata_artifact(
+            "run-abc", timeout_seconds=0, poll_interval_seconds=0
+        )
+        self.assertIsNone(result)
+
+    @patch("oz_workflows.artifacts.poll_for_artifact")
+    def test_returns_none_on_http_error(self, mock_poll: MagicMock) -> None:
+        request = httpx.Request("GET", "https://example.test/signed")
+        response = MagicMock(spec=httpx.Response, status_code=404, request=request)
+        mock_poll.side_effect = httpx.HTTPStatusError(
+            "not found", request=request, response=response
+        )
+        result = try_load_pr_metadata_artifact(
+            "run-abc", timeout_seconds=0, poll_interval_seconds=0
+        )
+        self.assertIsNone(result)
+
+    @patch("oz_workflows.artifacts.poll_for_artifact")
+    def test_returns_none_when_required_keys_missing(
+        self, mock_poll: MagicMock
+    ) -> None:
+        # Missing pr_summary
+        mock_poll.return_value = {
+            "branch_name": "oz-agent/spec-issue-42",
+            "pr_title": "feat: implement spec",
+        }
+        result = try_load_pr_metadata_artifact(
+            "run-abc", timeout_seconds=0, poll_interval_seconds=0
+        )
+        self.assertIsNone(result)
+
+    @patch("oz_workflows.artifacts.poll_for_artifact")
+    def test_returns_none_when_pr_summary_empty(self, mock_poll: MagicMock) -> None:
+        mock_poll.return_value = {
+            "branch_name": "oz-agent/spec-issue-42",
+            "pr_title": "feat: implement spec",
+            "pr_summary": "   ",
+        }
+        result = try_load_pr_metadata_artifact(
+            "run-abc", timeout_seconds=0, poll_interval_seconds=0
+        )
+        self.assertIsNone(result)
+
+    @patch("oz_workflows.artifacts.poll_for_artifact")
+    def test_returns_none_when_pr_title_empty(self, mock_poll: MagicMock) -> None:
+        mock_poll.return_value = {
+            "branch_name": "oz-agent/spec-issue-42",
+            "pr_title": "   ",
+            "pr_summary": "Closes #42\n\nSummary.",
+        }
+        result = try_load_pr_metadata_artifact(
+            "run-abc", timeout_seconds=0, poll_interval_seconds=0
+        )
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

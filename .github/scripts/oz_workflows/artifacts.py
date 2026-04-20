@@ -248,6 +248,50 @@ def load_pr_metadata_artifact(run_id: str) -> PrMetadata:
     return cast(PrMetadata, metadata)
 
 
+def try_load_pr_metadata_artifact(
+    run_id: str,
+    *,
+    timeout_seconds: int = 10,
+    poll_interval_seconds: int = 2,
+) -> PrMetadata | None:
+    """Try to load the optional ``pr-metadata.json`` artifact.
+
+    Workflows that only *sometimes* need to refresh the PR title/body (for
+    example, ``respond-to-pr-comment`` when the agent's changes transition
+    a spec-only PR into a spec + implementation PR) should use this helper
+    rather than ``load_pr_metadata_artifact`` so a missing or malformed
+    artifact degrades to ``None`` instead of aborting the workflow.
+
+    Uses a short polling window by default because the artifact is
+    optional. When the artifact is absent, the agent did not intend to
+    refresh the PR description and callers should leave the existing
+    description untouched.
+    """
+    try:
+        metadata = poll_for_artifact(
+            run_id,
+            filename=PR_METADATA_FILENAME,
+            timeout_seconds=timeout_seconds,
+            poll_interval_seconds=poll_interval_seconds,
+        )
+    except (RuntimeError, ValueError, httpx.HTTPError):
+        # ``RuntimeError``: poll timeouts or non-object JSON payloads.
+        # ``ValueError``: malformed JSON (``json.JSONDecodeError`` is a subclass).
+        # ``httpx.HTTPError``: 4xx responses or other transport-level failures
+        # that survived the download retries in ``_download_artifact_text``.
+        return None
+    missing = [key for key in _PR_METADATA_REQUIRED_KEYS if key not in metadata]
+    if missing:
+        return None
+    pr_summary = metadata.get("pr_summary", "")
+    if not isinstance(pr_summary, str) or not pr_summary.strip():
+        return None
+    pr_title = metadata.get("pr_title", "")
+    if not isinstance(pr_title, str) or not pr_title.strip():
+        return None
+    return cast(PrMetadata, metadata)
+
+
 RESOLVED_REVIEW_COMMENTS_FILENAME = "resolved_review_comments.json"
 
 
