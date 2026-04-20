@@ -17,107 +17,82 @@ import update_triage
 from oz_workflows.repo_local import WriteSurfaceViolation, assert_write_surface
 
 
-class UpdatePrReviewGuardTest(unittest.TestCase):
-    def test_allows_diff_restricted_to_local_companions(self) -> None:
-        assert_write_surface(
-            [
-                ".agents/skills/review-pr-local/SKILL.md",
-                ".agents/skills/review-spec-local/SKILL.md",
-            ],
-            allowed_prefixes=list(update_pr_review.ALLOWED_PREFIXES),
-            loop_name="update-pr-review",
-        )
-
-    def test_rejects_diff_touching_core_review_pr_skill(self) -> None:
-        with self.assertRaises(WriteSurfaceViolation):
-            assert_write_surface(
-                [".agents/skills/review-pr/SKILL.md"],
-                allowed_prefixes=list(update_pr_review.ALLOWED_PREFIXES),
-                loop_name="update-pr-review",
-            )
-
-    def test_rejects_diff_touching_workflow_scripts(self) -> None:
-        with self.assertRaises(WriteSurfaceViolation):
-            assert_write_surface(
-                [".github/scripts/review_pr.py"],
-                allowed_prefixes=list(update_pr_review.ALLOWED_PREFIXES),
-                loop_name="update-pr-review",
-            )
-
-    def test_rejects_diff_touching_issue_triage_config(self) -> None:
-        # ``.github/issue-triage/`` is owned by ``update-triage``; allowing
-        # ``update-pr-review`` to edit it would create dual-ownership and
-        # could silently mutate triage config from PR-review feedback.
-        with self.assertRaises(WriteSurfaceViolation):
-            assert_write_surface(
-                [".github/issue-triage/config.json"],
-                allowed_prefixes=list(update_pr_review.ALLOWED_PREFIXES),
-                loop_name="update-pr-review",
-            )
-
-
-class UpdateTriageGuardTest(unittest.TestCase):
-    def test_allows_triage_local_and_issue_triage_config(self) -> None:
-        assert_write_surface(
-            [
-                ".agents/skills/triage-issue-local/SKILL.md",
-                ".github/issue-triage/config.json",
-            ],
-            allowed_prefixes=list(update_triage.ALLOWED_PREFIXES),
-            loop_name="update-triage",
-        )
-
-    def test_rejects_diff_touching_core_triage_skill(self) -> None:
-        with self.assertRaises(WriteSurfaceViolation):
-            assert_write_surface(
-                [".agents/skills/triage-issue/SKILL.md"],
-                allowed_prefixes=list(update_triage.ALLOWED_PREFIXES),
-                loop_name="update-triage",
-            )
-
-    def test_rejects_diff_touching_dedupe_companion(self) -> None:
-        # Dedupe companion belongs to the ``update-dedupe`` loop, not triage.
-        with self.assertRaises(WriteSurfaceViolation):
-            assert_write_surface(
-                [".agents/skills/dedupe-issue-local/SKILL.md"],
-                allowed_prefixes=list(update_triage.ALLOWED_PREFIXES),
-                loop_name="update-triage",
-            )
+# Each entry declares a self-improvement loop, its allowed prefix list,
+# and the file paths that should be allowed or rejected by
+# ``assert_write_surface``. Any shared rejected paths (e.g.
+# ``.github/scripts/*``) apply to all loops.
+_GUARD_CASES = [
+    {
+        "loop_name": "update-pr-review",
+        "allowed_prefixes": list(update_pr_review.ALLOWED_PREFIXES),
+        "allowed_paths": [
+            ".agents/skills/review-pr-local/SKILL.md",
+            ".agents/skills/review-spec-local/SKILL.md",
+        ],
+        "rejected_paths": [
+            # Core review-pr skill is owned by the shared skill definition,
+            # not the local companion.
+            ".agents/skills/review-pr/SKILL.md",
+            # Workflow scripts are out of scope for every self-improvement
+            # loop.
+            ".github/scripts/review_pr.py",
+            # ``.github/issue-triage/`` is owned by ``update-triage``;
+            # allowing ``update-pr-review`` to edit it would create
+            # dual-ownership.
+            ".github/issue-triage/config.json",
+        ],
+    },
+    {
+        "loop_name": "update-triage",
+        "allowed_prefixes": list(update_triage.ALLOWED_PREFIXES),
+        "allowed_paths": [
+            ".agents/skills/triage-issue-local/SKILL.md",
+            ".github/issue-triage/config.json",
+        ],
+        "rejected_paths": [
+            ".agents/skills/triage-issue/SKILL.md",
+            # Dedupe companion belongs to the ``update-dedupe`` loop, not
+            # triage.
+            ".agents/skills/dedupe-issue-local/SKILL.md",
+        ],
+    },
+    {
+        "loop_name": "update-dedupe",
+        "allowed_prefixes": list(update_dedupe.ALLOWED_PREFIXES),
+        "allowed_paths": [
+            ".agents/skills/dedupe-issue-local/SKILL.md",
+        ],
+        "rejected_paths": [
+            ".agents/skills/dedupe-issue/SKILL.md",
+            ".agents/skills/triage-issue-local/SKILL.md",
+            # Dedupe is scoped tighter than triage; it does not own
+            # ``.github/issue-triage/*``.
+            ".github/issue-triage/config.json",
+        ],
+    },
+]
 
 
-class UpdateDedupeGuardTest(unittest.TestCase):
-    def test_allows_dedupe_local_companion(self) -> None:
-        assert_write_surface(
-            [".agents/skills/dedupe-issue-local/SKILL.md"],
-            allowed_prefixes=list(update_dedupe.ALLOWED_PREFIXES),
-            loop_name="update-dedupe",
-        )
+class SelfImprovementGuardTest(unittest.TestCase):
+    def test_allowed_paths_pass_write_surface_check(self) -> None:
+        for case in _GUARD_CASES:
+            with self.subTest(loop_name=case["loop_name"]):
+                assert_write_surface(
+                    case["allowed_paths"],
+                    allowed_prefixes=case["allowed_prefixes"],
+                    loop_name=case["loop_name"],
+                )
 
-    def test_rejects_diff_touching_core_dedupe_skill(self) -> None:
-        with self.assertRaises(WriteSurfaceViolation):
-            assert_write_surface(
-                [".agents/skills/dedupe-issue/SKILL.md"],
-                allowed_prefixes=list(update_dedupe.ALLOWED_PREFIXES),
-                loop_name="update-dedupe",
-            )
-
-    def test_rejects_diff_touching_triage_companion(self) -> None:
-        with self.assertRaises(WriteSurfaceViolation):
-            assert_write_surface(
-                [".agents/skills/triage-issue-local/SKILL.md"],
-                allowed_prefixes=list(update_dedupe.ALLOWED_PREFIXES),
-                loop_name="update-dedupe",
-            )
-
-    def test_rejects_diff_touching_issue_triage_config(self) -> None:
-        # Dedupe is scoped tighter than triage; it does not own
-        # ``.github/issue-triage/*``.
-        with self.assertRaises(WriteSurfaceViolation):
-            assert_write_surface(
-                [".github/issue-triage/config.json"],
-                allowed_prefixes=list(update_dedupe.ALLOWED_PREFIXES),
-                loop_name="update-dedupe",
-            )
+    def test_rejected_paths_raise_write_surface_violation(self) -> None:
+        for case in _GUARD_CASES:
+            for path in case["rejected_paths"]:
+                with self.subTest(loop_name=case["loop_name"], path=path):
+                    with self.assertRaises(WriteSurfaceViolation):
+                        assert_write_surface(
+                            [path],
+                            allowed_prefixes=case["allowed_prefixes"],
+                            loop_name=case["loop_name"],
+                        )
 
 
 if __name__ == "__main__":

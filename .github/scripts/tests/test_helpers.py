@@ -83,44 +83,38 @@ class IsAutomationUserTest(unittest.TestCase):
 
 
 class ResolveProgressRequesterLoginTest(unittest.TestCase):
-    def test_prefers_explicit_requester_login(self) -> None:
-        self.assertEqual(
-            resolve_progress_requester_login(
-                FakeGitHubClient(),
-                "acme",
-                "widgets",
-                12,
-                requester_login="@alice",
+    def test_fallback_precedence(self) -> None:
+        """Explicit > comment author > sender for requester resolution."""
+        cases = [
+            (
+                "explicit_requester_login",
+                {"requester_login": "@alice"},
+                "alice",
             ),
-            "alice",
-        )
-
-    def test_uses_comment_author_when_present(self) -> None:
-        self.assertEqual(
-            resolve_progress_requester_login(
-                FakeGitHubClient(),
-                "acme",
-                "widgets",
-                12,
-                event_payload={
-                    "sender": {"login": "bob"},
-                    "comment": {"user": {"login": "alice"}},
+            (
+                "comment_author_wins_over_sender",
+                {
+                    "event_payload": {
+                        "sender": {"login": "bob"},
+                        "comment": {"user": {"login": "alice"}},
+                    },
                 },
+                "alice",
             ),
-            "alice",
-        )
-
-    def test_falls_back_to_sender_login(self) -> None:
-        self.assertEqual(
-            resolve_progress_requester_login(
-                FakeGitHubClient(),
-                "acme",
-                "widgets",
-                12,
-                event_payload={"sender": {"login": "bob"}},
+            (
+                "sender_fallback",
+                {"event_payload": {"sender": {"login": "bob"}}},
+                "bob",
             ),
-            "bob",
-        )
+        ]
+        for label, kwargs, expected in cases:
+            with self.subTest(label=label):
+                self.assertEqual(
+                    resolve_progress_requester_login(
+                        FakeGitHubClient(), "acme", "widgets", 12, **kwargs
+                    ),
+                    expected,
+                )
 
 
 class OrgMemberCommentsTextTest(unittest.TestCase):
@@ -165,38 +159,33 @@ class OrgMemberCommentsTextTest(unittest.TestCase):
         )
 
 class ConventionalCommitPrefixTest(unittest.TestCase):
-    def test_bug_label_returns_fix(self) -> None:
-        labels = [{"name": "bug"}, {"name": "ready-to-implement"}]
-        self.assertEqual(conventional_commit_prefix(labels), "fix")
-
-    def test_enhancement_label_returns_feat(self) -> None:
-        labels = [{"name": "enhancement"}]
-        self.assertEqual(conventional_commit_prefix(labels), "feat")
-
-    def test_feature_label_returns_feat(self) -> None:
-        labels = [{"name": "feature"}]
-        self.assertEqual(conventional_commit_prefix(labels), "feat")
-
-    def test_documentation_label_returns_docs(self) -> None:
-        labels = [{"name": "documentation"}]
-        self.assertEqual(conventional_commit_prefix(labels), "docs")
-
-    def test_no_matching_label_returns_default(self) -> None:
-        labels = [{"name": "ready-to-implement"}, {"name": "area/workflows"}]
-        self.assertEqual(conventional_commit_prefix(labels), "feat")
-
-    def test_empty_labels_returns_default(self) -> None:
-        self.assertEqual(conventional_commit_prefix([]), "feat")
+    def test_label_to_prefix_table(self) -> None:
+        cases = [
+            (
+                "bug_label_returns_fix",
+                [{"name": "bug"}, {"name": "ready-to-implement"}],
+                "fix",
+            ),
+            ("enhancement", [{"name": "enhancement"}], "feat"),
+            ("feature", [{"name": "feature"}], "feat"),
+            ("documentation", [{"name": "documentation"}], "docs"),
+            (
+                "no_matching_label_returns_default",
+                [{"name": "ready-to-implement"}, {"name": "area/workflows"}],
+                "feat",
+            ),
+            ("empty_labels", [], "feat"),
+            ("string_labels", ["bug", "urgent"], "fix"),
+        ]
+        for label, labels, expected in cases:
+            with self.subTest(label=label):
+                self.assertEqual(conventional_commit_prefix(labels), expected)
 
     def test_custom_default(self) -> None:
         self.assertEqual(conventional_commit_prefix([], default="chore"), "chore")
 
-    def test_string_labels(self) -> None:
-        self.assertEqual(conventional_commit_prefix(["bug", "urgent"]), "fix")
-
     def test_case_insensitive(self) -> None:
-        labels = [{"name": "Bug"}]
-        self.assertEqual(conventional_commit_prefix(labels), "fix")
+        self.assertEqual(conventional_commit_prefix([{"name": "Bug"}]), "fix")
 
     def test_first_match_wins(self) -> None:
         labels = [{"name": "bug"}, {"name": "enhancement"}]

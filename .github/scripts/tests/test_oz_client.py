@@ -18,74 +18,79 @@ from oz_workflows.oz_client import (
 
 
 class BuildOzClientTest(unittest.TestCase):
-    @patch.dict(
-        os.environ,
-        {
-            "WARP_API_KEY": "fake-key",
-            "WARP_API_BASE_URL": "https://staging.warp.dev/api/v1",
-            "WARP_ORIGIN_TOKEN_ENV_NAME": "STAGING_ORIGIN_TOKEN",
-            "STAGING_ORIGIN_TOKEN": "fake-token",
-        },
-        clear=True,
-    )
-    @patch("oz_workflows.oz_client.OzAPI")
-    def test_default_headers_include_api_source(
-        self, mock_oz_api: unittest.mock.MagicMock
-    ) -> None:
-        build_oz_client()
-        _args, kwargs = mock_oz_api.call_args
-        headers = kwargs["default_headers"]
-        self.assertEqual(kwargs["base_url"], "https://staging.warp.dev/api/v1")
-        self.assertEqual(headers["x-oz-api-source"], "GITHUB_ACTION")
-        self.assertEqual(headers["X-Warp-Origin-Token"], "fake-token")
+    def test_honors_base_url_and_origin_token_env(self) -> None:
+        """``build_oz_client`` forwards ``WARP_API_BASE_URL`` and the
+        origin token env-var name to the ``OzAPI`` client.
 
-    @patch.dict(
-        os.environ,
-        {
-            "WARP_API_KEY": "fake-key",
-            "WARP_API_BASE_URL": "https://app.warp.dev/api/v1",
-            "WARP_ORIGIN_TOKEN_ENV_NAME": "PROD_ORIGIN_TOKEN",
-            "PROD_ORIGIN_TOKEN": "prod-token",
-        },
-        clear=True,
-    )
-    @patch("oz_workflows.oz_client.OzAPI")
-    def test_uses_configured_base_url_and_origin_token_env_name(
-        self, mock_oz_api: unittest.mock.MagicMock
-    ) -> None:
-        build_oz_client()
-        _args, kwargs = mock_oz_api.call_args
-        headers = kwargs["default_headers"]
-        self.assertEqual(kwargs["base_url"], "https://app.warp.dev/api/v1")
-        self.assertEqual(headers["X-Warp-Origin-Token"], "prod-token")
+        Both the staging and production configurations are covered to
+        confirm that no base URL is hard-coded.
+        """
+        cases = [
+            (
+                "staging",
+                {
+                    "WARP_API_KEY": "fake-key",
+                    "WARP_API_BASE_URL": "https://staging.warp.dev/api/v1",
+                    "WARP_ORIGIN_TOKEN_ENV_NAME": "STAGING_ORIGIN_TOKEN",
+                    "STAGING_ORIGIN_TOKEN": "fake-token",
+                },
+                "https://staging.warp.dev/api/v1",
+                "fake-token",
+            ),
+            (
+                "production",
+                {
+                    "WARP_API_KEY": "fake-key",
+                    "WARP_API_BASE_URL": "https://app.warp.dev/api/v1",
+                    "WARP_ORIGIN_TOKEN_ENV_NAME": "PROD_ORIGIN_TOKEN",
+                    "PROD_ORIGIN_TOKEN": "prod-token",
+                },
+                "https://app.warp.dev/api/v1",
+                "prod-token",
+            ),
+        ]
+        for label, env, expected_base_url, expected_token in cases:
+            with self.subTest(label=label):
+                with patch.dict(os.environ, env, clear=True), patch(
+                    "oz_workflows.oz_client.OzAPI"
+                ) as mock_oz_api:
+                    build_oz_client()
+                    _args, kwargs = mock_oz_api.call_args
+                    headers = kwargs["default_headers"]
+                    self.assertEqual(kwargs["base_url"], expected_base_url)
+                    self.assertEqual(headers["x-oz-api-source"], "GITHUB_ACTION")
+                    self.assertEqual(
+                        headers["X-Warp-Origin-Token"], expected_token
+                    )
 
-    @patch.dict(
-        os.environ,
-        {
-            "WARP_API_KEY": "fake-key",
-            "WARP_ORIGIN_TOKEN_ENV_NAME": "STAGING_ORIGIN_TOKEN",
-            "STAGING_ORIGIN_TOKEN": "fake-token",
-        },
-        clear=True,
-    )
-    def test_requires_warp_api_base_url(self) -> None:
-        with self.assertRaises(RuntimeError) as ctx:
-            build_oz_client()
-        self.assertIn("WARP_API_BASE_URL", str(ctx.exception))
-
-    @patch.dict(
-        os.environ,
-        {
-            "WARP_API_KEY": "fake-key",
-            "WARP_API_BASE_URL": "https://staging.warp.dev/api/v1",
-            "STAGING_ORIGIN_TOKEN": "fake-token",
-        },
-        clear=True,
-    )
-    def test_requires_warp_origin_token_env_name(self) -> None:
-        with self.assertRaises(RuntimeError) as ctx:
-            build_oz_client()
-        self.assertIn("WARP_ORIGIN_TOKEN_ENV_NAME", str(ctx.exception))
+    def test_requires_base_url_and_origin_token_env_name(self) -> None:
+        """Missing required env vars must surface as ``RuntimeError``."""
+        cases = [
+            (
+                "missing_base_url",
+                {
+                    "WARP_API_KEY": "fake-key",
+                    "WARP_ORIGIN_TOKEN_ENV_NAME": "STAGING_ORIGIN_TOKEN",
+                    "STAGING_ORIGIN_TOKEN": "fake-token",
+                },
+                "WARP_API_BASE_URL",
+            ),
+            (
+                "missing_origin_token_env_name",
+                {
+                    "WARP_API_KEY": "fake-key",
+                    "WARP_API_BASE_URL": "https://staging.warp.dev/api/v1",
+                    "STAGING_ORIGIN_TOKEN": "fake-token",
+                },
+                "WARP_ORIGIN_TOKEN_ENV_NAME",
+            ),
+        ]
+        for label, env, expected_missing in cases:
+            with self.subTest(label=label):
+                with patch.dict(os.environ, env, clear=True):
+                    with self.assertRaises(RuntimeError) as ctx:
+                        build_oz_client()
+                    self.assertIn(expected_missing, str(ctx.exception))
 
 
 class SkillSpecTest(unittest.TestCase):
