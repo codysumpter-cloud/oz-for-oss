@@ -1,17 +1,21 @@
 from __future__ import annotations
 from contextlib import closing
+import logging
 
 import json
 import re
+from pathlib import Path
 from textwrap import dedent
 from typing import Any, TypedDict
 from github import Auth, Github
 from github.File import File
+from github.GithubException import GithubException
 
 from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.helpers import (
     format_review_start_line,
     is_spec_only_pr,
+    ORG_MEMBER_ASSOCIATIONS,
     POWERED_BY_SUFFIX,
     record_run_session_link,
     resolve_spec_context_for_pr,
@@ -23,6 +27,16 @@ from oz_workflows.repo_local import (
     format_repo_local_prompt_section,
     resolve_repo_local_skill_path,
 )
+from oz_workflows.triage import format_stakeholders_for_prompt, load_stakeholders
+
+logger = logging.getLogger(__name__)
+
+# Maximum number of human reviewers to request from STAKEHOLDERS so we don't
+# over-notify maintainers on a single non-member PR.
+_MAX_STAKEHOLDER_REVIEWERS = 3
+# ``verdict`` values the agent is allowed to emit for non-member PRs. These
+# map directly to GitHub's ``event`` parameter on the create-review endpoint.
+_ALLOWED_NON_MEMBER_VERDICTS = {"APPROVE", "REQUEST_CHANGES"}
 
 
 class ReviewComment(TypedDict, total=False):
@@ -50,6 +64,82 @@ def _normalize_review_path(value: Any) -> str:
     path = str(value or "").strip()
     path = re.sub(r"^(a/|b/|\./)", "", path)
     return path
+
+
+def _is_non_member_pr(pr: Any) -> bool:
+    """Return True if the PR author is not an organization member/collaborator.
+
+    Non-member PRs receive the review-action gate (APPROVE or
+    REQUEST_CHANGES) and, on APPROVE, a review request targeted at
+    matching ``.github/STAKEHOLDERS`` entries. Member/collaborator PRs
+    keep the existing ``COMMENT`` behavior.
+    """
+    association = getattr(pr, "author_association", "") or ""
+    return association not in ORG_MEMBER_ASSOCIATIONS
+
+
+def _normalize_reviewer_logins(
+    candidates: Any,
+    *,
+    pr_author_login: str,
+    limit: int = _MAX_STAKEHOLDER_REVIEWERS,
+) -> list[str]:
+    """Normalize and cap a list of recommended reviewer logins from the agent.
+
+    Strips leading ``@`` characters, drops blanks and non-string entries,
+    de-duplicates while preserving first-seen order, removes the PR
+    author (GitHub rejects self-review requests), and caps the result
+    at ``limit`` entries so we don't over-notify maintainers.
+    """
+    if not isinstance(candidates, list):
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not isinstance(candidate, str):
+            continue
+        login = candidate.strip().lstrip("@")
+        if not login:
+            continue
+        if login.lower() == (pr_author_login or "").strip().lower():
+            continue
+        if login in seen:
+            continue
+        seen.add(login)
+        normalized.append(login)
+        if len(normalized) >= limit:
+            break
+    return normalized
+
+
+def _resolve_non_member_review_action(
+    review: dict[str, Any],
+    *,
+    pr_author_login: str,
+) -> tuple[str, list[str]]:
+    """Extract and validate the verdict + reviewer list for a non-member PR.
+
+    Returns a tuple of ``(event, reviewers)`` where ``event`` is the
+    GitHub ``create_review`` event string (``"APPROVE"`` or
+    ``"REQUEST_CHANGES"``) and ``reviewers`` is the normalized list of
+    GitHub logins to request a review from (always empty on
+    ``REQUEST_CHANGES``). Raises ``ValueError`` when the agent returned
+    an unsupported ``verdict``.
+    """
+    verdict_raw = str(review.get("verdict") or "").strip().upper()
+    if verdict_raw not in _ALLOWED_NON_MEMBER_VERDICTS:
+        raise ValueError(
+            f"Review payload `verdict` must be one of {sorted(_ALLOWED_NON_MEMBER_VERDICTS)} for a non-member PR; got {verdict_raw!r}."
+        )
+    reviewers = (
+        _normalize_reviewer_logins(
+            review.get("recommended_reviewers"),
+            pr_author_login=pr_author_login,
+        )
+        if verdict_raw == "APPROVE"
+        else []
+    )
+    return verdict_raw, reviewers
 
 
 def _commentable_lines_for_patch(patch: str | None) -> dict[str, set[int]]:
@@ -374,6 +464,63 @@ def main() -> None:
             )
         else:
             repo_local_section = ""
+
+        # Non-member PRs go through an additional "review action" gate: the
+        # agent is asked to emit a verdict (APPROVE or REQUEST_CHANGES) and
+        # a list of matching ``.github/STAKEHOLDERS`` logins to request as
+        # human reviewers, and the workflow turns those into a real
+        # pull-request review plus reviewer requests. Member/collaborator
+        # PRs keep the existing COMMENT-only behavior.
+        is_non_member = _is_non_member_pr(pr)
+        pr_author_login = str(
+            getattr(getattr(pr, "user", None), "login", "") or ""
+        )
+        non_member_review_section = ""
+        if is_non_member:
+            stakeholders_entries = load_stakeholders(
+                Path(workspace()) / ".github" / "STAKEHOLDERS"
+            )
+            stakeholders_block = format_stakeholders_for_prompt(
+                stakeholders_entries
+            )
+            non_member_review_section = dedent(
+                f"""
+                Non-Member Review Action:
+                - The PR author (@{pr_author_login or 'unknown'}) is not a
+                  repository member or collaborator, so this review must
+                  commit to a verdict rather than just leaving comments.
+                - Choose exactly one ``verdict`` for the review, using the
+                  GitHub review event naming:
+                  - ``APPROVE`` when the PR looks ready for a human to
+                    take over.
+                  - ``REQUEST_CHANGES`` when the PR clearly needs rework
+                    before a human should spend time reviewing it.
+                  Never emit ``COMMENT`` for this PR.
+                - Identify up to {_MAX_STAKEHOLDER_REVIEWERS} ``recommended_reviewers`` from
+                  ``.github/STAKEHOLDERS`` (CODEOWNERS-style syntax; later
+                  rules override earlier ones, most specific pattern wins
+                  over catch-all rules) by matching the changed file paths
+                  against each rule. De-duplicate across files, prefer
+                  more specific rules over catch-all rules, and strip any
+                  leading ``@`` from each login. Exclude the PR author
+                  (@{pr_author_login or 'unknown'}) — GitHub rejects
+                  self-review requests.
+                - Only populate ``recommended_reviewers`` when the verdict
+                  is ``APPROVE``. Set it to an empty list on
+                  ``REQUEST_CHANGES``.
+                - Extend the ``review.json`` shape with these two fields
+                  alongside ``summary``/``comments``:
+                  {{"verdict": "APPROVE" | "REQUEST_CHANGES", "recommended_reviewers": [string, ...]}}
+                - Do not call GitHub yourself to post the review or to
+                  request reviewers — the workflow will use these fields
+                  to post the formal pull-request review and, on
+                  ``APPROVE``, request reviews from the listed logins.
+
+                Stakeholders (from ``.github/STAKEHOLDERS``):
+                {stakeholders_block}
+                """
+            ).strip()
+
         prompt = dedent(
             f"""
             Review pull request #{pr_number} in repository {owner}/{repo}.
@@ -424,6 +571,12 @@ def main() -> None:
                 "\n\n" + repo_local_section.rstrip() + "\n\nCloud Workflow Requirements:",
                 1,
             )
+        if non_member_review_section:
+            # Append the non-member review-action block after the Cloud
+            # Workflow Requirements so the base review behavior (comments
+            # etc.) is still described up front, and the additional
+            # verdict/stakeholder contract is laid out separately.
+            prompt = prompt + "\n\n" + non_member_review_section
 
         config = build_agent_config(
             config_name="review-pull-request",
@@ -444,18 +597,66 @@ def main() -> None:
             summary, comments = _normalize_review_payload(
                 review, diff_line_map, diff_content_map
             )
-            if not summary and not comments:
+            if is_non_member:
+                event, recommended_reviewers = _resolve_non_member_review_action(
+                    review,
+                    pr_author_login=pr_author_login,
+                )
+            else:
+                event = "COMMENT"
+                recommended_reviewers = []
+            if not summary and not comments and event == "COMMENT":
+                # For member PRs the legacy short-circuit stands: if the
+                # agent had nothing to say, skip posting an empty review.
+                # Non-member PRs always post so the verdict lands on the
+                # PR even when the agent has no inline comments.
                 progress.complete("I completed the review and did not identify any actionable feedback for this pull request.")
                 return
             review_body = f"{summary or 'Automated review'}\n\n{POWERED_BY_SUFFIX}"
             if comments:
-                pr.create_review(body=review_body, event="COMMENT", comments=comments)
+                pr.create_review(body=review_body, event=event, comments=comments)
             else:
-                pr.create_review(body=review_body, event="COMMENT")
-            progress.complete("I completed the review and posted feedback on this pull request.")
+                pr.create_review(body=review_body, event=event)
+            if event == "APPROVE" and recommended_reviewers:
+                try:
+                    pr.create_review_request(reviewers=recommended_reviewers)
+                except GithubException:
+                    # Requesting reviewers is best-effort — an invalid
+                    # login or a maintainer who cannot review this
+                    # repository should not fail the workflow after the
+                    # formal review has already been posted.
+                    logger.exception(
+                        "Failed to request reviewers %s for PR #%s in %s/%s",
+                        recommended_reviewers,
+                        pr_number,
+                        owner,
+                        repo,
+                    )
+            progress.complete(_format_review_completion_message(event, recommended_reviewers))
         except Exception:
             progress.report_error()
             raise
+
+
+def _format_review_completion_message(
+    event: str,
+    recommended_reviewers: list[str],
+) -> str:
+    """Build the progress-comment completion message for a posted review."""
+    if event == "APPROVE":
+        if recommended_reviewers:
+            mentions = ", ".join(f"@{login}" for login in recommended_reviewers)
+            return (
+                "I approved this pull request and requested human review from: "
+                f"{mentions}."
+            )
+        return (
+            "I approved this pull request. No matching stakeholder was found "
+            "for the changed files, so no human reviewers were requested."
+        )
+    if event == "REQUEST_CHANGES":
+        return "I requested changes on this pull request and posted feedback."
+    return "I completed the review and posted feedback on this pull request."
 
 if __name__ == "__main__":
     main()
