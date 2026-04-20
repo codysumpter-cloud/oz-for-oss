@@ -50,6 +50,19 @@ def _make_issue(
     return issue
 
 
+def _make_pr_obj(
+    *,
+    head_ref: str = "oz-agent/spec-issue-42",
+    filenames: list[str] | None = None,
+) -> MagicMock:
+    pr_obj = MagicMock()
+    pr_obj.head = SimpleNamespace(ref=head_ref)
+    pr_obj.get_files.return_value = [
+        SimpleNamespace(filename=name) for name in (filenames or ["specs/GH42/product.md"])
+    ]
+    return pr_obj
+
+
 class TriggerImplementationOnPlanApprovedTest(unittest.TestCase):
     def test_exits_silently_when_pr_is_closed(self) -> None:
         event = _make_event(pr_state="closed")
@@ -88,8 +101,7 @@ class TriggerImplementationOnPlanApprovedTest(unittest.TestCase):
             github = MagicMock()
             client.get_repo.return_value = github
 
-            pr_obj = MagicMock()
-            pr_obj.get_files.return_value = [SimpleNamespace(filename="specs/GH42/product.md")]
+            pr_obj = _make_pr_obj()
             github.get_pull.return_value = pr_obj
 
             with (
@@ -104,6 +116,66 @@ class TriggerImplementationOnPlanApprovedTest(unittest.TestCase):
         finally:
             os.unlink(event_path)
 
+    def test_exits_silently_when_pr_is_not_spec_pr(self) -> None:
+        """A non-spec PR that merely references an issue must not trigger implementation."""
+        event = _make_event()
+        event_path = _write_event(event)
+        try:
+            client = MagicMock()
+            client.close = MagicMock()
+            github = MagicMock()
+            client.get_repo.return_value = github
+
+            pr_obj = _make_pr_obj(
+                head_ref="feature/some-change",
+                filenames=["src/module.py", "README.md"],
+            )
+            github.get_pull.return_value = pr_obj
+
+            with (
+                patch.dict(os.environ, {"GITHUB_EVENT_PATH": event_path, "GITHUB_REPOSITORY": "owner/repo", "GH_TOKEN": "token"}),
+                patch("trigger_implementation_on_plan_approved.Github", return_value=client),
+                patch("trigger_implementation_on_plan_approved.Auth.Token", return_value="token"),
+                patch("trigger_implementation_on_plan_approved.resolve_issue_number_for_pr") as mock_resolve,
+                patch("create_implementation_from_issue.main") as mock_impl_main,
+            ):
+                from trigger_implementation_on_plan_approved import main
+                main()
+                mock_resolve.assert_not_called()
+                github.get_issue.assert_not_called()
+                mock_impl_main.assert_not_called()
+        finally:
+            os.unlink(event_path)
+
+    def test_treats_spec_only_pr_with_non_spec_branch_as_spec_pr(self) -> None:
+        """A PR on an unusual branch still qualifies if every changed file lives under specs/."""
+        event = _make_event()
+        event_path = _write_event(event)
+        try:
+            client = MagicMock()
+            client.close = MagicMock()
+            github = MagicMock()
+            client.get_repo.return_value = github
+
+            pr_obj = _make_pr_obj(
+                head_ref="human/edit-specs",
+                filenames=["specs/GH42/product.md", "specs/GH42/tech.md"],
+            )
+            github.get_pull.return_value = pr_obj
+
+            with (
+                patch.dict(os.environ, {"GITHUB_EVENT_PATH": event_path, "GITHUB_REPOSITORY": "owner/repo", "GH_TOKEN": "token"}),
+                patch("trigger_implementation_on_plan_approved.Github", return_value=client),
+                patch("trigger_implementation_on_plan_approved.Auth.Token", return_value="token"),
+                patch("trigger_implementation_on_plan_approved.resolve_issue_number_for_pr", return_value=None) as mock_resolve,
+            ):
+                from trigger_implementation_on_plan_approved import main
+                main()
+                # Should proceed past the spec-PR guard and attempt issue resolution.
+                mock_resolve.assert_called_once()
+        finally:
+            os.unlink(event_path)
+
     def test_exits_silently_when_issue_lacks_ready_to_implement(self) -> None:
         event = _make_event()
         event_path = _write_event(event)
@@ -113,8 +185,7 @@ class TriggerImplementationOnPlanApprovedTest(unittest.TestCase):
             github = MagicMock()
             client.get_repo.return_value = github
 
-            pr_obj = MagicMock()
-            pr_obj.get_files.return_value = [SimpleNamespace(filename="specs/GH42/product.md")]
+            pr_obj = _make_pr_obj()
             github.get_pull.return_value = pr_obj
 
             issue = _make_issue(labels=["ready-to-spec"], assignees=["oz-agent"])
@@ -141,8 +212,7 @@ class TriggerImplementationOnPlanApprovedTest(unittest.TestCase):
             github = MagicMock()
             client.get_repo.return_value = github
 
-            pr_obj = MagicMock()
-            pr_obj.get_files.return_value = [SimpleNamespace(filename="specs/GH42/product.md")]
+            pr_obj = _make_pr_obj()
             github.get_pull.return_value = pr_obj
 
             issue = _make_issue(labels=["ready-to-implement"], assignees=["some-human"])
@@ -178,8 +248,7 @@ class TriggerImplementationOnPlanApprovedTest(unittest.TestCase):
             github = MagicMock()
             client.get_repo.return_value = github
 
-            pr_obj = MagicMock()
-            pr_obj.get_files.return_value = [SimpleNamespace(filename="specs/GH42/product.md")]
+            pr_obj = _make_pr_obj()
             github.get_pull.return_value = pr_obj
 
             issue = _make_issue(

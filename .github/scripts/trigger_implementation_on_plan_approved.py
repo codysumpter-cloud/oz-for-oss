@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from contextlib import closing
 
@@ -10,8 +11,29 @@ from github import Auth, Github
 from oz_workflows.env import load_event, repo_parts, repo_slug, require_env
 from oz_workflows.helpers import (
     is_automation_user,
+    is_spec_only_pr,
     resolve_issue_number_for_pr,
 )
+
+_SPEC_BRANCH_PATTERN = re.compile(r"(?:^|/)spec-issue-\d+(?:$|[/-])")
+
+
+def _is_spec_pr(pr_obj, changed_files: list[str]) -> bool:
+    """Return True when the PR is a spec PR.
+
+    A PR counts as a spec PR if its head branch matches the agent's
+    ``oz-agent/spec-issue-{N}`` pattern, or if every changed file lives
+    under ``specs/``. This keeps the plan-approved trigger from firing on
+    arbitrary non-spec PRs that merely reference an issue in their body.
+    """
+    head_ref = ""
+    try:
+        head_ref = str(pr_obj.head.ref or "")
+    except AttributeError:
+        head_ref = ""
+    if head_ref and _SPEC_BRANCH_PATTERN.search(head_ref):
+        return True
+    return is_spec_only_pr(changed_files)
 
 
 def main() -> None:
@@ -30,6 +52,9 @@ def main() -> None:
         pr_obj = github.get_pull(int(pr["number"]))
         files = list(pr_obj.get_files())
         changed_files = [str(f.filename) for f in files]
+
+        if not _is_spec_pr(pr_obj, changed_files):
+            return
 
         issue_number = resolve_issue_number_for_pr(github, owner, repo, pr_obj, changed_files)
         if not issue_number:

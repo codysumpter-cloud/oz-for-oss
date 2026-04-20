@@ -61,16 +61,17 @@ Figma: none provided. This is a backend/workflow change with no UI beyond GitHub
 #### Scenario: `plan-approved` added to a non-spec PR
 
 1. `plan-approved` is added to a PR that is not a spec PR (i.e., not on an `oz-agent/spec-issue-{N}` branch and not modifying files under `specs/`).
-2. No implementation workflow is triggered.
+2. No implementation workflow is triggered. This guarantee holds even if the non-spec PR body references an issue number (for example, `Fixes #123`) that otherwise would resolve to an issue with `ready-to-implement`.
 
 #### Behavior rules
 
 1. **Trigger on `plan-approved` label added to a PR.** When the `plan-approved` label is added to a pull request, the system looks up the associated issue number.
-2. **Issue association uses existing logic.** The associated issue is determined from the PR branch name (e.g., `oz-agent/spec-issue-{N}`), changed spec files (e.g., `specs/GH{N}/product.md`), and PR body references. This is the same logic used by `resolve_issue_number_for_pr`.
-3. **Only trigger if `ready-to-implement` is present.** The implementation workflow is only dispatched if the associated issue has the `ready-to-implement` label and `oz-agent` is assigned. If either condition is missing, no workflow runs.
-4. **Identical implementation behavior.** The triggered implementation workflow behaves identically to one triggered by adding `ready-to-implement`. It uses the same spec context resolution, branch naming, and PR creation logic.
-5. **Bot and automation users are ignored.** If `plan-approved` was added by a bot or automation user, no workflow runs. This prevents infinite loops if automation manages labels.
-6. **The `plan-approved` trigger only fires for open PRs.** If the spec PR is closed or merged when `plan-approved` is added, no workflow runs.
+2. **Only spec PRs qualify.** Before resolving the associated issue, the trigger verifies the PR is a spec PR. A PR qualifies if its head branch matches the `oz-agent/spec-issue-{N}` pattern or if every changed file lives under `specs/`. Non-spec PRs are skipped even if their body references an issue number.
+3. **Issue association uses existing logic.** For qualifying spec PRs, the associated issue is determined from the PR branch name (e.g., `oz-agent/spec-issue-{N}`), changed spec files (e.g., `specs/GH{N}/product.md`), and PR body references. This is the same logic used by `resolve_issue_number_for_pr`.
+4. **Only trigger if `ready-to-implement` is present.** The implementation workflow is only dispatched if the associated issue has the `ready-to-implement` label and `oz-agent` is assigned. If either condition is missing, no workflow runs.
+5. **Identical implementation behavior.** The triggered implementation workflow behaves identically to one triggered by adding `ready-to-implement`. It uses the same spec context resolution, branch naming, and PR creation logic.
+6. **Bot and automation users are ignored.** If `plan-approved` was added by a bot or automation user, no workflow runs. This prevents infinite loops if automation manages labels.
+7. **The `plan-approved` trigger only fires for open PRs.** If the spec PR is closed or merged when `plan-approved` is added, no workflow runs.
 
 ### Success criteria
 

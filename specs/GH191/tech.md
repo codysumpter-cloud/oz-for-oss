@@ -15,7 +15,7 @@ The product spec requires: (1) a new GitHub Actions workflow trigger on `plan-ap
 - `.github/scripts/create_implementation_from_issue.py (70-84)` — the no-op guard that blocks implementation when spec PRs exist but none are labeled `plan-approved`.
 - `.github/scripts/oz_workflows/helpers.py (759-791)` — `find_matching_spec_prs()` which separates spec PRs into approved and unapproved lists based on the `plan-approved` label.
 - `.github/scripts/oz_workflows/helpers.py (806-849)` — `resolve_spec_context_for_issue()` which builds the spec context used by the implementation workflow.
-- `.github/scripts/oz_workflows/helpers.py (916-950)` — `resolve_issue_number_for_pr()` which determines the associated issue number from a PR's branch name, changed files, and body references.
+- `.github/scripts/oz_workflows/helpers.py (926-950)` — `resolve_issue_number_for_pr()` which determines the associated issue number from a PR's branch name, changed files, and body references.
 - `.github/scripts/oz_workflows/helpers.py (953-957)` — `is_spec_only_pr()` which checks whether all changed files live under `specs/`.
 
 ### Current state
@@ -86,10 +86,11 @@ This script is the core logic. It:
 1. Loads the `pull_request_target` event payload.
 2. Checks that the labeled label is `plan-approved` and the PR is open (defense in depth beyond the YAML condition).
 3. Checks that the sender is not a bot/automation user via `is_automation_user()`.
-4. Resolves the associated issue number using `resolve_issue_number_for_pr()`.
-5. If no associated issue is found, exits silently.
-6. Fetches the associated issue and checks that it has the `ready-to-implement` label and `oz-agent` in its assignees.
-7. If conditions are met, calls the same implementation logic by dispatching the `create-implementation-from-issue` workflow via the GitHub API (`workflow_dispatch` or by directly invoking the reusable workflow).
+4. Verifies the PR is a spec PR before resolving an associated issue. The PR qualifies if its head branch matches the `oz-agent/spec-issue-{N}` pattern or if `is_spec_only_pr(changed_files)` is true. This prevents a non-spec PR that merely references an issue in its body (e.g., `Fixes #123`) from triggering implementation.
+5. Resolves the associated issue number using `resolve_issue_number_for_pr()`.
+6. If no associated issue is found, exits silently.
+7. Fetches the associated issue and checks that it has the `ready-to-implement` label and `oz-agent` in its assignees.
+8. If conditions are met, calls the same implementation logic by dispatching the `create-implementation-from-issue` workflow via the GitHub API (`workflow_dispatch` or by directly invoking the reusable workflow).
 
 **Approach for dispatching the implementation workflow:**
 
@@ -116,6 +117,11 @@ def main() -> None:
         pr_obj = github.get_pull(int(pr["number"]))
         files = list(pr_obj.get_files())
         changed_files = [str(f.filename) for f in files]
+
+        # Only spec PRs should retrigger implementation.
+        if not _is_spec_pr(pr_obj, changed_files):
+            return
+
         issue_number = resolve_issue_number_for_pr(github, owner, repo, pr_obj, changed_files)
         if not issue_number:
             return
@@ -142,14 +148,20 @@ def main() -> None:
             "sender": event.get("sender", {}),
         }
 
-        # Write synthetic event to a temp file and point GITHUB_EVENT_PATH to it
-        tmp_event_path = Path(tempfile.mktemp(suffix=".json"))
-        tmp_event_path.write_text(json.dumps(synthetic_event), encoding="utf-8")
-        os.environ["GITHUB_EVENT_PATH"] = str(tmp_event_path)
+        # Write synthetic event to a temp file and point GITHUB_EVENT_PATH to it.
+        # Use tempfile.mkstemp (not the deprecated tempfile.mktemp) to avoid the
+        # TOCTOU race and clean the file up in a finally block.
+        tmp_fd, tmp_event_path = tempfile.mkstemp(suffix=".json")
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as handle:
+                json.dump(synthetic_event, handle)
+            os.environ["GITHUB_EVENT_PATH"] = tmp_event_path
 
-        # Run the implementation workflow
-        from create_implementation_from_issue import main as run_implementation
-        run_implementation()
+            from create_implementation_from_issue import main as run_implementation
+            run_implementation()
+        finally:
+            if os.path.exists(tmp_event_path):
+                os.unlink(tmp_event_path)
 ```
 
 This approach is clean because:
@@ -159,12 +171,22 @@ This approach is clean because:
 
 #### 4. Concurrency considerations
 
-The new workflow uses its own concurrency group keyed on the PR number. The implementation workflow it dispatches uses a concurrency group keyed on the issue number (from `create-implementation-from-issue-local.yml`). Since the new script calls `create_implementation_from_issue.main()` inline rather than dispatching a separate workflow run, both concurrency groups apply — the outer one from the plan-approved workflow prevents concurrent plan-approved triggers on the same PR, and the implementation logic itself is protected by the issue-level group if triggered separately.
+The plan-approved trigger and the standard `ready-to-implement` trigger run under distinct concurrency groups:
 
-If `ready-to-implement` is added and the no-op fires, then `plan-approved` is added shortly after, the implementation will run from the plan-approved trigger. If `plan-approved` is added first and `ready-to-implement` is added shortly after, the standard trigger will run and find the approved spec context. There is no race condition that produces duplicate runs because:
-- The no-op case does not create a branch or PR.
-- The plan-approved trigger only fires when `ready-to-implement` is already present.
-- If both happen simultaneously, GitHub's concurrency group on the issue number ensures only one implementation run proceeds.
+- The plan-approved local workflow uses `trigger-impl-plan-approved-{PR_number}`. This serializes repeated `plan-approved` label events on the same spec PR, but it does **not** serialize against the standard implementation workflow.
+- The standard implementation workflow uses `create-implementation-issue-{issue_number}`. This serializes the `ready-to-implement` and related triggers per issue, but does not apply to the plan-approved workflow because the plan-approved workflow calls `create_implementation_from_issue.main()` inline inside its own workflow run rather than dispatching the standard workflow.
+
+The result is a narrow race window: if `ready-to-implement` and `plan-approved` are added close enough in time that both label events fire before either workflow has completed, two workers could end up invoking `create_implementation_from_issue.main()` concurrently for the same issue. In that case:
+
+- Both runs resolve the same target branch. `create_implementation_from_issue.py` checks for an already-open PR on that branch before creating one (`get_pulls(state="open", head=...)`) and edits the existing PR instead of creating a duplicate. GitHub additionally rejects a second `create_pull` on an identical head/base pair, so at most one PR is created per branch.
+- Each run still invokes the agent, which is wasteful but does not produce duplicate PRs or corrupt state.
+
+This is accepted as a narrow-window risk. If it becomes a problem in practice, the script can be extended to short-circuit when a concurrent run is detected (for example, by querying recent `create-implementation-from-issue` workflow runs for the issue), but we are not implementing that gating in this change.
+
+Other sequencing outcomes are safe:
+
+- `ready-to-implement` added, standard trigger no-ops (plan-approved is missing), `plan-approved` added later → plan-approved trigger runs the implementation once.
+- `plan-approved` added first → plan-approved trigger exits because `ready-to-implement` is not yet present. `ready-to-implement` added later → standard trigger runs the implementation once.
 
 ### End-to-end flow
 
@@ -196,7 +218,10 @@ If `ready-to-implement` is added and the no-op fires, then `plan-approved` is ad
 ### Risks and mitigations
 
 **Risk: Duplicate implementation runs if both labels are added near-simultaneously.**
-Mitigation: The implementation workflow's concurrency group (`create-implementation-issue-{N}`) serializes runs per issue. If the no-op run completes before the plan-approved trigger runs, the plan-approved trigger will proceed. If they overlap, the concurrency group queues them. The no-op case does not produce a branch, so the subsequent run starts fresh.
+Mitigation: Because the plan-approved workflow calls `create_implementation_from_issue.main()` inline, the two triggers use different concurrency groups and do not serialize against each other. In the rare case that both runs reach the implementation step concurrently, `create_implementation_from_issue.py` detects the existing PR on the target branch and updates it instead of creating a duplicate, and GitHub rejects a second `create_pull` for an identical head/base pair. The worst case is one wasted agent run rather than duplicate PRs.
+
+**Risk: Non-spec PR body references an issue and trips the trigger.**
+Mitigation: Before resolving the issue number, the script checks that the PR is a spec PR by matching the head branch against `oz-agent/spec-issue-{N}` or using `is_spec_only_pr(changed_files)`. Non-spec PRs (e.g. a feature PR whose body says `Fixes #123`) are filtered out even if they would otherwise resolve an issue via `resolve_issue_number_for_pr`.
 
 **Risk: Synthetic event payload missing fields expected by the implementation script.**
 Mitigation: The synthetic event includes the exact fields read by `create_implementation_from_issue.py`: `event["issue"]` (number, title, body, labels, assignees), `event["repository"]` (default_branch), and `event.get("comment")` (absent, which is handled). The `event.get("sender")` is passed through from the PR event for co-author resolution.
