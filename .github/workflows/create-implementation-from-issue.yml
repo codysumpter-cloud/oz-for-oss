@@ -68,5 +68,7 @@ jobs:
           WARP_AGENT_MODEL: ${{ vars.WARP_AGENT_MODEL || '' }}
           WARP_AGENT_MCP: ${{ vars.WARP_AGENT_MCP || '' }}
           WARP_ENVIRONMENT_ID: ${{ vars.WARP_ENVIRONMENT_ID || '' }}
+          WARP_API_BASE_URL: https://staging.warp.dev/api/v1
+          WARP_ORIGIN_TOKEN_ENV_NAME: STAGING_ORIGIN_TOKEN
           STAGING_ORIGIN_TOKEN: ${{ steps.staging_origin_token.outputs.token }}
         run: python "${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/create_implementation_from_issue.py"
