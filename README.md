@@ -1,28 +1,10 @@
 # oz-for-oss
 
-`oz-for-oss` is a Python-first automation repository for Oz-backed GitHub workflows. Its primary output is the workflow and hub-action logic that triages issues, generates implementation plans, creates implementation diffs, enforces repository policy, and reviews pull requests.
+Oz for OSS contains a set of workflows to help manage the overhead of maintaining open-source project. It consists of workflows that trigger Oz agents to triage issues, generate product and tech specs, create implementation PRs, and reviews pull requests.
 
-## Primary artifacts
+The automation is organized as GitHub Actions workflows under `.github/workflows/` that invoke Python entrypoints in `.github/scripts/` (with shared helpers in `.github/scripts/oz_workflows/`), backed by triage label definitions in `.github/issue-triage/`, a CODEOWNERS-style stakeholder map in `.github/STAKEHOLDERS`, and committed spec artifacts under `specs/GH{number}/product.md` and `specs/GH{number}/tech.md`. Together these cover issue triage, product and tech spec creation, issue implementation scaffolding, PR issue-state enforcement, PR review orchestration, and unready-assignment guidance for Oz.
 
-- `.github/workflows/` contains the GitHub Actions workflows that trigger Oz automation.
-- `.github/scripts/` contains the Python entrypoints that those workflows execute.
-- `.github/scripts/oz_workflows/` contains shared helpers for GitHub Actions outputs, environment loading, GitHub API access, artifact retrieval, and Oz client integration.
-- `.github/issue-triage/` contains triage label definitions used during issue triage.
-- `.github/STAKEHOLDERS` maps repository path patterns to subject-matter expert GitHub usernames, using CODEOWNERS-style syntax.
-- `specs/` stores committed product and technical spec artifacts associated with issues, organized as `specs/GH{number}/product.md` and `specs/GH{number}/tech.md`.
-
-## Workflow surface
-
-This repository currently automates:
-
-- issue triage
-- product and tech spec creation
-- issue implementation scaffolding
-- PR issue-state enforcement
-- PR review orchestration
-- unready-assignment guidance for Oz
-
-## Setting up a target repository
+## How to use these workflows in your own repo
 
 To use the `oz-for-oss` reusable workflows in another repository, you need a GitHub App installation, a set of GitHub Actions secrets and variables, and local adapter workflows that call the reusable layer.
 
@@ -79,7 +61,9 @@ Each adapter is deliberately thin — it defines the GitHub event triggers and c
 
 ### 4. Bootstrap triage configuration (optional)
 
-If you want the triage agent to apply area and status labels, run the `bootstrap-issue-config` skill on your target repository. This generates `.github/issue-triage/config.json` and `.github/STAKEHOLDERS`. See the [Bootstrapping triage configuration](#bootstrapping-triage-configuration) section for details.
+If you want the triage agent to apply area and status labels, run the `bootstrap-issue-config` skill on your target repository. The skill fetches existing labels and classifies them into area, feature, and status categories; analyzes recent issues and issue templates to discover additional labels; generates or updates `.github/issue-triage/config.json` with label definitions (colors and descriptions); generates or updates `.github/STAKEHOLDERS` by inspecting CODEOWNERS, recent git contributors, and existing stakeholder information; and creates any missing labels on the repository via the GitHub API.
+
+The skill is idempotent — re-running it merges new discoveries with existing configuration rather than overwriting it. The `config.json` file contains **only** label definitions; stakeholder ownership is managed separately in `.github/STAKEHOLDERS`, which uses the same glob-based syntax as GitHub CODEOWNERS files.
 
 ## Local development
 
@@ -109,23 +93,3 @@ Common entrypoints include:
 - `.github/scripts/create_implementation_from_issue.py`
 - `.github/scripts/enforce_pr_issue_state.py`
 - `.github/scripts/review_pr.py`
-
-## Bootstrapping triage configuration
-
-To set up or update the issue triage configuration for a repository, use the `bootstrap-issue-config` skill. This skill:
-
-1. Fetches existing labels from the repository and classifies them into area, feature, and status categories.
-2. Analyzes recent issues and issue templates to discover additional labels.
-3. Generates or updates `.github/issue-triage/config.json` with label definitions (colors and descriptions).
-4. Generates or updates `.github/STAKEHOLDERS` by inspecting CODEOWNERS, recent git contributors, and existing stakeholder information.
-5. Creates any missing labels on the repository via the GitHub API.
-
-The skill is idempotent — re-running it merges new discoveries with existing configuration rather than overwriting it.
-
-The `config.json` file contains **only** label definitions. Stakeholder ownership is managed separately in the `.github/STAKEHOLDERS` file, which uses the same glob-based syntax as GitHub CODEOWNERS files.
-
-## Repository conventions
-
-- Production logic in this repository lives in the Python automation and workflow definitions, not in a shipping application binary or CLI.
-- Shared workflow and hub-action helpers should live in `.github/scripts/oz_workflows/` so they can be reused by multiple workflow entrypoints.
-- Workflow dependency installation is driven by `.github/scripts/requirements.txt`.
