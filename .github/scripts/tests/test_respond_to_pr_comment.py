@@ -149,6 +149,26 @@ class RunImplementationPrRefreshTest(unittest.TestCase):
         pr.edit.assert_not_called()
         mock_load_metadata.assert_not_called()
 
+    def test_raises_when_metadata_branch_does_not_match_head_branch(self) -> None:
+        # Guard against the agent uploading pr-metadata.json for the
+        # wrong branch. If branch_name doesn't match the PR's head ref,
+        # something is off -- refuse to refresh the PR title/body rather
+        # than overwriting it with content that may not describe what the
+        # head branch actually contains.
+        metadata = {
+            "branch_name": "oz-agent/some-other-branch",
+            "pr_title": "feat: implement retry logic on top of spec",
+            "pr_summary": "Closes #42\n\n## Summary\nMismatched branch.",
+        }
+        with self.assertRaises(RuntimeError) as ctx:
+            self._run(
+                branch_updated=True,
+                pr_metadata=metadata,
+            )
+        self.assertIn("branch_name", str(ctx.exception))
+        self.assertIn("oz-agent/some-other-branch", str(ctx.exception))
+        self.assertIn("oz-agent/spec-issue-42", str(ctx.exception))
+
 
 class RunImplementationPromptTest(unittest.TestCase):
     """Verify the prompt instructs the agent about pr-metadata.json."""

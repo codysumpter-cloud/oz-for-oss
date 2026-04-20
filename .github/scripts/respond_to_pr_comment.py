@@ -281,6 +281,20 @@ def _run_implementation(
         pr_description_refreshed = False
         pr_metadata = try_load_pr_metadata_artifact(run.run_id)
         if pr_metadata is not None:
+            # The agent is instructed to push to the PR's head branch and
+            # to set `branch_name` to that same branch. If the uploaded
+            # metadata points at a different branch something has gone
+            # wrong (the agent pushed to the wrong branch or produced
+            # stale metadata), so refuse to refresh the PR description
+            # rather than overwriting it with content that may not
+            # describe what the head branch actually contains.
+            metadata_branch = pr_metadata.get("branch_name", "")
+            if metadata_branch != head_branch:
+                raise RuntimeError(
+                    f"pr-metadata.json branch_name {metadata_branch!r} does not "
+                    f"match the PR head branch {head_branch!r}; refusing to "
+                    f"refresh the PR title and description."
+                )
             pr.edit(
                 title=pr_metadata["pr_title"],
                 body=pr_metadata["pr_summary"],
