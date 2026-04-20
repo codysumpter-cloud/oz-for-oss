@@ -1,19 +1,24 @@
 from __future__ import annotations
 
-import subprocess
-from pathlib import Path
 from textwrap import dedent
 
 from oz_workflows.env import optional_env, repo_parts, workspace
 from oz_workflows.oz_client import build_agent_config, run_agent
-from oz_workflows.repo_local import WriteSurfaceViolation, assert_write_surface
+from oz_workflows.repo_local import (
+    WriteSurfaceViolation,
+    maybe_push_update_branch,
+)
 
 
 UPDATE_BRANCH = "oz-agent/update-pr-review"
+# Write surface is strictly the review companions. The issue-triage config
+# is owned by ``update-triage`` (and the triage label taxonomy is a triage
+# signal, not a PR-review signal). Letting this loop edit it would create
+# dual-ownership and could silently mutate triage config from misclassified
+# PR feedback.
 ALLOWED_PREFIXES: tuple[str, ...] = (
     ".agents/skills/review-pr-local/",
     ".agents/skills/review-spec-local/",
-    ".github/issue-triage/",
 )
 
 
@@ -33,8 +38,8 @@ def main() -> None:
         - The aggregated feedback includes a `review_type` field per PR: `"code"` or `"spec"`.
         - Route feedback from `"code"` PRs to `.agents/skills/review-pr-local/SKILL.md` and feedback from `"spec"` PRs to `.agents/skills/review-spec-local/SKILL.md`.
         - Do NOT edit the core skills at `.agents/skills/review-pr/SKILL.md` or `.agents/skills/review-spec/SKILL.md`. They are the cross-repo contract and are read-only from this loop.
-        - Do NOT edit any file under `.github/scripts/`. The prompt-construction layer is also read-only from this loop.
-        - The allowed write surface is strictly `.agents/skills/review-pr-local/`, `.agents/skills/review-spec-local/`, and `.github/issue-triage/`.
+        - Do NOT edit any file under `.github/scripts/` or under `.github/issue-triage/`. The prompt-construction layer and the triage label taxonomy are out of scope for this loop.
+        - The allowed write surface is strictly `.agents/skills/review-pr-local/` and `.agents/skills/review-spec-local/`.
         - Update each companion skill independently based on its category of feedback. Skip a companion if its category has no actionable feedback.
         - If you produce changes, commit them to a local branch named `{UPDATE_BRANCH}` but do NOT push the branch yourself. The Python entrypoint will run a write-surface guard and push only when the guard passes.
         - If no companion update is warranted based on the feedback, do not create a commit. Leave the working tree clean.
@@ -52,53 +57,21 @@ def main() -> None:
         config=config,
     )
 
-    maybe_push_update_branch(workspace(), UPDATE_BRANCH)
-
-
-def maybe_push_update_branch(repo_root: Path, branch: str) -> None:
-    """Enforce the write surface, then push ``branch`` to origin when a diff exists.
-
-    When the agent leaves a local commit on ``branch``, collect the changed
-    paths against ``origin/main`` and pass them to ``assert_write_surface``.
-    A violation aborts the loop rather than silently widening the surface.
-    When no local commit exists, do nothing.
-    """
-    if not _branch_exists(repo_root, branch):
-        return
-    changed_files = _changed_files_since_origin_main(repo_root, branch)
-    if not changed_files:
-        return
-    assert_write_surface(
-        changed_files,
+    maybe_push_update_branch(
+        workspace(),
+        UPDATE_BRANCH,
         allowed_prefixes=list(ALLOWED_PREFIXES),
         loop_name="update-pr-review",
+        pr_title="chore: update PR review companion skills from feedback",
+        pr_body=(
+            "Automated update from the `update-pr-review` self-improvement loop.\n\n"
+            "This PR proposes evidence-backed edits to "
+            "`.agents/skills/review-pr-local/SKILL.md` and/or "
+            "`.agents/skills/review-spec-local/SKILL.md` based on recent "
+            "human PR review feedback."
+        ),
+        reviewer="captainsafia",
     )
-    subprocess.run(
-        ["git", "push", "origin", branch],
-        cwd=str(repo_root),
-        check=True,
-    )
-
-
-def _branch_exists(repo_root: Path, branch: str) -> bool:
-    result = subprocess.run(
-        ["git", "rev-parse", "--verify", f"refs/heads/{branch}"],
-        cwd=str(repo_root),
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0
-
-
-def _changed_files_since_origin_main(repo_root: Path, branch: str) -> list[str]:
-    result = subprocess.run(
-        ["git", "diff", "--name-only", f"origin/main...{branch}"],
-        cwd=str(repo_root),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return [line for line in result.stdout.splitlines() if line.strip()]
 
 
 if __name__ == "__main__":

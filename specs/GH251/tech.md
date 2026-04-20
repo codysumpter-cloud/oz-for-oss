@@ -161,13 +161,16 @@ Update `.agents/skills/update-pr-review/SKILL.md`:
 Update `.github/scripts/update_pr_review.py`:
 
 - Update the dedented prompt to name the `-local` skill files as the write targets.
-- Restructure the control flow so the Python entrypoint, not the agent, gates the push. Today the agent commits and pushes `oz-agent/update-pr-review`; that must change. Instruct the agent via its prompt to leave a local commit on `oz-agent/update-pr-review` without pushing and to exit once the commit is staged. Then run `git diff --name-only origin/main...oz-agent/update-pr-review` in `update_pr_review.py` and fail if any path is outside `.agents/skills/review-pr-local/`, `.agents/skills/review-spec-local/`, or `.github/issue-triage/`. Only push the branch when the guard passes.
+- Restructure the control flow so the Python entrypoint, not the agent, gates the push. Today the agent commits and pushes `oz-agent/update-pr-review`; that must change. Instruct the agent via its prompt to leave a local commit on `oz-agent/update-pr-review` without pushing and to exit once the commit is staged. Then run `git diff --name-only origin/main...oz-agent/update-pr-review` in `update_pr_review.py` and fail if any path is outside `.agents/skills/review-pr-local/` or `.agents/skills/review-spec-local/`. Only push the branch when the guard passes. `.github/issue-triage/` is intentionally excluded from this loop's write surface because the triage label taxonomy is a triage signal, not a review signal, and is owned by `update-triage`.
+- After the guard passes and the branch is pushed, the Python entrypoint opens a pull request itself (via `gh pr create`, tagging `@captainsafia`) rather than relying on the agent to open the PR. The agent's prompt no longer has an "open a pull request" instruction; removing that step without the entrypoint taking it over would leave the branch pushed silently with no reviewer notified.
+
+Factor the push/PR plumbing into `oz_workflows/repo_local.py` (or a new `oz_workflows/push_guard.py`) so `update_pr_review.py`, `update_triage.py`, and `update_dedupe.py` share one implementation of `branch_exists`, `changed_files_since_origin_main`, and `maybe_push_update_branch`. Each entrypoint then only declares its own `ALLOWED_PREFIXES`, PR title, and PR body; future guard-logic changes land in a single place.
 
 Add a new script `.github/scripts/update_triage.py` modeled on `update_pr_review.py`:
 
 - Aggregation: add `.agents/skills/update-triage/scripts/aggregate_triage_feedback.py` that queries the GitHub API for signals relevant to triage (issues triaged in the last N days, subsequent label changes by maintainers, re-opens, follow-up comments). Closed-as-duplicate signals are intentionally excluded and are handled by the separate `update-dedupe` loop described below. Output a temp JSON payload analogous to `aggregate_review_feedback.py`.
 - Prompt: instruct the `update-triage` skill to propose minimum-viable edits to `.agents/skills/triage-issue-local/SKILL.md`, and to update `.github/issue-triage/config.json` only when a label taxonomy change is warranted.
-- Branch/PR: branch `oz-agent/update-triage`, tag `@captainsafia` for review, reuse the same app-token and Oz-agent plumbing as `update_pr_review.py`.
+- Branch/PR: branch `oz-agent/update-triage`, tag `@captainsafia` for review, reuse the same app-token, Oz-agent plumbing, and shared `maybe_push_update_branch` helper as `update_pr_review.py`. The entrypoint opens the PR itself via `gh pr create` after the push succeeds.
 - Write-surface guard: same push-gating control flow as `update_pr_review.py`, with allowed prefixes `.agents/skills/triage-issue-local/` and `.github/issue-triage/`.
 
 Add new skill `.agents/skills/update-triage/SKILL.md` and bundled aggregation script, following the shape of `.agents/skills/update-pr-review/`.
@@ -179,7 +182,7 @@ Add new workflow wrappers:
 
 Add a sibling `update-dedupe` loop that owns the closed-as-duplicate signal:
 
-- `.github/scripts/update_dedupe.py` modeled on `update_triage.py`, with aggregation script `.agents/skills/update-dedupe/scripts/aggregate_dedupe_feedback.py` that queries only closed-as-duplicate events and their canonical-issue links.
+- `.github/scripts/update_dedupe.py` modeled on `update_triage.py` and using the same shared push/PR helper, with aggregation script `.agents/skills/update-dedupe/scripts/aggregate_dedupe_feedback.py`. The aggregator limits itself to issues GitHub itself recorded as closed with the duplicate close reason (`state_reason == "duplicate"`) and resolves each duplicate's canonical issue from the issue timeline's `marked_as_duplicate` event. Ad-hoc maintainer comments that merely mention another issue number (for example "see also #50") are intentionally ignored: pattern-matching on prose would feed false positives into the learning loop that the `update-dedupe` agent then has to reason away.
 - Skill `.agents/skills/update-dedupe/SKILL.md` instructs the agent to propose minimum-viable edits to `.agents/skills/dedupe-issue-local/SKILL.md` only. Its write-surface guard allows only `.agents/skills/dedupe-issue-local/`.
 - Workflow wrappers `.github/workflows/update-dedupe.yml` and `.github/workflows/update-dedupe-local.yml`, scheduled weekly with `workflow_dispatch`.
 
@@ -187,8 +190,9 @@ Add a sibling `update-dedupe` loop that owns the closed-as-duplicate signal:
 
 Extend `.agents/skills/bootstrap-issue-config/SKILL.md`:
 
-- When bootstrapping a new consumer repository, scaffold empty `<agent>-local/SKILL.md` files for `review-pr`, `review-spec`, `triage-issue`, and `dedupe-issue` with only the frontmatter block and a short "no rules yet" body. This is the minimum that lets the prompt-construction layer and self-improvement loops treat the files as absent until a real rule lands.
-- The exact content of the scaffold should mirror the companion files checked into this repo.
+- Do **not** materialize empty `<agent>-local/SKILL.md` scaffolds during bootstrap. The prompt-construction layer already treats a missing file and a body-only frontmatter stub as equivalent, so an empty scaffold has no behavioral value and only adds review churn.
+- Bootstrap only documents the companion directory convention (`<agent>-local/` for `review-pr`, `review-spec`, `triage-issue`, `dedupe-issue`). Each companion file is created on-demand by the matching `update-<agent>` self-improvement loop (or by a maintainer) the first time there is evidence-backed content to add.
+- If a companion file already exists in the target repo, leave it untouched; bootstrap is additive.
 
 #### 6. Documentation
 

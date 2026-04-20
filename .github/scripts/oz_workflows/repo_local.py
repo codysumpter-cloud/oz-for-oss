@@ -11,6 +11,7 @@ references (not inlines) the companion file when one exists.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 
@@ -119,3 +120,115 @@ def assert_write_surface(
             f"{loop_name} attempted to write outside its allowed surface. "
             f"Disallowed paths: {pretty}. Allowed prefixes: {allowed}."
         )
+
+
+# Shared push/PR plumbing for the narrowed self-improvement loops.
+#
+# Each ``update-<agent>`` Python entrypoint invokes Oz, which leaves a
+# local commit on ``oz-agent/update-<agent>`` without pushing. The
+# entrypoint then calls :func:`maybe_push_update_branch` to run the
+# write-surface guard, push the branch to ``origin`` only when the guard
+# passes, and open a pull request so a human reviewer is notified.
+
+
+def branch_exists(repo_root: Path, branch: str) -> bool:
+    """Return ``True`` when ``refs/heads/<branch>`` exists under *repo_root*."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", f"refs/heads/{branch}"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+def changed_files_since_origin_main(repo_root: Path, branch: str) -> list[str]:
+    """Return the list of paths changed on *branch* relative to ``origin/main``."""
+    result = subprocess.run(
+        ["git", "diff", "--name-only", f"origin/main...{branch}"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return [line for line in result.stdout.splitlines() if line.strip()]
+
+
+def _pr_exists_for_branch(repo_root: Path, branch: str) -> bool:
+    """Return ``True`` when an open PR already targets *branch* as its head.
+
+    Uses ``gh pr list --head`` which scopes to open PRs by default. Returns
+    ``False`` on any gh/authentication error so the caller falls back to
+    attempting ``gh pr create`` and surfaces any real failure from there.
+    """
+    result = subprocess.run(
+        ["gh", "pr", "list", "--head", branch, "--json", "number"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False
+    stdout = result.stdout.strip()
+    # ``gh pr list --json number`` returns ``[]`` when there are no open PRs
+    # against the head and a non-empty JSON array when there is at least one.
+    return bool(stdout) and stdout != "[]"
+
+
+def maybe_push_update_branch(
+    repo_root: Path,
+    branch: str,
+    *,
+    allowed_prefixes: list[str],
+    loop_name: str,
+    pr_title: str,
+    pr_body: str,
+    base_branch: str = "main",
+    reviewer: str | None = None,
+) -> None:
+    """Enforce the write surface, push *branch*, and open a PR if one is missing.
+
+    When the agent left a local commit on *branch*, collect the changed
+    paths against ``origin/main`` and pass them to
+    :func:`assert_write_surface`. A violation aborts the loop rather than
+    silently widening the surface. When the guard passes the branch is
+    pushed and a PR is opened (tagging *reviewer* when provided) so a human
+    reviewer is notified instead of the branch landing silently. When no
+    local commit exists, do nothing.
+    """
+    if not branch_exists(repo_root, branch):
+        return
+    changed_files = changed_files_since_origin_main(repo_root, branch)
+    if not changed_files:
+        return
+    assert_write_surface(
+        changed_files,
+        allowed_prefixes=allowed_prefixes,
+        loop_name=loop_name,
+    )
+    subprocess.run(
+        ["git", "push", "origin", branch],
+        cwd=str(repo_root),
+        check=True,
+    )
+    # Creating the PR is the new notification step. Prior versions of each
+    # entrypoint told the agent to open the PR itself; pulling that into
+    # the Python entrypoint ensures the branch is never pushed silently.
+    if _pr_exists_for_branch(repo_root, branch):
+        return
+    create_cmd = [
+        "gh",
+        "pr",
+        "create",
+        "--head",
+        branch,
+        "--base",
+        base_branch,
+        "--title",
+        pr_title,
+        "--body",
+        pr_body,
+    ]
+    if reviewer:
+        create_cmd.extend(["--reviewer", reviewer])
+    subprocess.run(create_cmd, cwd=str(repo_root), check=True)

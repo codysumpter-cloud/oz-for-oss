@@ -43,7 +43,7 @@ gh auth status
 python3 .agents/skills/update-dedupe/scripts/aggregate_dedupe_feedback.py
 ```
 
-By default this targets the current repo and looks back 7 days. It collects issues closed with `state_reason == "not_planned"` or with an explicit duplicate reference, and records the canonical issue each was closed against. The script writes structured JSON to a temporary file and prints the path.
+By default this targets the current repo and looks back 7 days. It collects only issues GitHub itself recorded as closed with the *duplicate* close reason (`state_reason == "duplicate"`) and looks up the canonical issue each was closed against via the issue timeline's `marked_as_duplicate` event. Ad-hoc maintainer comments that merely mention another issue are intentionally ignored to avoid false positives. The script writes structured JSON to a temporary file and prints the path.
 
 3. Read the generated JSON and look for repeated clusters:
 

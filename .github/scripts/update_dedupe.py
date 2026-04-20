@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import subprocess
-from pathlib import Path
 from textwrap import dedent
 
 from oz_workflows.env import optional_env, repo_parts, workspace
 from oz_workflows.oz_client import build_agent_config, run_agent
-from oz_workflows.repo_local import WriteSurfaceViolation, assert_write_surface
+from oz_workflows.repo_local import (
+    WriteSurfaceViolation,
+    maybe_push_update_branch,
+)
 
 
 UPDATE_BRANCH = "oz-agent/update-dedupe"
@@ -49,47 +50,20 @@ def main() -> None:
         config=config,
     )
 
-    maybe_push_update_branch(workspace(), UPDATE_BRANCH)
-
-
-def maybe_push_update_branch(repo_root: Path, branch: str) -> None:
-    """Enforce the write surface, then push ``branch`` to origin when a diff exists."""
-    if not _branch_exists(repo_root, branch):
-        return
-    changed_files = _changed_files_since_origin_main(repo_root, branch)
-    if not changed_files:
-        return
-    assert_write_surface(
-        changed_files,
+    maybe_push_update_branch(
+        workspace(),
+        UPDATE_BRANCH,
         allowed_prefixes=list(ALLOWED_PREFIXES),
         loop_name="update-dedupe",
+        pr_title="chore: update dedupe companion skill from closed-as-duplicate signals",
+        pr_body=(
+            "Automated update from the `update-dedupe` self-improvement loop.\n\n"
+            "This PR proposes evidence-backed edits to "
+            "`.agents/skills/dedupe-issue-local/SKILL.md` based on recent "
+            "closed-as-duplicate events and their canonical-issue links."
+        ),
+        reviewer="captainsafia",
     )
-    subprocess.run(
-        ["git", "push", "origin", branch],
-        cwd=str(repo_root),
-        check=True,
-    )
-
-
-def _branch_exists(repo_root: Path, branch: str) -> bool:
-    result = subprocess.run(
-        ["git", "rev-parse", "--verify", f"refs/heads/{branch}"],
-        cwd=str(repo_root),
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0
-
-
-def _changed_files_since_origin_main(repo_root: Path, branch: str) -> list[str]:
-    result = subprocess.run(
-        ["git", "diff", "--name-only", f"origin/main...{branch}"],
-        cwd=str(repo_root),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return [line for line in result.stdout.splitlines() if line.strip()]
 
 
 if __name__ == "__main__":

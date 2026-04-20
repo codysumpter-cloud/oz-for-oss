@@ -65,32 +65,18 @@ This skill produces two files:
   ```
 - Skip labels that already exist (the `gh label create` command will error on duplicates — ignore those errors).
 
-### 6. Scaffold repo-local companion skills
+### 6. Note repo-local companion skills (do not scaffold)
 
-For each reusable agent role that supports a repo-specific companion, scaffold an empty companion skill so future self-improvement runs have a target to write into:
+The reusable agent roles that support a repo-specific companion are:
 
 - `.agents/skills/review-pr-local/SKILL.md`
 - `.agents/skills/review-spec-local/SKILL.md`
 - `.agents/skills/triage-issue-local/SKILL.md`
 - `.agents/skills/dedupe-issue-local/SKILL.md`
 
-Each scaffold contains only YAML frontmatter and a short "no rules yet" body so the prompt-construction layer treats the file as absent (the helper `resolve_repo_local_skill_path` returns `None` until real rules land). Example content for `review-pr-local/SKILL.md`:
+Do **not** create these files during bootstrap. The prompt-construction layer treats a missing companion file and a body-only frontmatter stub the same way, so there is no value in materializing an empty file during bootstrap. Each file gets created on-demand by the matching `update-<agent>` self-improvement loop (or by a maintainer) the first time there is evidence-backed content to add. Bootstrap only needs to ensure the directory convention is documented; the files themselves stay absent until a real rule lands.
 
-```
----
-name: review-pr-local
-specializes: review-pr
-description: Repo-specific review guidance for this repository. Only the categories declared overridable by the core review-pr skill may be specialized here.
----
-
-# Repo-specific review guidance
-
-No repo-specific rules yet.
-```
-
-Apply the same shape to the other three companion files, adjusting `name` and `specializes` to match the companion being scaffolded. Do not populate the body with rules during bootstrap; that is the job of the matching `update-<agent>` self-improvement loop once there is evidence-backed feedback.
-
-Skip any companion file that already exists in the repo; bootstrap is additive.
+If a companion file already exists in the repo, leave it untouched; bootstrap is additive.
 
 ### 7. Validate and summarize
 
@@ -98,7 +84,7 @@ Skip any companion file that already exists in the repo; bootstrap is additive.
 - Print a short summary of:
   - How many labels were discovered vs. newly created.
   - How many stakeholder entries were written.
-  - Which companion skill scaffolds were created vs. already present.
+  - Which repo-local companion skills are already present in the repo (if any).
   - Any warnings (e.g. no issues found, no CODEOWNERS file).
 
 ## Idempotency

@@ -24,7 +24,7 @@ Repo-specific rules already exist, but they live in the wrong places: hardcoded 
 - Each reusable agent skill in `.agents/skills/<agent>/SKILL.md` becomes a stable, cross-repo contract that self-improvement loops never rewrite.
 - Every reusable agent that has repo-tunable behavior has a clearly defined repo-specific companion location where preferences, heuristics, and taxonomies live.
 - The repo-specific layer is loaded as additional prompt context at runtime by the existing `.github/scripts/*` entrypoints and is clearly fenced so the agent knows which guidance is repo-specific.
-- Each self-improvement loop only ever writes to the repo-specific layer and to `.github/issue-triage/*`, never to `.agents/skills/<agent>/SKILL.md` or `.github/scripts/*`.
+- Each self-improvement loop only ever writes to its own repo-specific layer (and, for `update-triage` only, to `.github/issue-triage/*`), never to `.agents/skills/<agent>/SKILL.md` or `.github/scripts/*`. The `update-pr-review` loop in particular does not own the triage label taxonomy and must not write to `.github/issue-triage/`.
 - A new `update-triage` self-improvement loop exists and updates repo-specific triage heuristics weekly, following the same shape as `update-pr-review`.
 - A new `update-dedupe` self-improvement loop exists and consumes closed-as-duplicate signals specifically, writing only to the dedupe companion skill.
 - The pattern is documented in `docs/platform.md` so other repos adopting `oz-for-oss` understand how to extend it.
@@ -100,12 +100,13 @@ Each `update-<agent>` self-improvement loop:
 
 The loop must skip producing a PR when there is no repeated signal. "Repeated" means the same repo-specific pattern is corroborated by at least two independent threads or a single explicit maintainer statement. One-off reviewer preferences must not be encoded as rules.
 
-The loop's allowed write surface is strictly limited to:
+Each loop's allowed write surface is strictly scoped to the files it owns:
 
-- `.agents/skills/<agent>-local/` (and equivalent repo-specific files)
-- `.github/issue-triage/*`
+- `update-pr-review`: `.agents/skills/review-pr-local/` and `.agents/skills/review-spec-local/`
+- `update-triage`: `.agents/skills/triage-issue-local/` and `.github/issue-triage/*`
+- `update-dedupe`: `.agents/skills/dedupe-issue-local/`
 
-Writes outside that surface — in particular to `.agents/skills/<agent>/SKILL.md` or `.github/scripts/*` — must fail fast rather than silently continue.
+Writes outside that surface — in particular to `.agents/skills/<agent>/SKILL.md` or `.github/scripts/*` — must fail fast rather than silently continue. Two loops must never share ownership of the same file; for example, the triage label taxonomy (`.github/issue-triage/*`) is owned by `update-triage` only.
 
 #### Invariants
 
@@ -128,7 +129,7 @@ Writes outside that surface — in particular to `.agents/skills/<agent>/SKILL.m
 - `.agents/skills/review-pr/SKILL.md`, `.agents/skills/review-spec/SKILL.md`, `.agents/skills/triage-issue/SKILL.md`, and `.agents/skills/dedupe-issue/SKILL.md` contain only cross-repo contract content; they explicitly enumerate the categories a companion skill may override.
 - Companion skills exist at `.agents/skills/review-pr-local/SKILL.md`, `.agents/skills/review-spec-local/SKILL.md`, `.agents/skills/triage-issue-local/SKILL.md`, and `.agents/skills/dedupe-issue-local/SKILL.md` containing the repo-specific rules previously embedded in the core skills or hardcoded in Python.
 - `review_pr.py` includes the matching companion file in the review prompt when it exists, fenced and labeled as repo-specific, and silently omits it when absent.
-- `triage_new_issues.py` reads `triage-issue-local` and `dedupe-issue-local` companion files instead of hardcoding per-owner/repo guidance. The existing Warp-specific branch in `triage_heuristics_prompt()` is removed from Python and moved into the companion skill.
+- `triage_new_issues.py` reads `triage-issue-local` and `dedupe-issue-local` companion files instead of hardcoding per-owner/repo guidance. The existing Warp-specific branch in `triage_heuristics_prompt()` is removed from Python; the prose it used to return lands in `warpdotdev/Warp`'s own `.agents/skills/triage-issue-local/SKILL.md` (not in `oz-for-oss`), and the Python conditional is removed only once that companion is in place. `oz-for-oss`'s own companion ships with generic content or remains absent so it does not leak Warp-specific guidance to other consumers.
 - `update-pr-review` writes only to `.agents/skills/review-pr-local/SKILL.md` and `.agents/skills/review-spec-local/SKILL.md`. Any attempt to write to the core skill files fails.
 - A new `update-triage` loop is scheduled weekly (mirroring `update-pr-review-local.yml`) and, when it produces a PR, the diff touches only `.agents/skills/triage-issue-local/SKILL.md`, `.agents/skills/dedupe-issue-local/SKILL.md`, or files under `.github/issue-triage/`.
 - `docs/platform.md` documents the pattern, with a section explaining the core-vs-local split and listing the existing companion skills.
@@ -146,5 +147,5 @@ Writes outside that surface — in particular to `.agents/skills/<agent>/SKILL.m
 ### Open questions
 
 - Whether the repo-specific layer should be shared across related agents (for example a single `review-local` skill consumed by both `review-pr` and `review-spec`) or kept strictly per-agent.
-- How to bootstrap the repo-specific layer when a repository first adopts `oz-for-oss`. Current assumption: extend the existing `bootstrap-issue-config` skill to also scaffold empty companion skill files with the correct frontmatter and a short "no rules yet" body.
+- How to bootstrap the repo-specific layer when a repository first adopts `oz-for-oss`. Current assumption: bootstrap does not materialize empty companion files. The prompt-construction layer already treats a missing file and a body-only frontmatter stub as equivalent, so the directories stay absent until the matching `update-<agent>` loop (or a maintainer) lands a file with real content.
 - Whether an `update-implementation` loop is worth shipping. This spec defers it until there is clearer signal.

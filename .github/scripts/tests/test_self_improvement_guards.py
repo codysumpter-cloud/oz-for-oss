@@ -23,7 +23,6 @@ class UpdatePrReviewGuardTest(unittest.TestCase):
             [
                 ".agents/skills/review-pr-local/SKILL.md",
                 ".agents/skills/review-spec-local/SKILL.md",
-                ".github/issue-triage/config.json",
             ],
             allowed_prefixes=list(update_pr_review.ALLOWED_PREFIXES),
             loop_name="update-pr-review",
@@ -41,6 +40,17 @@ class UpdatePrReviewGuardTest(unittest.TestCase):
         with self.assertRaises(WriteSurfaceViolation):
             assert_write_surface(
                 [".github/scripts/review_pr.py"],
+                allowed_prefixes=list(update_pr_review.ALLOWED_PREFIXES),
+                loop_name="update-pr-review",
+            )
+
+    def test_rejects_diff_touching_issue_triage_config(self) -> None:
+        # ``.github/issue-triage/`` is owned by ``update-triage``; allowing
+        # ``update-pr-review`` to edit it would create dual-ownership and
+        # could silently mutate triage config from PR-review feedback.
+        with self.assertRaises(WriteSurfaceViolation):
+            assert_write_surface(
+                [".github/issue-triage/config.json"],
                 allowed_prefixes=list(update_pr_review.ALLOWED_PREFIXES),
                 loop_name="update-pr-review",
             )

@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """Aggregate recent closed-as-duplicate signals into JSON.
 
-The output feeds the ``update-dedupe`` self-improvement loop. Signals
-collected: issues closed as duplicates (``state_reason == "not_planned"``
-with a ``duplicate`` label or an explicit maintainer comment pointing at a
-canonical thread), along with the inferred canonical issue.
+The output feeds the ``update-dedupe`` self-improvement loop. A signal is
+an issue that GitHub recorded as closed with the *duplicate* close reason
+(``state_reason == "duplicate"``). The canonical issue each duplicate was
+closed against is looked up on the issue timeline via the
+``marked_as_duplicate`` event so the aggregation only reports signals the
+GitHub UI itself treats as duplicates; ad-hoc maintainer comments that
+merely mention an issue cross-reference are intentionally ignored to
+avoid feeding false positives into the dedupe learning loop.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import re
 import subprocess
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -19,11 +22,6 @@ from typing import Any
 
 
 DEFAULT_REPO = "warpdotdev/oz-for-oss"
-ORG_MEMBER_ASSOCIATIONS = {"COLLABORATOR", "MEMBER", "OWNER"}
-DUPLICATE_PATTERN = re.compile(
-    r"(?:duplicate\s+of|dup(?:licate)?\s*(?:of)?\s*)?#(\d+)",
-    re.IGNORECASE,
-)
 
 
 def _gh_api(args: list[str]) -> Any:
@@ -46,43 +44,54 @@ def _since(days: int) -> datetime:
     return datetime.now(timezone.utc) - timedelta(days=days)
 
 
-def _issue_has_duplicate_label(issue: dict[str, Any]) -> bool:
-    labels = issue.get("labels") or []
-    for label in labels:
-        name = label.get("name") if isinstance(label, dict) else ""
-        if name == "duplicate":
-            return True
-    return False
-
-
-def _canonical_candidates_from_comments(
+def _canonical_from_timeline(
     repo: str, issue_number: int
-) -> list[int]:
+) -> tuple[int | None, str | None]:
+    """Return (canonical_issue_number, canonical_html_url) for *issue_number*.
+
+    Reads the issue timeline for ``marked_as_duplicate`` events and returns
+    the most recent such link. When no such event exists the function
+    returns ``(None, None)``; callers should treat that as "GitHub recorded
+    the close reason as duplicate but did not link a canonical issue".
+    """
     try:
-        comments = _gh_api(
+        events = _gh_api(
             [
                 "--paginate",
-                f"repos/{repo}/issues/{issue_number}/comments",
+                "-H",
+                "Accept: application/vnd.github.mockingbird-preview+json",
+                f"repos/{repo}/issues/{issue_number}/timeline",
             ]
         )
     except subprocess.CalledProcessError:
-        return []
-    candidates: list[int] = []
-    for comment in comments:
-        if not isinstance(comment, dict):
+        return None, None
+    if not isinstance(events, list):
+        return None, None
+    canonical_number: int | None = None
+    canonical_url: str | None = None
+    for event in events:
+        if not isinstance(event, dict):
             continue
-        association = comment.get("author_association") or "NONE"
-        if association not in ORG_MEMBER_ASSOCIATIONS:
+        if event.get("event") != "marked_as_duplicate":
             continue
-        body = comment.get("body") or ""
-        for match in DUPLICATE_PATTERN.finditer(body):
-            try:
-                num = int(match.group(1))
-            except (TypeError, ValueError):
-                continue
-            if num and num != issue_number and num not in candidates:
-                candidates.append(num)
-    return candidates
+        # GitHub exposes the canonical issue under either
+        # ``new_issue`` (the issue this one was closed against) or via
+        # ``issue`` on the inverse ``unmarked_as_duplicate`` event. We
+        # only care about the ``marked_as_duplicate`` side.
+        candidate = event.get("new_issue") or event.get("source") or {}
+        if not isinstance(candidate, dict):
+            continue
+        number = candidate.get("number")
+        try:
+            number_int = int(number) if number is not None else None
+        except (TypeError, ValueError):
+            number_int = None
+        if not number_int or number_int == issue_number:
+            continue
+        url = candidate.get("html_url") or candidate.get("url") or ""
+        canonical_number = number_int
+        canonical_url = str(url) if url else None
+    return canonical_number, canonical_url
 
 
 def build_payload(repo: str, days: int) -> dict[str, Any]:
@@ -109,13 +118,15 @@ def build_payload(repo: str, days: int) -> dict[str, Any]:
             continue
         if when < cutoff:
             continue
-        state_reason = issue.get("state_reason") or ""
-        has_dup_label = _issue_has_duplicate_label(issue)
-        if state_reason != "not_planned" and not has_dup_label:
+        # Only count issues GitHub itself recorded as closed with the
+        # duplicate reason. The legacy ``duplicate`` label alone is not
+        # sufficient — it may be present on open issues or on issues that
+        # were later closed for unrelated reasons.
+        if (issue.get("state_reason") or "") != "duplicate":
             continue
 
         issue_number = int(issue.get("number") or 0)
-        canonical_candidates = _canonical_candidates_from_comments(
+        canonical_number, canonical_url = _canonical_from_timeline(
             repo, issue_number
         )
         records.append(
@@ -124,9 +135,8 @@ def build_payload(repo: str, days: int) -> dict[str, Any]:
                 "title": issue.get("title") or "",
                 "url": issue.get("html_url") or "",
                 "closed_at": closed_at,
-                "state_reason": state_reason,
-                "has_duplicate_label": has_dup_label,
-                "canonical_candidates": canonical_candidates,
+                "canonical_issue_number": canonical_number,
+                "canonical_issue_url": canonical_url,
             }
         )
 

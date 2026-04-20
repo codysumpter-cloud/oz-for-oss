@@ -15,13 +15,13 @@ This self-improvement loop may only write to:
 
 - `.agents/skills/review-pr-local/` (and `SKILL.md` inside it)
 - `.agents/skills/review-spec-local/` (and `SKILL.md` inside it)
-- `.github/issue-triage/*`
 
 It must NOT touch:
 
 - `.agents/skills/review-pr/SKILL.md` (the core contract)
 - `.agents/skills/review-spec/SKILL.md` (the core contract)
 - any file under `.github/scripts/`
+- any file under `.github/issue-triage/` (that taxonomy is owned by the `update-triage` loop)
 - any other core skill
 
 The Python entrypoint (`update_pr_review.py`) enforces this via a `git diff` check against allowed prefixes before pushing. A violation aborts the run.
