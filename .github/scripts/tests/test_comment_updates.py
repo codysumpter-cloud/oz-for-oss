@@ -89,7 +89,12 @@ class CommentUpdateTest(unittest.TestCase):
         self.assertNotIn("https://example.test/session/123", body)
         self.assertIn("You can view [the conversation on Warp](https://example.test/conversation/456).", body)
 
-    def test_separate_runs_create_separate_comments(self) -> None:
+    def test_sequential_runs_adopt_single_comment(self) -> None:
+        # When a second workflow run starts after the first one's
+        # progress comment is already visible, the second run must
+        # adopt and update that comment instead of creating a new one.
+        # This is the basic (non-racing) form of the concurrency
+        # deduplication behavior.
         github = FakeGitHubClient()
         run1 = WorkflowProgressComment(
             github,
@@ -113,13 +118,101 @@ class CommentUpdateTest(unittest.TestCase):
         run2.start("I've started triaging this issue.")
         run2.record_session_link("https://example.test/session/run2")
 
-        self.assertEqual(len(github.comments), 2)
-        body1 = github.comments[0]["body"]
-        body2 = github.comments[1]["body"]
-        self.assertIn("session/run1", body1)
-        self.assertNotIn("session/run2", body1)
-        self.assertIn("session/run2", body2)
-        self.assertNotIn("session/run1", body2)
+        self.assertEqual(len(github.comments), 1)
+        body = github.comments[0]["body"]
+        # The adopted comment keeps run1's session link updated to run2's
+        # (the session-link section replaces in-place on append).
+        self.assertIn("session/run2", body)
+        self.assertNotIn("session/run1", body)
+        # Metadata marker on the surviving comment is exactly one marker.
+        self.assertEqual(body.count("<!-- oz-agent-metadata:"), 1)
+
+    def test_concurrent_runs_dedupe_to_single_comment(self) -> None:
+        # Reproduces issue #210: two workflow runs racing against each
+        # other both list comments, see no match, and create their own
+        # progress comment before either learns of the other. The
+        # dedupe step must converge on a single canonical comment.
+        github = FakeGitHubClient()
+        run1 = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="triage-new-issues",
+            requester_login="alice",
+        )
+        run2 = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="triage-new-issues",
+            requester_login="alice",
+        )
+
+        # Force run2's initial list (inside _get_or_find_existing_comment)
+        # to return empty so run2 thinks no comment exists and creates
+        # its own, even though run1 has already created one. Subsequent
+        # list calls use the real implementation so dedupe can see both.
+        original_list = run2._list_comments
+        remaining_overrides = [[]]
+
+        def list_override() -> list[object]:
+            if remaining_overrides:
+                return remaining_overrides.pop(0)  # type: ignore[return-value]
+            return original_list()
+
+        run2._list_comments = list_override  # type: ignore[method-assign]
+
+        run1.start("I've started triaging this issue.")
+        run2.start("I've started triaging this issue.")
+
+        # Only one progress comment should remain after dedupe.
+        self.assertEqual(len(github.comments), 1)
+        # Both runs converge on the same (lowest-numbered) comment id.
+        self.assertIsNotNone(run1.comment_id)
+        self.assertEqual(run1.comment_id, run2.comment_id)
+
+    def test_concurrent_runs_share_canonical_comment_on_updates(self) -> None:
+        # After the concurrent-create race resolves, subsequent progress
+        # updates from the losing run must flow into the canonical
+        # (surviving) comment rather than creating new ones.
+        github = FakeGitHubClient()
+        run1 = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="triage-new-issues",
+            requester_login="alice",
+        )
+        run2 = WorkflowProgressComment(
+            github,
+            "acme",
+            "widgets",
+            42,
+            workflow="triage-new-issues",
+            requester_login="alice",
+        )
+        original_list = run2._list_comments
+        remaining_overrides = [[]]
+
+        def list_override() -> list[object]:
+            if remaining_overrides:
+                return remaining_overrides.pop(0)  # type: ignore[return-value]
+            return original_list()
+
+        run2._list_comments = list_override  # type: ignore[method-assign]
+
+        run1.start("I've started triaging this issue.")
+        run2.start("I've started triaging this issue.")
+        run2.record_session_link("https://example.test/session/run2")
+        run2.complete("I finished triaging.")
+
+        self.assertEqual(len(github.comments), 1)
+        body = github.comments[0]["body"]
+        self.assertIn("I finished triaging.", body)
+        self.assertIn("session/run2", body)
 
     def test_cleanup_deletes_comment_from_any_run(self) -> None:
         github = FakeGitHubClient()
@@ -245,7 +338,10 @@ class ReviewReplyProgressCommentTest(unittest.TestCase):
         replies_in_thread = [c for c in pr.review_comments if c.get("in_reply_to_id") == 100]
         self.assertEqual(len(replies_in_thread), 1)
 
-    def test_separate_runs_create_separate_review_replies(self) -> None:
+    def test_sequential_runs_adopt_single_review_reply(self) -> None:
+        # Two runs of the same review-reply workflow for the same trigger
+        # comment must converge on a single in-thread reply rather than
+        # posting a fresh reply per run.
         github = FakeGitHubClient()
         pr = FakePullRequest(trigger_comment_id=100)
         run1 = WorkflowProgressComment(
@@ -270,9 +366,10 @@ class ReviewReplyProgressCommentTest(unittest.TestCase):
         run2.start("Second run start.")
 
         replies = [c for c in pr.review_comments if c.get("in_reply_to_id") == 100]
-        self.assertEqual(len(replies), 2)
+        self.assertEqual(len(replies), 1)
+        # Run2 adopted run1's reply and appended its own start line.
         self.assertIn("First run start.", replies[0]["body"])
-        self.assertIn("Second run start.", replies[1]["body"])
+        self.assertIn("Second run start.", replies[0]["body"])
 
     def test_dedupes_duplicate_replies_from_retried_post(self) -> None:
         # Simulate PyGitHub's default retry policy retrying POST on a 5xx

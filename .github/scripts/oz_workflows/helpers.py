@@ -747,40 +747,67 @@ class WorkflowProgressComment:
                 build_comment_body("\n\n".join(normalized_sections), self.metadata),
             )
             created_id = int(get_field(created, "id"))
-            self._dedupe_duplicate_created_comments(keep_id=created_id)
-            self.comment_id = created_id
+            self.comment_id = self._dedupe_duplicate_created_comments(created_id=created_id)
             return
-        updated_body = append_comment_sections(str(get_field(existing, "body") or ""), self.metadata, normalized_sections)
+        existing_body = str(get_field(existing, "body") or "")
+        # Strip any workflow metadata marker already in the body before
+        # re-appending with our own marker. This matters when we adopt a
+        # concurrent or prior sibling run's comment, whose run-specific
+        # marker would otherwise be treated as a body section and
+        # duplicated alongside ours.
+        existing_body = _strip_workflow_metadata(existing_body, self._workflow_prefix)
+        updated_body = append_comment_sections(existing_body, self.metadata, normalized_sections)
         self._update_comment(int(get_field(existing, "id")), updated_body)
         self.comment_id = int(get_field(existing, "id"))
 
-    def _dedupe_duplicate_created_comments(self, *, keep_id: int) -> None:
-        """Delete any stray comments matching this run's metadata marker.
+    def _dedupe_duplicate_created_comments(self, *, created_id: int) -> int:
+        """Consolidate progress comments for this workflow+issue.
 
-        PyGitHub's default retry policy retries POST requests on 5xx
-        responses. When GitHub returns a 5xx but actually processed the
-        create-comment request server-side, those retries produce duplicate
-        comments that all share this run's unique ``run_id`` metadata
-        marker. Remove them here so the progress comment stays as a single
-        entry; best-effort, since the duplicates are cosmetic.
+        Two situations can leave duplicate progress comments behind:
+
+        - PyGitHub's default retry policy retries POST requests on 5xx
+          responses. When GitHub returns a 5xx but actually processed the
+          create-comment request server-side, those retries produce
+          duplicates that all share this run's unique ``run_id`` marker.
+        - Two concurrent workflow runs (e.g. rapid ``issue_comment``
+          events or an ``issue_comment`` plus ``issues`` event) can both
+          list comments, see no existing match, and create their own
+          comment before either learns of the other. The resulting
+          comments share the stable workflow+issue prefix but have
+          different run-specific markers.
+
+        In both cases, gather every progress comment for this
+        workflow+issue, keep the oldest (lowest-numbered) as the
+        canonical entry, and delete the rest. Return the id of the
+        canonical comment so the caller can adopt it as its own
+        ``comment_id``. This is deterministic across concurrent runs:
+        both runs pick the same canonical id even if their dedupe passes
+        interleave with the other's create. Best-effort: if listing the
+        comments fails, fall back to the just-created id.
         """
         try:
             comments = self._list_comments()
         except Exception:
-            return
-        for comment in comments:
-            comment_id = int(get_field(comment, "id") or 0)
-            if comment_id == keep_id or comment_id <= 0:
-                continue
-            body = get_field(comment, "body")
-            if not isinstance(body, str) or self.metadata not in body:
-                continue
+            return created_id
+        match_ids = sorted(
+            int(get_field(comment, "id") or 0)
+            for comment in comments
+            if isinstance(get_field(comment, "body"), str)
+            and self._workflow_prefix in (get_field(comment, "body") or "")
+        )
+        match_ids = [cid for cid in match_ids if cid > 0]
+        if not match_ids:
+            return created_id
+        canonical_id = match_ids[0]
+        for comment_id in match_ids[1:]:
             try:
                 self._delete_comment(comment_id)
             except Exception:
-                # Deleting duplicates is best-effort; leave extras in place
-                # rather than letting cleanup errors abort the workflow.
+                # Deleting duplicates is best-effort; leave extras in
+                # place rather than letting cleanup errors abort the
+                # workflow.
                 continue
+        return canonical_id
 
     def _find_any_workflow_comment(self) -> IssueComment | PullRequestComment | None:
         """Find any progress comment for this workflow on this issue, regardless of run."""
@@ -801,18 +828,26 @@ class WorkflowProgressComment:
                 return self._get_comment(self.comment_id)
             except UnknownObjectException:
                 self.comment_id = None
+        # Scan by the stable workflow+issue prefix rather than this run's
+        # unique marker so concurrent runs of the same workflow converge
+        # on a single comment. If a sibling run has already created one,
+        # adopt it instead of creating a duplicate.
         comments = self._list_comments()
-        existing = next(
-            (
-                comment
-                for comment in comments
-                if isinstance(get_field(comment, "body"), str) and self.metadata in str(get_field(comment, "body") or "")
-            ),
-            None,
-        )
-        if existing:
-            self.comment_id = int(get_field(existing, "id"))
-        return existing
+        matches = [
+            comment
+            for comment in comments
+            if isinstance(get_field(comment, "body"), str)
+            and self._workflow_prefix in str(get_field(comment, "body") or "")
+        ]
+        if not matches:
+            return None
+        # If multiple matches already exist (e.g. a previous run left
+        # duplicates behind), adopt the oldest so every run picks the
+        # same canonical entry.
+        matches.sort(key=lambda comment: int(get_field(comment, "id") or 0))
+        canonical = matches[0]
+        self.comment_id = int(get_field(canonical, "id"))
+        return canonical
 
     def _list_comments(self) -> list[IssueComment] | list[PullRequestComment]:
         """List candidate progress comments for the current scope."""
