@@ -7,7 +7,10 @@ from github import Auth, Github
 from github.PullRequest import PullRequest
 from github.Repository import Repository
 
-from oz_workflows.artifacts import try_load_resolved_review_comments_artifact
+from oz_workflows.artifacts import (
+    try_load_pr_metadata_artifact,
+    try_load_resolved_review_comments_artifact,
+)
 from oz_workflows.env import load_event, optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.helpers import (
     all_review_comments_text,
@@ -212,6 +215,14 @@ def _run_implementation(
         - Do not open or update the pull request yourself.
         - If no implementation diff is warranted, do not push the branch.
 
+        PR Description Refresh:
+        - If your changes materially change what this PR contains (for example, adding implementation code on top of a PR that previously only contained spec changes, or otherwise substantially broadening or narrowing the PR's scope), write `pr-metadata.json` at the repository root containing a JSON object with these required fields so the workflow can refresh the PR title and body:
+          - `branch_name`: the branch you pushed to (use `{head_branch}` exactly).
+          - `pr_title`: a conventional-commit-style PR title that reflects the PR's current combined scope (e.g. `feat: add retry logic for transient API failures` when implementation has been added on top of a spec PR).
+          - `pr_summary`: the full markdown PR body reflecting the PR's current combined scope. When the original PR body started with `Closes #<issue_number>` or `Fixes #<issue_number>`, preserve that line at the top so GitHub still auto-closes the linked issue when the PR merges.
+        - After writing `pr-metadata.json`, upload it as an artifact via `oz-dev artifact upload pr-metadata.json`. The subcommand is `artifact` (singular); do not use `artifacts`.
+        - If your changes are minor tweaks that do not change the PR's scope (for example, fixing a typo in a spec, adjusting wording, or small bug fixes within the PR's existing scope), do not write or upload `pr-metadata.json`. Leaving it out signals that the existing PR title and description should remain unchanged.
+
         Resolved Review Comment Reporting:
         - If any of your changes addresses one or more existing PR review comments (inline comments on the code in this PR, as surfaced in the review context above), record them so the workflow can close the loop on those review threads.
         - Only include review comments whose underlying concern is actually resolved by the change you produced in this run. Do not guess or speculate.
@@ -261,6 +272,35 @@ def _run_implementation(
             progress.complete("I analyzed the request but did not produce any changes.")
             return
 
+        # Refresh the PR title/body when the agent's changes materially
+        # changed the PR's scope (for example, adding implementation
+        # commits on top of a spec-only PR). The agent signals this by
+        # uploading pr-metadata.json; when the artifact is absent we
+        # leave the existing description untouched because the changes
+        # were meant to stay within the PR's current scope.
+        pr_description_refreshed = False
+        pr_metadata = try_load_pr_metadata_artifact(run.run_id)
+        if pr_metadata is not None:
+            # The agent is instructed to push to the PR's head branch and
+            # to set `branch_name` to that same branch. If the uploaded
+            # metadata points at a different branch something has gone
+            # wrong (the agent pushed to the wrong branch or produced
+            # stale metadata), so refuse to refresh the PR description
+            # rather than overwriting it with content that may not
+            # describe what the head branch actually contains.
+            metadata_branch = pr_metadata.get("branch_name", "")
+            if metadata_branch != head_branch:
+                raise RuntimeError(
+                    f"pr-metadata.json branch_name {metadata_branch!r} does not "
+                    f"match the PR head branch {head_branch!r}; refusing to "
+                    f"refresh the PR title and description."
+                )
+            pr.edit(
+                title=pr_metadata["pr_title"],
+                body=pr_metadata["pr_summary"],
+            )
+            pr_description_refreshed = True
+
         # Only honor the resolved-review-comments payload when the branch
         # was actually updated. Without a code change there is nothing to
         # tie the "resolved" claim back to, so skip replies/thread
@@ -278,6 +318,10 @@ def _run_implementation(
         completion_sections = [
             "I pushed changes to this PR based on the comment.",
         ]
+        if pr_description_refreshed:
+            completion_sections.append(
+                "Refreshed the PR title and description to reflect the PR's updated scope."
+            )
         if resolved_review_comments:
             count = len(resolved_review_comments)
             noun = "review comment" if count == 1 else "review comments"
