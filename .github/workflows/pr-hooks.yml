@@ -80,12 +80,18 @@ jobs:
       pr_number: ${{ github.event.pull_request.number }}
   review_pr_after_enforcement:
     needs: [enforce_issue_state]
+    # Skip the downstream PR review when the enforcement job already
+    # posted an agent review via the non-member review gate. That gate
+    # leaves its own APPROVE or REQUEST_CHANGES review on the PR, so
+    # running the general review flow here would post a second,
+    # duplicate review from oz-agent.
     if: >-
       github.event_name == 'pull_request_target' &&
       github.event.action != 'synchronize' &&
       github.event.pull_request.draft == false &&
       !startsWith(github.event.pull_request.head.ref, 'cherrypick') &&
-      needs.enforce_issue_state.outputs.allow_review == 'true'
+      needs.enforce_issue_state.outputs.allow_review == 'true' &&
+      needs.enforce_issue_state.outputs.agent_verdict == ''
     uses: ./.github/workflows/review-pull-request.yml
     with:
       pr_number: ${{ github.event.pull_request.number }}
