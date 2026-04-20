@@ -1,6 +1,6 @@
 # oz-for-oss
 
-`oz-for-oss` is a Python-first automation repository for Oz-backed GitHub workflows. Its primary output is the workflow and hub-action logic that triages issues, generates implementation plans, creates implementation diffs, enforces repository policy, and reviews pull requests.
+Oz for OSS contains a set of workflows to help manage the overhead of maintaining open-source project. It consists of workflows that trigger Oz agents to triage issues, generate product and tech specs, create implementation PRs, and reviews pull requests.
 
 The automation is organized as GitHub Actions workflows under `.github/workflows/` that invoke Python entrypoints in `.github/scripts/` (with shared helpers in `.github/scripts/oz_workflows/`), backed by triage label definitions in `.github/issue-triage/`, a CODEOWNERS-style stakeholder map in `.github/STAKEHOLDERS`, and committed spec artifacts under `specs/GH{number}/product.md` and `specs/GH{number}/tech.md`. Together these cover issue triage, product and tech spec creation, issue implementation scaffolding, PR issue-state enforcement, PR review orchestration, and unready-assignment guidance for Oz.
 
@@ -93,9 +93,3 @@ Common entrypoints include:
 - `.github/scripts/create_implementation_from_issue.py`
 - `.github/scripts/enforce_pr_issue_state.py`
 - `.github/scripts/review_pr.py`
-
-## Repository conventions
-
-- Production logic in this repository lives in the Python automation and workflow definitions, not in a shipping application binary or CLI.
-- Shared workflow and hub-action helpers should live in `.github/scripts/oz_workflows/` so they can be reused by multiple workflow entrypoints.
-- Workflow dependency installation is driven by `.github/scripts/requirements.txt`.
