@@ -101,9 +101,8 @@ class RunImplementationPrRefreshTest(unittest.TestCase):
                     },
                     "sender": {"login": "alice"},
                 },
-                triggering_body="Please implement this spec",
-                additional_context="",
-                context_label="All PR discussion context (org members only)",
+                trigger_comment_id=9001,
+                trigger_kind="conversation",
                 requester="alice",
             )
             return pr, mock_load_metadata
@@ -217,6 +216,7 @@ class RunImplementationPromptTest(unittest.TestCase):
                 return_value=[],
             ),
         ):
+            unique_body = "ATTACKER_PROMPT_INJECTION_NEEDLE_42"
             _run_implementation(
                 client,
                 github,
@@ -224,12 +224,11 @@ class RunImplementationPromptTest(unittest.TestCase):
                 "repo",
                 pr,
                 event={
-                    "comment": {"user": {"login": "alice"}, "body": "implement"},
+                    "comment": {"user": {"login": "alice"}, "body": unique_body},
                     "sender": {"login": "alice"},
                 },
-                triggering_body="implement",
-                additional_context="",
-                context_label="All PR discussion context (org members only)",
+                trigger_comment_id=9001,
+                trigger_kind="conversation",
                 requester="alice",
             )
 
@@ -241,6 +240,14 @@ class RunImplementationPromptTest(unittest.TestCase):
         # The prompt must describe when to write the artifact and when to
         # skip it so small tweaks don't churn the PR description.
         self.assertIn("materially change", prompt)
+        # The prompt must instruct the agent to fetch issue/PR content via
+        # the supported fetch script rather than have it inlined into the
+        # prompt. The triggering comment body must not be inlined.
+        self.assertIn("fetch_github_context.py", prompt)
+        self.assertIn("pr --repo owner/repo --number 10", prompt)
+        self.assertNotIn(unique_body, prompt)
+        # The PR body set on the fake PR must also not be inlined.
+        self.assertNotIn("Spec for retry logic", prompt)
 
 
 if __name__ == "__main__":
