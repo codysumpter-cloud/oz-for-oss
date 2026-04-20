@@ -141,7 +141,9 @@ class CreateImplementationFromIssuePromptTest(unittest.TestCase):
             ".agents/skills/implement-specs/scripts/fetch_github_context.py issue --repo owner/repo --number 123",
             prompt,
         )
-        self.assertIn("--include-untrusted", prompt)
+        # The prompt must not offer an --include-untrusted escape hatch:
+        # non-member comments are dropped entirely by the fetch script.
+        self.assertNotIn("--include-untrusted", prompt)
         # The trust-boundary framing must be present so the agent treats the
         # script as the only supported way to read issue content.
         self.assertIn("only supported way", prompt)

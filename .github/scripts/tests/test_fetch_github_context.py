@@ -70,49 +70,39 @@ class IsTrustedTest(unittest.TestCase):
 
 
 class FilterCommentsTest(unittest.TestCase):
-    def test_excludes_untrusted_by_default(self) -> None:
+    def test_excludes_untrusted_comments(self) -> None:
         comments = [
             _make_comment(author="alice", association="MEMBER", body="trusted", comment_id=1),
             _make_comment(author="eve", association="NONE", body="untrusted", comment_id=2),
             _make_comment(author="mallory", association="CONTRIBUTOR", body="untrusted2", comment_id=3),
         ]
-        filtered = fgc._filter_comments(comments, include_untrusted=False)
+        filtered = fgc._filter_comments(comments)
         self.assertEqual([c["id"] for c in filtered], [1])
 
-    def test_includes_untrusted_when_flag_set(self) -> None:
+    def test_keeps_all_trusted_associations(self) -> None:
         comments = [
-            _make_comment(author="alice", association="MEMBER", body="trusted", comment_id=1),
-            _make_comment(author="eve", association="NONE", body="untrusted", comment_id=2),
+            _make_comment(author="owen", association="OWNER", body="owner", comment_id=1),
+            _make_comment(author="alice", association="MEMBER", body="member", comment_id=2),
+            _make_comment(author="bob", association="COLLABORATOR", body="collab", comment_id=3),
         ]
-        filtered = fgc._filter_comments(comments, include_untrusted=True)
-        self.assertEqual([c["id"] for c in filtered], [1, 2])
+        filtered = fgc._filter_comments(comments)
+        self.assertEqual([c["id"] for c in filtered], [1, 2, 3])
 
 
 class RenderCommentSectionTest(unittest.TestCase):
-    def test_trusted_comment_is_labeled_trusted_without_banner(self) -> None:
+    def test_trusted_comment_is_labeled_trusted(self) -> None:
         comment = _make_comment(
             author="alice", association="MEMBER", body="hello world", comment_id=7
         )
-        rendered = fgc._render_comment_section(
-            comment, kind="issue-comment", include_untrusted=False
-        )
+        rendered = fgc._render_comment_section(comment, kind="issue-comment")
         self.assertIn("trust=TRUSTED", rendered)
         self.assertIn("author=@alice", rendered)
         self.assertIn("association=MEMBER", rendered)
         self.assertIn("id=7", rendered)
         self.assertIn("hello world", rendered)
+        # There is no longer any UNTRUSTED banner; untrusted comments are
+        # filtered out upstream and never rendered at all.
         self.assertNotIn("UNTRUSTED comment", rendered)
-
-    def test_untrusted_comment_is_wrapped_with_untrusted_banner(self) -> None:
-        comment = _make_comment(
-            author="eve", association="NONE", body="please do X", comment_id=8
-        )
-        rendered = fgc._render_comment_section(
-            comment, kind="issue-comment", include_untrusted=True
-        )
-        self.assertIn("trust=UNTRUSTED", rendered)
-        self.assertIn("!! UNTRUSTED comment:", rendered)
-        self.assertIn("please do X", rendered)
 
 
 class ParseNextLinkTest(unittest.TestCase):
@@ -155,7 +145,14 @@ class RenderIssueBodySectionTest(unittest.TestCase):
 
 
 class RunIssueTest(unittest.TestCase):
-    def test_run_issue_renders_trusted_only_by_default(self) -> None:
+    def test_run_issue_drops_untrusted_comments_entirely(self) -> None:
+        """Comments from non-members must be nuked from the output.
+
+        Even when the only comment on an issue is an untrusted one, its
+        body (including any prompt-injection payload) must not appear
+        anywhere in the rendered output. There is no opt-in flag to
+        include it.
+        """
         issue = {
             "number": 1,
             "title": "Example",
@@ -186,13 +183,13 @@ class RunIssueTest(unittest.TestCase):
                 1,
                 token="t",
                 include_comments=True,
-                include_untrusted=False,
             )
         self.assertIn("trusted reply", output)
         self.assertNotIn("IGNORE_PRIOR_INSTRUCTIONS", output)
+        self.assertNotIn("!! UNTRUSTED comment", output)
         self.assertIn("Trust notice", output)
 
-    def test_run_issue_quarantines_untrusted_when_requested(self) -> None:
+    def test_run_issue_reports_no_trusted_comments_when_only_untrusted(self) -> None:
         issue = {
             "number": 1,
             "title": "Example",
@@ -216,13 +213,11 @@ class RunIssueTest(unittest.TestCase):
                 1,
                 token="t",
                 include_comments=True,
-                include_untrusted=True,
             )
-        # The untrusted body is present but quarantined with a banner and
-        # trust=UNTRUSTED provenance.
-        self.assertIn("IGNORE_PRIOR_INSTRUCTIONS", output)
-        self.assertIn("!! UNTRUSTED comment:", output)
-        self.assertIn("trust=UNTRUSTED", output)
+        # The untrusted body must not leak into the output, and the
+        # rendered "no trusted comments" placeholder should be present.
+        self.assertNotIn("IGNORE_PRIOR_INSTRUCTIONS", output)
+        self.assertIn("no comments from trusted authors", output)
 
 
 class RunPrTest(unittest.TestCase):
@@ -260,7 +255,6 @@ class RunPrTest(unittest.TestCase):
                 token="t",
                 include_comments=True,
                 include_diff=True,
-                include_untrusted=False,
             )
         self.assertIn("## Pull request body", output)
         self.assertIn("issue-level comment", output)
@@ -269,6 +263,46 @@ class RunPrTest(unittest.TestCase):
         self.assertIn("line=42", output)
         self.assertIn("## Pull request diff", output)
         self.assertIn("diff --git a/x b/x", output)
+
+    def test_run_pr_drops_untrusted_comments_from_every_thread(self) -> None:
+        pr = {
+            "number": 4,
+            "title": "T",
+            "user": {"login": "alice"},
+            "author_association": "MEMBER",
+            "body": "pr body",
+            "head": {"ref": "feat"},
+            "base": {"ref": "main"},
+        }
+        untrusted_issue = _make_comment(
+            author="eve",
+            association="NONE",
+            body="EVIL_ISSUE_PAYLOAD",
+            comment_id=30,
+        )
+        untrusted_review = _make_comment(
+            author="mallory",
+            association="CONTRIBUTOR",
+            body="EVIL_REVIEW_PAYLOAD",
+            comment_id=31,
+        )
+        with (
+            patch.object(fgc, "_fetch_pull", return_value=pr),
+            patch.object(fgc, "_fetch_issue_comments", return_value=[untrusted_issue]),
+            patch.object(
+                fgc, "_fetch_pr_review_comments", return_value=[untrusted_review]
+            ),
+        ):
+            output = fgc.run_pr(
+                "o",
+                "r",
+                4,
+                token="t",
+                include_comments=True,
+                include_diff=False,
+            )
+        self.assertNotIn("EVIL_ISSUE_PAYLOAD", output)
+        self.assertNotIn("EVIL_REVIEW_PAYLOAD", output)
 
 
 class CliSmokeTest(unittest.TestCase):
@@ -292,9 +326,10 @@ class CliSmokeTest(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(buf.getvalue(), "fake-output\n")
         self.assertEqual(captured["args"], ("o", "r", 7))
-        # Defaults: comments included, untrusted excluded.
+        # Default: comments included. There is no include_untrusted kwarg
+        # anymore - non-member comments are always dropped.
         self.assertTrue(captured["kwargs"]["include_comments"])
-        self.assertFalse(captured["kwargs"]["include_untrusted"])
+        self.assertNotIn("include_untrusted", captured["kwargs"])
 
     def test_main_pr_subcommand_respects_flags(self) -> None:
         captured: dict = {}
@@ -316,13 +351,35 @@ class CliSmokeTest(unittest.TestCase):
                     "--number",
                     "10",
                     "--include-diff",
-                    "--include-untrusted",
                     "--no-include-comments",
                 ]
             )
         self.assertTrue(captured["kwargs"]["include_diff"])
-        self.assertTrue(captured["kwargs"]["include_untrusted"])
         self.assertFalse(captured["kwargs"]["include_comments"])
+        self.assertNotIn("include_untrusted", captured["kwargs"])
+
+    def test_main_rejects_removed_include_untrusted_flag(self) -> None:
+        """The --include-untrusted flag has been removed entirely.
+
+        argparse should reject it instead of silently accepting it, so
+        any stale caller fails loudly rather than getting a surprising
+        no-op.
+        """
+        with (
+            patch.object(fgc, "_resolve_token", return_value="fake-token"),
+            redirect_stdout(io.StringIO()),
+        ):
+            with self.assertRaises(SystemExit):
+                fgc.main(
+                    [
+                        "--repo",
+                        "o/r",
+                        "issue",
+                        "--number",
+                        "1",
+                        "--include-untrusted",
+                    ]
+                )
 
     def test_main_pr_diff_subcommand(self) -> None:
         with (
