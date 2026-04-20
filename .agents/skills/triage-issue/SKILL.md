@@ -53,12 +53,8 @@ If a companion file is not referenced in the prompt, rely on the core contract a
    - phrased so the reporter can answer them directly
    - short and prioritized, with a maximum of 5 questions
    - biased toward asking for visual evidence: when the issue involves UI behavior, rendering, or any visual symptom, the first follow-up question should ask the reporter to attach a screenshot or record a short video of the problem rather than asking technical or terminology-specific questions
-7. Use the issue shape to decide what to ask. The patterns below describe information that typically requires reporter input because it is personal, environmental, or subjective — do not use them as a reason to ask about facts the agent could verify through documentation or code inspection:
-   - environment-sensitive bugs: exact application version, OS build, shell, compositor/window manager, GPU/driver, WSL/Wayland details, IME/input method, remote session context
-   - auth/account/backend errors: whether this is signup vs login vs restore, browser/handoff path, debug ID or conversation ID, timestamps, plan/account context, VPN/proxy or browser-session differences
-   - AI/agent-quality issues: exact prompt or task, transcript excerpt, provider/model/BYOK configuration, expected troubleshooting behavior, whether docs/web lookup was attempted
-   - editor/file-tree/shell integration issues: minimal repro repo or command sequence, shell config, external tool involved, whether the behavior reproduces outside the application
-   - crashes/rendering/window-manager issues: repeated crash signature, graphics backend details, repro timing, screenshots/video, third-party window manager or snap tool
+7. Use the issue shape to decide what to ask. The patterns below describe information that typically requires reporter input because it is personal, environmental, or subjective — do not use them as a reason to ask about facts the agent could verify through documentation or code inspection. Repository-specific follow-up patterns (for example, categories tied to a particular application's surface area, integrations, or runtime environment) belong in the companion `triage-issue-local` skill rather than here:
+   - environment-sensitive bugs: exact application version, OS, and any other environment details the reporter can observe but the agent cannot derive
    - feature requests: concrete workflow, current workaround, desired UX/API shape, scope boundaries, success criteria
    - automated or low-signal reports: exact CVE/package/path/version/scan ID or other concrete evidence before treating them as actionable
 8. Identify subject-matter experts by:

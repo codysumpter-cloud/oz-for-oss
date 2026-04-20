@@ -24,7 +24,7 @@ The label taxonomy for this repository is managed in `.github/issue-triage/confi
 
 ## Recurring follow-up patterns
 
-No repo-specific follow-up patterns have been captured for this repository yet. The weekly `update-triage` loop will propose additions here over time when maintainer overrides show a recurring pattern.
+No repo-specific follow-up patterns have been captured for this repository yet. `oz-for-oss` is not a terminal or desktop application, so the GPU/driver, window-manager, shell-integration, and similar runtime-environment sub-items that only make sense for those products do not belong here. The weekly `update-triage` loop will propose additions as maintainer overrides reveal recurring patterns that are actually specific to this repository.
 
 ## Owner-inference hints
 
