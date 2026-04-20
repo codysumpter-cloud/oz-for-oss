@@ -9,7 +9,7 @@ Write a `TECH.md`-style spec for a significant feature in this repository.
 
 ## Overview
 
-This skill is the local shared tech-spec workflow for this repository. It is aligned with Warp's upstream tech-spec skill, but checked into this repository so local wrappers and workflows can depend on it directly.
+This skill is the local shared tech-spec workflow for this repository. Local wrappers and workflows depend on it directly as the canonical tech-spec contract.
 
 The tech spec should translate product intent into an implementation plan that fits the existing codebase, documents architectural choices, and makes the work easier for agents to execute and reviewers to evaluate.
 
@@ -51,7 +51,7 @@ Do not guess about current architecture when the code can be inspected directly.
 
 ## What to write
 
-Use a structure aligned with the upstream shared tech spec:
+Use the following structure:
 
 ### 1. Problem
 

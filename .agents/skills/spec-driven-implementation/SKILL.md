@@ -9,7 +9,7 @@ Drive a spec-first workflow for substantial features in this repository.
 
 ## Overview
 
-This skill is the local shared spec-first workflow for this repository. It is aligned with Warp's upstream spec-driven implementation skill, but checked into this repository so local wrappers and workflows can depend on it directly.
+This skill is the local shared spec-first workflow for this repository. Local wrappers and workflows depend on it directly as the canonical spec-first contract.
 
 Use this skill for significant features where a written spec will improve implementation quality, reduce ambiguity, or make review easier. Be pragmatic: not every change needs specs.
 

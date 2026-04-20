@@ -22,7 +22,7 @@ Use those shared local skills as the base behavior unless this wrapper overrides
 
 The Oz-specific differences are:
 
-- the primary input is a GitHub issue, not a Linear-driven Warp feature workflow
+- the primary input is a GitHub issue
 - approved spec context may be supplied in `spec_context.md`
 - issue discussion may be supplied in `issue_comments.txt`
 - the workflow expects a reusable markdown summary in `implementation_summary.md`

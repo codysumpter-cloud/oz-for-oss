@@ -87,8 +87,8 @@ jobs:
           matches_direct_trigger = (
               (action == "opened" and not pr.get("draft", False))
               or action == "ready_for_review"
-              or (action == "review_requested" and requested_reviewer in {"warp-agent", "oz-agent"})
-              or (action == "labeled" and label_name in {"warp-review", "oz-review"})
+              or (action == "review_requested" and requested_reviewer == "oz-agent")
+              or (action == "labeled" and label_name == "oz-review")
           )
           if input_pr_number:
               should_run = True

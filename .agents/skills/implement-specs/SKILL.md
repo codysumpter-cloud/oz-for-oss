@@ -9,7 +9,7 @@ Implement an approved feature from the repository's product and tech specs.
 
 ## Overview
 
-This skill is the local shared implementation workflow for spec-driven work in this repository. It is aligned with Warp's upstream implementation skill, but checked into this repository so local wrappers and workflows can depend on it directly.
+This skill is the local shared implementation workflow for spec-driven work in this repository. Local wrappers and workflows depend on it directly as the canonical implementation contract.
 
 Use this skill after the product and tech specs are approved. The goal is to build the feature described by the specs while keeping the checked-in specs and the implementation aligned as the work evolves.
 

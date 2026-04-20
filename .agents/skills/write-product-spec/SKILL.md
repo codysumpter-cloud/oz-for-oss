@@ -9,7 +9,7 @@ Write a `PRODUCT.md`-style spec for a significant feature in this repository.
 
 ## Overview
 
-This skill is the local shared product-spec workflow for this repository. It is aligned with Warp's upstream product-spec skill, but checked into this repository so local wrappers and workflows can depend on it directly.
+This skill is the local shared product-spec workflow for this repository. Local wrappers and workflows depend on it directly as the canonical product-spec contract.
 
 The product spec should make the desired behavior unambiguous enough that an agent can implement it correctly and avoid regressions while making changes. Focus on product behavior, UX, invariants, and validation rather than implementation details.
 
@@ -49,7 +49,7 @@ No Figma mock is acceptable, but the absence should be explicit.
 
 ## What to write
 
-Use a structure similar to the upstream shared product spec:
+Use the following structure:
 
 ### 1. Summary
 

@@ -1,13 +1,9 @@
 from __future__ import annotations
 
 import json
-import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-
-from github import Github
-from github.Repository import Repository
 
 from .helpers import get_field, parse_datetime
 
@@ -153,47 +149,6 @@ def discover_issue_templates(workspace: Path) -> dict[str, Any]:
         "config": config,
         "templates": templates,
     }
-
-
-COMMAND_SIGNATURES_REPO = "warpdotdev/command-signatures"
-COMMAND_SIGNATURES_REF = "main"
-COMMAND_SIGNATURES_MAX_ENTRIES = 200
-
-logger = logging.getLogger(__name__)
-
-
-def fetch_command_signatures_listing(github_client: Github) -> list[str]:
-    """Fetch the top-level directory listing from the command-signatures repo.
-
-    Returns a sorted list of command names (directory names) that have
-    signatures defined.  The caller is expected to pass a ``github.Github``
-    client instance so the function can access the repo.
-    """
-    try:
-        repo: Repository = github_client.get_repo(COMMAND_SIGNATURES_REPO)
-        contents = repo.get_contents("", ref=COMMAND_SIGNATURES_REF)
-        if not isinstance(contents, list):
-            contents = [contents]
-        command_names: list[str] = sorted(
-            item.name
-            for item in contents
-            if item.type == "dir" and not item.name.startswith(".")
-        )[:COMMAND_SIGNATURES_MAX_ENTRIES]
-        return command_names
-    except Exception as exc:
-        logger.warning("Failed to fetch command-signatures listing: %s", exc)
-        return []
-
-
-def format_command_signatures_for_prompt(command_names: list[str]) -> str:
-    """Format command-signatures listing as prompt context."""
-    if not command_names:
-        return "Unable to fetch command-signatures context."
-    return (
-        f"The following {len(command_names)} commands have CLI completions defined "
-        f"in the warpdotdev/command-signatures repository (used by Warp's completions engine).\n"
-        f"Commands: {', '.join(command_names)}"
-    )
 
 
 def extract_original_issue_report(body: str) -> str:
