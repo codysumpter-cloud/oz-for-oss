@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 from review_pr import (
     _build_diff_line_map,
     _commentable_lines_for_patch,
     _extract_suggestion_blocks,
+    _format_review_completion_message,
+    _is_non_member_pr,
     _line_content_for_patch,
     _normalize_review_path,
     _normalize_review_payload,
+    _normalize_reviewer_logins,
+    _resolve_non_member_review_action,
     _validate_suggestion_blocks,
 )
 
@@ -588,6 +593,130 @@ class ValidateSuggestionBlocksTest(unittest.TestCase):
                 else:
                     self.assertEqual(len(errors), 1)
                     self.assertIn(expected_substring, errors[0])
+
+
+class IsNonMemberPrTest(unittest.TestCase):
+    def test_non_member_associations(self) -> None:
+        for association in ["", "NONE", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR"]:
+            with self.subTest(association=association):
+                pr = SimpleNamespace(author_association=association)
+                self.assertTrue(_is_non_member_pr(pr))
+
+    def test_member_associations(self) -> None:
+        for association in ["OWNER", "MEMBER", "COLLABORATOR"]:
+            with self.subTest(association=association):
+                pr = SimpleNamespace(author_association=association)
+                self.assertFalse(_is_non_member_pr(pr))
+
+    def test_missing_attribute_is_non_member(self) -> None:
+        self.assertTrue(_is_non_member_pr(SimpleNamespace()))
+
+
+class NormalizeReviewerLoginsTest(unittest.TestCase):
+    def test_strips_at_signs_and_deduplicates(self) -> None:
+        result = _normalize_reviewer_logins(
+            ["@alice", "alice", " bob ", "@@carol"],
+            pr_author_login="dave",
+        )
+        self.assertEqual(result, ["alice", "bob", "carol"])
+
+    def test_caps_to_max_reviewers(self) -> None:
+        result = _normalize_reviewer_logins(
+            ["a", "b", "c", "d", "e"],
+            pr_author_login="",
+        )
+        self.assertEqual(result, ["a", "b", "c"])
+
+    def test_removes_pr_author_case_insensitive(self) -> None:
+        result = _normalize_reviewer_logins(
+            ["Alice", "@BOB", "carol"],
+            pr_author_login="bob",
+        )
+        self.assertEqual(result, ["Alice", "carol"])
+
+    def test_drops_non_string_and_empty_entries(self) -> None:
+        result = _normalize_reviewer_logins(
+            ["", None, 42, "@", "alice"],
+            pr_author_login="",
+        )
+        self.assertEqual(result, ["alice"])
+
+    def test_non_list_returns_empty(self) -> None:
+        self.assertEqual(_normalize_reviewer_logins(None, pr_author_login=""), [])
+        self.assertEqual(_normalize_reviewer_logins("alice", pr_author_login=""), [])
+
+    def test_custom_limit(self) -> None:
+        result = _normalize_reviewer_logins(
+            ["a", "b", "c"],
+            pr_author_login="",
+            limit=2,
+        )
+        self.assertEqual(result, ["a", "b"])
+
+
+class ResolveNonMemberReviewActionTest(unittest.TestCase):
+    def test_approve_returns_event_and_reviewers(self) -> None:
+        event, reviewers = _resolve_non_member_review_action(
+            {
+                "verdict": "approve",
+                "recommended_reviewers": ["@alice", "contributor", "bob"],
+            },
+            pr_author_login="contributor",
+        )
+        self.assertEqual(event, "APPROVE")
+        self.assertEqual(reviewers, ["alice", "bob"])
+
+    def test_request_changes_drops_reviewers(self) -> None:
+        event, reviewers = _resolve_non_member_review_action(
+            {
+                "verdict": "REQUEST_CHANGES",
+                "recommended_reviewers": ["alice"],
+            },
+            pr_author_login="",
+        )
+        self.assertEqual(event, "REQUEST_CHANGES")
+        self.assertEqual(reviewers, [])
+
+    def test_invalid_verdict_raises(self) -> None:
+        for verdict in ["", "COMMENT", "maybe", None]:
+            with self.subTest(verdict=verdict):
+                with self.assertRaisesRegex(ValueError, "`verdict` must be"):
+                    _resolve_non_member_review_action(
+                        {"verdict": verdict, "recommended_reviewers": []},
+                        pr_author_login="",
+                    )
+
+    def test_missing_recommended_reviewers_is_empty(self) -> None:
+        event, reviewers = _resolve_non_member_review_action(
+            {"verdict": "APPROVE"},
+            pr_author_login="",
+        )
+        self.assertEqual(event, "APPROVE")
+        self.assertEqual(reviewers, [])
+
+
+class FormatReviewCompletionMessageTest(unittest.TestCase):
+    def test_approve_with_reviewers_mentions_logins(self) -> None:
+        message = _format_review_completion_message("APPROVE", ["alice", "bob"])
+        self.assertIn("approved", message)
+        self.assertIn("@alice, @bob", message)
+
+    def test_approve_without_reviewers(self) -> None:
+        message = _format_review_completion_message("APPROVE", [])
+        self.assertIn("approved", message)
+        self.assertIn("No matching stakeholder", message)
+
+    def test_request_changes(self) -> None:
+        self.assertIn(
+            "requested changes",
+            _format_review_completion_message("REQUEST_CHANGES", []),
+        )
+
+    def test_comment_default(self) -> None:
+        self.assertIn(
+            "posted feedback",
+            _format_review_completion_message("COMMENT", []),
+        )
 
 
 if __name__ == "__main__":
