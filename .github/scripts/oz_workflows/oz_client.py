@@ -26,7 +26,7 @@ DEFAULT_OZ_ORIGIN_TOKEN_ENV_NAME = "STAGING_ORIGIN_TOKEN"
 # WARP_SESSION_SHARING_PUBLIC_ACCESS environment variable; set it to "NONE" or
 # "OFF" to disable public sharing for a run.
 DEFAULT_SESSION_SHARING_PUBLIC_ACCESS = "VIEWER"
-_SESSION_SHARING_DISABLED_VALUES = {"", "NONE", "OFF", "DISABLED", "FALSE", "0"}
+_SESSION_SHARING_DISABLED_VALUES = {"NONE", "OFF", "DISABLED", "FALSE", "0"}
 _SESSION_SHARING_SUPPORTED_LEVELS = {"VIEWER", "EDITOR"}
 
 
@@ -74,9 +74,9 @@ def _resolve_session_sharing_public_access() -> str | None:
             f"{raw!r} is not a supported value; expected one of "
             f"{sorted(_SESSION_SHARING_SUPPORTED_LEVELS)} or a disable value "
             f"({sorted(_SESSION_SHARING_DISABLED_VALUES - {''})}). "
-            "Falling back to the default public-access level."
+            "Disabling public session sharing for this run."
         )
-        return DEFAULT_SESSION_SHARING_PUBLIC_ACCESS
+        return None
     return normalized
 
 
