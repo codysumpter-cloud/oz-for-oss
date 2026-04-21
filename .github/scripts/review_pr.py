@@ -378,6 +378,27 @@ def _normalize_review_payload(
     return summary.strip(), normalized_comments
 
 
+def _format_review_completion_message(
+    event: str,
+    recommended_reviewers: list[str],
+) -> str:
+    """Build the progress-comment completion message for a posted review."""
+    if event == "APPROVE":
+        if recommended_reviewers:
+            mentions = ", ".join(f"@{login}" for login in recommended_reviewers)
+            return (
+                "I approved this pull request and requested human review from: "
+                f"{mentions}."
+            )
+        return (
+            "I approved this pull request. No matching stakeholder was found "
+            "for the changed files, so no human reviewers were requested."
+        )
+    if event == "REQUEST_CHANGES":
+        return "I requested changes on this pull request and posted feedback."
+    return "I completed the review and posted feedback on this pull request."
+
+
 def main() -> None:
     owner, repo = repo_parts()
     pr_number = int(require_env("PR_NUMBER"))
@@ -470,8 +491,10 @@ def main() -> None:
         # a list of matching ``.github/STAKEHOLDERS`` logins to request as
         # human reviewers, and the workflow turns those into a real
         # pull-request review plus reviewer requests. Member/collaborator
-        # PRs keep the existing COMMENT-only behavior.
-        is_non_member = _is_non_member_pr(pr)
+        # PRs keep the existing COMMENT-only behavior. Spec-only PRs are
+        # intentionally exempted from the gate so humans stay in the loop
+        # earlier for spec changes.
+        is_non_member = _is_non_member_pr(pr) and not spec_only
         pr_author_login = str(
             getattr(getattr(pr, "user", None), "login", "") or ""
         )
@@ -598,10 +621,25 @@ def main() -> None:
                 review, diff_line_map, diff_content_map
             )
             if is_non_member:
-                event, recommended_reviewers = _resolve_non_member_review_action(
-                    review,
-                    pr_author_login=pr_author_login,
-                )
+                try:
+                    event, recommended_reviewers = _resolve_non_member_review_action(
+                        review,
+                        pr_author_login=pr_author_login,
+                    )
+                except ValueError:
+                    # The agent returned an unsupported ``verdict``.
+                    # Degrade to COMMENT so any valid ``summary`` /
+                    # ``comments`` still land on the PR instead of
+                    # failing the whole workflow and throwing away the
+                    # feedback that was produced.
+                    logger.exception(
+                        "Falling back to COMMENT for non-member PR #%s in %s/%s due to invalid review action payload",
+                        pr_number,
+                        owner,
+                        repo,
+                    )
+                    event = "COMMENT"
+                    recommended_reviewers = []
             else:
                 event = "COMMENT"
                 recommended_reviewers = []
@@ -637,26 +675,6 @@ def main() -> None:
             progress.report_error()
             raise
 
-
-def _format_review_completion_message(
-    event: str,
-    recommended_reviewers: list[str],
-) -> str:
-    """Build the progress-comment completion message for a posted review."""
-    if event == "APPROVE":
-        if recommended_reviewers:
-            mentions = ", ".join(f"@{login}" for login in recommended_reviewers)
-            return (
-                "I approved this pull request and requested human review from: "
-                f"{mentions}."
-            )
-        return (
-            "I approved this pull request. No matching stakeholder was found "
-            "for the changed files, so no human reviewers were requested."
-        )
-    if event == "REQUEST_CHANGES":
-        return "I requested changes on this pull request and posted feedback."
-    return "I completed the review and posted feedback on this pull request."
 
 if __name__ == "__main__":
     main()
