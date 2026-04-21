@@ -14,7 +14,6 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      id-token: write
     uses: ./.github/workflows/update-dedupe.yml
     with:
       lookback_days: ${{ github.event.inputs.lookback_days || '7' }}
