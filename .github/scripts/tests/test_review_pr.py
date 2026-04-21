@@ -8,6 +8,7 @@ from review_pr import (
     _commentable_lines_for_patch,
     _extract_suggestion_blocks,
     _format_review_completion_message,
+    _is_bot_or_member_pr,
     _is_non_member_pr,
     _line_content_for_patch,
     _normalize_review_path,
@@ -610,6 +611,48 @@ class IsNonMemberPrTest(unittest.TestCase):
 
     def test_missing_attribute_is_non_member(self) -> None:
         self.assertTrue(_is_non_member_pr(SimpleNamespace()))
+
+
+class IsBotOrMemberPrTest(unittest.TestCase):
+    def test_bot_user_type_returns_true(self) -> None:
+        pr = SimpleNamespace(
+            user=SimpleNamespace(login="oz-agent[bot]", type="Bot"),
+            author_association="NONE",
+        )
+        self.assertTrue(_is_bot_or_member_pr(pr))
+
+    def test_login_ending_in_bot_returns_true(self) -> None:
+        pr = SimpleNamespace(
+            user=SimpleNamespace(login="github-actions[bot]", type="User"),
+            author_association="CONTRIBUTOR",
+        )
+        self.assertTrue(_is_bot_or_member_pr(pr))
+
+    def test_org_member_associations_return_true(self) -> None:
+        for association in ["MEMBER", "OWNER", "COLLABORATOR"]:
+            with self.subTest(association=association):
+                pr = SimpleNamespace(
+                    user=SimpleNamespace(login="alice", type="User"),
+                    author_association=association,
+                )
+                self.assertTrue(_is_bot_or_member_pr(pr))
+
+    def test_external_contributor_returns_false(self) -> None:
+        for association in ["", "NONE", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR"]:
+            with self.subTest(association=association):
+                pr = SimpleNamespace(
+                    user=SimpleNamespace(login="alice", type="User"),
+                    author_association=association,
+                )
+                self.assertFalse(_is_bot_or_member_pr(pr))
+
+    def test_missing_user_attribute_falls_back_to_association(self) -> None:
+        pr = SimpleNamespace(author_association="NONE")
+        self.assertFalse(_is_bot_or_member_pr(pr))
+
+    def test_missing_user_attribute_member_association_returns_true(self) -> None:
+        pr = SimpleNamespace(author_association="MEMBER")
+        self.assertTrue(_is_bot_or_member_pr(pr))
 
 
 class NormalizeReviewerLoginsTest(unittest.TestCase):

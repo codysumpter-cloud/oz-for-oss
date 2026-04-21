@@ -84,6 +84,12 @@ jobs:
           focus = os.environ.get("INPUT_FOCUS", "")
           comment_id = os.environ.get("INPUT_COMMENT_ID", "")
           pr_number = input_pr_number or str(pr.get("number") or "")
+          pr_user = pr.get("user") or {}
+          pr_author_login = (pr_user.get("login") or "").strip().lower()
+          pr_author_type = (pr_user.get("type") or "").strip().lower()
+          pr_author_association = (pr.get("author_association") or "").strip()
+          is_bot_author = pr_author_type == "bot" or pr_author_login.endswith("[bot]")
+          is_member_author = pr_author_association in {"COLLABORATOR", "MEMBER", "OWNER"}
           matches_direct_trigger = (
               (action == "opened" and not pr.get("draft", False))
               or action == "ready_for_review"
@@ -92,6 +98,8 @@ jobs:
           )
           if input_pr_number:
               should_run = True
+          elif is_bot_author or is_member_author:
+              should_run = False
           elif head_ref.startswith("cherrypick"):
               should_run = False
           elif has_pr_hooks and event_name == "pull_request_target":
@@ -107,7 +115,9 @@ jobs:
               fh.write(focus)
               fh.write("\n__EOF__\n")
               fh.write(f"comment_id={comment_id}\n")
-              if has_pr_hooks and event_name == "pull_request_target" and not input_pr_number:
+              if is_bot_author or is_member_author:
+                  fh.write("skip_reason=bot-or-org-member-author\n")
+              elif has_pr_hooks and event_name == "pull_request_target" and not input_pr_number:
                   fh.write("skip_reason=pr-hooks-present\n")
               elif head_ref.startswith("cherrypick"):
                   fh.write("skip_reason=cherrypick-branch\n")

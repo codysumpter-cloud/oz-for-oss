@@ -14,6 +14,7 @@ from github.GithubException import GithubException
 from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.helpers import (
     format_review_start_line,
+    is_automation_user,
     is_spec_only_pr,
     ORG_MEMBER_ASSOCIATIONS,
     POWERED_BY_SUFFIX,
@@ -76,6 +77,20 @@ def _is_non_member_pr(pr: Any) -> bool:
     """
     association = getattr(pr, "author_association", "") or ""
     return association not in ORG_MEMBER_ASSOCIATIONS
+
+
+def _is_bot_or_member_pr(pr: Any) -> bool:
+    """Return True when the PR author is a bot or an org member/collaborator.
+
+    Both cases should be skipped entirely: the workflow must not review its
+    own PRs (bot author) or PRs opened by org members, since those are
+    already subject to human review processes.
+    """
+    author = getattr(pr, "user", None)
+    if is_automation_user(author):
+        return True
+    association = str(getattr(pr, "author_association", "") or "")
+    return association in ORG_MEMBER_ASSOCIATIONS
 
 
 def _normalize_reviewer_logins(
@@ -410,6 +425,8 @@ def main() -> None:
         github = client.get_repo(repo_slug())
         pr = github.get_pull(pr_number)
         if pr.state != "open":
+            return
+        if _is_bot_or_member_pr(pr):
             return
         if comment_id_raw:
             pr.get_issue_comment(int(comment_id_raw)).create_reaction("eyes")
