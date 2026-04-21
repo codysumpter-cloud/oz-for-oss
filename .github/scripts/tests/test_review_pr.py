@@ -611,6 +611,14 @@ class IsNonMemberPrTest(unittest.TestCase):
     def test_missing_attribute_is_non_member(self) -> None:
         self.assertTrue(_is_non_member_pr(SimpleNamespace()))
 
+    def test_bot_account_association_is_none(self) -> None:
+        # GitHub App bot accounts report author_association as "NONE", so
+        # _is_non_member_pr returns True for them. The bot-login guard in
+        # main() (``pr_author_login.endswith("[bot]")``) is what prevents
+        # APPROVE/REQUEST_CHANGES from being used for bot-authored PRs.
+        pr = SimpleNamespace(author_association="NONE")
+        self.assertTrue(_is_non_member_pr(pr))
+
 
 class NormalizeReviewerLoginsTest(unittest.TestCase):
     def test_strips_at_signs_and_deduplicates(self) -> None:

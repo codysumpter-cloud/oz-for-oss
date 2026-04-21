@@ -494,9 +494,18 @@ def main() -> None:
         # PRs keep the existing COMMENT-only behavior. Spec-only PRs are
         # intentionally exempted from the gate so humans stay in the loop
         # earlier for spec changes.
-        is_non_member = _is_non_member_pr(pr) and not spec_only
+        #
+        # GitHub App bot accounts (login ends with "[bot]") report
+        # author_association as "NONE" even though they are org-owned, so
+        # _is_non_member_pr would incorrectly classify them as external
+        # contributors. Exclude them from the non-member path explicitly.
         pr_author_login = str(
             getattr(getattr(pr, "user", None), "login", "") or ""
+        )
+        is_non_member = (
+            _is_non_member_pr(pr)
+            and not spec_only
+            and not pr_author_login.endswith("[bot]")
         )
         non_member_review_section = ""
         if is_non_member:
@@ -641,6 +650,16 @@ def main() -> None:
                     event = "COMMENT"
                     recommended_reviewers = []
             else:
+                event = "COMMENT"
+                recommended_reviewers = []
+            # Deterministic post-verdict guard: always use COMMENT for PRs
+            # opened by the bot itself (GitHub App accounts whose login ends
+            # with "[bot]") or by org members/collaborators, regardless of
+            # any verdict the agent emitted in review.json. This is the
+            # authoritative filter — it applies even if the non-member
+            # classification above changes, ensuring APPROVE and
+            # REQUEST_CHANGES never land on trusted-author PRs.
+            if pr_author_login.endswith("[bot]") or not _is_non_member_pr(pr):
                 event = "COMMENT"
                 recommended_reviewers = []
             if not summary and not comments and event == "COMMENT":
