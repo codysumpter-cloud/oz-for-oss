@@ -291,7 +291,7 @@ def process_issue(
         - Populate `issue_body` with the markdown triage summary that should be posted as a separate issue comment. Do not rewrite the original issue description, and do not include HTML metadata in `issue_body`.
         - Validate `triage_result.json` with `jq`.
         - Do not create issue comments or make other GitHub changes.
-        - After validating the JSON, upload it as an artifact via `oz-dev artifact upload triage_result.json`. The subcommand is `artifact` (singular); do not use `artifacts`.
+        - After validating the JSON, upload it as an artifact via `oz artifact upload triage_result.json`. The subcommand is `artifact` (singular); do not use `artifacts`.
         """
     ).strip()
     # Append the fenced repo-local references after the base prompt so a

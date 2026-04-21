@@ -20,7 +20,6 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      id-token: write
     env:
       WORKFLOW_CODE_REPOSITORY: warpdotdev/oz-for-oss
       WORKFLOW_CODE_REF: ${{ github.repository == 'warpdotdev/oz-for-oss' && github.sha || 'main' }}
@@ -42,22 +41,6 @@ jobs:
           ref: ${{ env.WORKFLOW_CODE_REF }}
           path: ${{ env.WORKFLOW_CODE_PATH }}
           token: ${{ steps.app_token.outputs.token }}
-      - name: Authenticate to Google Cloud for staging secret access
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: projects/643991131484/locations/global/workloadIdentityPools/github-actions/providers/warp-terraform
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-      - name: Resolve staging origin token
-        id: staging_origin_token
-        run: |
-          token="$(gcloud --project=warp-server-staging secrets versions access latest --secret=staging-origin-token)"
-          printf '::add-mask::%s\n' "$token"
-          {
-            echo 'token<<EOF'
-            printf '%s\n' "$token"
-            echo EOF
-          } >> "$GITHUB_OUTPUT"
       - name: Set up Oz Python environment
         uses: warpdotdev/oz-for-oss/.github/actions/setup-oz-python@main
         with:
@@ -71,7 +54,5 @@ jobs:
           WARP_AGENT_MODEL: ${{ vars.WARP_AGENT_MODEL || '' }}
           WARP_AGENT_MCP: ${{ vars.WARP_AGENT_MCP || '' }}
           WARP_ENVIRONMENT_ID: ${{ vars.WARP_ENVIRONMENT_ID || '' }}
-          WARP_API_BASE_URL: https://staging.warp.dev/api/v1
-          WARP_ORIGIN_TOKEN_ENV_NAME: STAGING_ORIGIN_TOKEN
-          STAGING_ORIGIN_TOKEN: ${{ steps.staging_origin_token.outputs.token }}
+          WARP_API_BASE_URL: https://app.warp.dev/api/v1
         run: python "${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/update_pr_review.py"

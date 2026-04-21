@@ -144,5 +144,5 @@ If the prompt says you are in a cloud-environment workflow and the expected loca
   This isolates only the changes introduced by the PR, not accumulated state from other branches.
 - Convert the raw diff into `pr_diff.txt` using the annotated format above before reviewing.
 - Still produce `review.json` and validate it with `jq`.
-- After validation, upload the result via `oz-dev artifact upload review.json`.
-- IMPORTANT: the upload command is `oz-dev artifact upload` (singular `artifact`). Do not use `artifacts` (plural) — that is not a valid subcommand and will fail.
+- After validation, upload the result via `oz artifact upload review.json`.
+- IMPORTANT: the upload command is `oz artifact upload` (singular `artifact`). Do not use `artifacts` (plural) — that is not a valid subcommand and will fail.

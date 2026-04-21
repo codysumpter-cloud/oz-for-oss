@@ -162,7 +162,7 @@ def main() -> None:
               - `branch_name`: the branch you pushed to. You may customize it by appending a short descriptive slug to the default (e.g. `{target_branch}-add-retry-logic`), but it must start with `{target_branch}`.
               - `pr_title`: a conventional-commit-style PR title derived from the actual changes (e.g. `feat: add retry logic for transient API failures`).
               - `pr_summary`: the full markdown PR body (this replaces the former `pr_description.md` contents). The first line must be `Closes #{{issue_number}}` so GitHub auto-closes the issue when the PR merges.
-            - After writing `pr-metadata.json`, upload it as an artifact via `oz-dev artifact upload pr-metadata.json`. The subcommand is `artifact` (singular); do not use `artifacts`.
+            - After writing `pr-metadata.json`, upload it as an artifact via `oz artifact upload pr-metadata.json`. The subcommand is `artifact` (singular); do not use `artifacts`.
             - If you produce changes, commit them to the branch specified in your `pr-metadata.json` `branch_name` field and push that branch to origin.
             - Do not open or update the pull request yourself.
             - If no implementation diff is warranted, do not push the branch.

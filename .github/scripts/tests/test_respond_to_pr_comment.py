@@ -236,7 +236,7 @@ class RunImplementationPromptTest(unittest.TestCase):
         self.assertIn("pr-metadata.json", prompt)
         self.assertIn("pr_title", prompt)
         self.assertIn("pr_summary", prompt)
-        self.assertIn("oz-dev artifact upload pr-metadata.json", prompt)
+        self.assertIn("oz artifact upload pr-metadata.json", prompt)
         # The prompt must describe when to write the artifact and when to
         # skip it so small tweaks don't churn the PR description.
         self.assertIn("materially change", prompt)
