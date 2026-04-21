@@ -14,6 +14,7 @@ from github.GithubException import GithubException
 from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.helpers import (
     format_review_start_line,
+    is_automation_user,
     is_spec_only_pr,
     ORG_MEMBER_ASSOCIATIONS,
     POWERED_BY_SUFFIX,
@@ -73,9 +74,25 @@ def _is_non_member_pr(pr: Any) -> bool:
     REQUEST_CHANGES) and, on APPROVE, a review request targeted at
     matching ``.github/STAKEHOLDERS`` entries. Member/collaborator PRs
     keep the existing ``COMMENT`` behavior.
+
+    PRs authored by automation accounts (bots, including the Oz bot
+    reviewing its own PRs) always fall back to ``COMMENT`` so we never
+    try to APPROVE or REQUEST_CHANGES on them; attempting an APPROVE on
+    a self-authored PR is rejected by the GitHub API. Likewise, when
+    ``author_association`` is missing, empty, or not a string we cannot
+    positively classify the author as a non-member, so we conservatively
+    fall back to the safe ``COMMENT`` path rather than assuming the
+    author is a non-member.
     """
-    association = getattr(pr, "author_association", "") or ""
-    return association not in ORG_MEMBER_ASSOCIATIONS
+    if is_automation_user(getattr(pr, "user", None)):
+        return False
+    association = getattr(pr, "author_association", None)
+    if not isinstance(association, str):
+        return False
+    normalized = association.strip().upper()
+    if not normalized:
+        return False
+    return normalized not in ORG_MEMBER_ASSOCIATIONS
 
 
 def _normalize_reviewer_logins(
