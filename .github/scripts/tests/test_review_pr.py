@@ -597,19 +597,65 @@ class ValidateSuggestionBlocksTest(unittest.TestCase):
 
 class IsNonMemberPrTest(unittest.TestCase):
     def test_non_member_associations(self) -> None:
-        for association in ["", "NONE", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR"]:
+        for association in ["NONE", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR"]:
             with self.subTest(association=association):
-                pr = SimpleNamespace(author_association=association)
+                pr = SimpleNamespace(
+                    author_association=association,
+                    user=SimpleNamespace(login="alice", type="User"),
+                )
                 self.assertTrue(_is_non_member_pr(pr))
 
     def test_member_associations(self) -> None:
         for association in ["OWNER", "MEMBER", "COLLABORATOR"]:
             with self.subTest(association=association):
-                pr = SimpleNamespace(author_association=association)
+                pr = SimpleNamespace(
+                    author_association=association,
+                    user=SimpleNamespace(login="alice", type="User"),
+                )
                 self.assertFalse(_is_non_member_pr(pr))
 
-    def test_missing_attribute_is_non_member(self) -> None:
-        self.assertTrue(_is_non_member_pr(SimpleNamespace()))
+    def test_association_normalization(self) -> None:
+        for association in ["  member  ", "member", "Collaborator"]:
+            with self.subTest(association=association):
+                pr = SimpleNamespace(
+                    author_association=association,
+                    user=SimpleNamespace(login="alice", type="User"),
+                )
+                self.assertFalse(_is_non_member_pr(pr))
+
+    def test_empty_or_whitespace_association_defaults_to_member(self) -> None:
+        """When ``author_association`` cannot be resolved positively we must
+        not assume the author is a non-member. Falling back to the
+        ``COMMENT`` path keeps the safe default and avoids posting a
+        formal APPROVE/REQUEST_CHANGES verdict on an unknown author.
+        """
+        for association in ["", "   ", None, 0, object()]:
+            with self.subTest(association=association):
+                pr = SimpleNamespace(
+                    author_association=association,
+                    user=SimpleNamespace(login="alice", type="User"),
+                )
+                self.assertFalse(_is_non_member_pr(pr))
+
+    def test_missing_attribute_defaults_to_member(self) -> None:
+        self.assertFalse(_is_non_member_pr(SimpleNamespace()))
+
+    def test_bot_authored_pr_is_treated_as_member(self) -> None:
+        """Bot-authored PRs must never hit the APPROVE/REQUEST_CHANGES
+        gate. GitHub rejects self-APPROVE on bot-authored PRs and we do
+        not want the review workflow leaving a formal verdict on
+        automation-authored changes regardless of ``author_association``.
+        """
+        bot_cases = [
+            ("bot_type", SimpleNamespace(login="some-user", type="Bot")),
+            ("bot_suffix", SimpleNamespace(login="dependabot[bot]", type="User")),
+            ("oz_agent", SimpleNamespace(login="oz-agent[bot]", type="Bot")),
+        ]
+        for label, user in bot_cases:
+            for association in ["", "NONE", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR", "MEMBER"]:
+                with self.subTest(label=label, association=association):
+                    pr = SimpleNamespace(author_association=association, user=user)
+                    self.assertFalse(_is_non_member_pr(pr))
 
 
 class NormalizeReviewerLoginsTest(unittest.TestCase):
