@@ -88,6 +88,70 @@ class FilterCommentsTest(unittest.TestCase):
         filtered = fgc._filter_comments(comments)
         self.assertEqual([c["id"] for c in filtered], [1, 2, 3])
 
+    def test_trust_resolver_promotes_contributor_that_is_org_member(self) -> None:
+        """A CONTRIBUTOR who is actually an org member should be kept.
+
+        ``author_association`` is scoped to the repository; private org
+        members and certain PR review comment edge cases surface as
+        ``CONTRIBUTOR``. The filter must fall back to the org membership
+        probe in those cases so maintainer comments are not dropped.
+        """
+        comments = [
+            _make_comment(
+                author="safia",
+                association="CONTRIBUTOR",
+                body="maintainer comment",
+                comment_id=100,
+            ),
+            _make_comment(
+                author="outsider",
+                association="CONTRIBUTOR",
+                body="drive-by",
+                comment_id=101,
+            ),
+        ]
+        trust = fgc._TrustResolver(org="warpdotdev", token="t")
+        with patch.object(
+            fgc,
+            "_check_org_membership",
+            side_effect=lambda org, login, *, token: login == "safia",
+        ) as mock_probe:
+            filtered = fgc._filter_comments(comments, trust=trust)
+        self.assertEqual([c["id"] for c in filtered], [100])
+        # Both authors were probed because neither association matched
+        # the static allowlist.
+        self.assertEqual(mock_probe.call_count, 2)
+
+    def test_trust_resolver_caches_membership_lookups(self) -> None:
+        """Repeated authors must not trigger repeated GitHub API calls."""
+        comments = [
+            _make_comment(
+                author="safia",
+                association="CONTRIBUTOR",
+                body="first",
+                comment_id=1,
+            ),
+            _make_comment(
+                author="safia",
+                association="CONTRIBUTOR",
+                body="second",
+                comment_id=2,
+            ),
+            _make_comment(
+                author="Safia",  # case-insensitive cache key
+                association="CONTRIBUTOR",
+                body="third",
+                comment_id=3,
+            ),
+        ]
+        trust = fgc._TrustResolver(org="warpdotdev", token="t")
+        with patch.object(
+            fgc, "_check_org_membership", return_value=True
+        ) as mock_probe:
+            filtered = fgc._filter_comments(comments, trust=trust)
+        self.assertEqual([c["id"] for c in filtered], [1, 2, 3])
+        mock_probe.assert_called_once()
+
 
 class RenderCommentSectionTest(unittest.TestCase):
     def test_trusted_comment_is_labeled_trusted(self) -> None:
@@ -103,6 +167,22 @@ class RenderCommentSectionTest(unittest.TestCase):
         # There is no longer any UNTRUSTED banner; untrusted comments are
         # filtered out upstream and never rendered at all.
         self.assertNotIn("UNTRUSTED comment", rendered)
+
+    def test_contributor_rendered_with_trusted_label_when_org_member(self) -> None:
+        """The rendered provenance keeps the raw ``CONTRIBUTOR`` association
+        but marks the trust level as ``TRUSTED`` when the author is
+        promoted via the org-membership fallback.
+        """
+        comment = _make_comment(
+            author="safia", association="CONTRIBUTOR", body="ship it", comment_id=9
+        )
+        trust = fgc._TrustResolver(org="warpdotdev", token="t")
+        with patch.object(fgc, "_check_org_membership", return_value=True):
+            rendered = fgc._render_comment_section(
+                comment, kind="issue-comment", trust=trust
+            )
+        self.assertIn("association=CONTRIBUTOR", rendered)
+        self.assertIn("trust=TRUSTED", rendered)
 
 
 class ParseNextLinkTest(unittest.TestCase):
@@ -144,6 +224,48 @@ class RenderIssueBodySectionTest(unittest.TestCase):
         self.assertIn("detailed description", rendered)
 
 
+class CheckOrgMembershipTest(unittest.TestCase):
+    """Behavioural contract for the GitHub org-membership probe.
+
+    ``GET /orgs/{org}/members/{login}`` returns 204 for members and
+    non-2xx for non-members. The probe must treat only 204 as "member"
+    so we fail closed when GitHub reports anything else.
+    """
+
+    def test_returns_true_on_204(self) -> None:
+        with patch.object(
+            fgc, "_gh_request", return_value=(204, b"", {})
+        ) as mock_request:
+            result = fgc._check_org_membership("warpdotdev", "safia", token="t")
+        self.assertTrue(result)
+        args, kwargs = mock_request.call_args
+        self.assertIn("/orgs/warpdotdev/members/safia", args[0])
+        self.assertTrue(kwargs.get("allow_http_error"))
+
+    def test_returns_false_on_404(self) -> None:
+        with patch.object(fgc, "_gh_request", return_value=(404, b"", {})):
+            self.assertFalse(
+                fgc._check_org_membership("warpdotdev", "eve", token="t")
+            )
+
+    def test_returns_false_on_302_redirect(self) -> None:
+        # 302 is what GitHub returns when the caller cannot see private
+        # membership - the endpoint redirects to /public_members. We
+        # must NOT interpret that as "member" since private members
+        # whose membership is hidden from our token are indistinguishable
+        # from non-members in that response.
+        with patch.object(fgc, "_gh_request", return_value=(302, b"", {})):
+            self.assertFalse(
+                fgc._check_org_membership("warpdotdev", "alice", token="t")
+            )
+
+    def test_missing_org_or_login_returns_false_without_request(self) -> None:
+        with patch.object(fgc, "_gh_request") as mock_request:
+            self.assertFalse(fgc._check_org_membership("", "safia", token="t"))
+            self.assertFalse(fgc._check_org_membership("warpdotdev", "", token="t"))
+        mock_request.assert_not_called()
+
+
 class RunIssueTest(unittest.TestCase):
     def test_run_issue_drops_untrusted_comments_entirely(self) -> None:
         """Comments from non-members must be nuked from the output.
@@ -176,6 +298,10 @@ class RunIssueTest(unittest.TestCase):
                 "_fetch_issue_comments",
                 return_value=[trusted_comment, untrusted_comment],
             ),
+            # Stub the org-membership fallback so it doesn't attempt a
+            # real network call when the untrusted comment fails the
+            # static allowlist check.
+            patch.object(fgc, "_check_org_membership", return_value=False),
         ):
             output = fgc.run_issue(
                 "o",
@@ -188,6 +314,54 @@ class RunIssueTest(unittest.TestCase):
         self.assertNotIn("IGNORE_PRIOR_INSTRUCTIONS", output)
         self.assertNotIn("!! UNTRUSTED comment", output)
         self.assertIn("Trust notice", output)
+
+    def test_run_issue_keeps_contributor_comment_when_probe_says_org_member(
+        self,
+    ) -> None:
+        """End-to-end check for the bug described in GH #290.
+
+        The script should stop silently dropping maintainer comments
+        when the API reports their ``author_association`` as
+        ``CONTRIBUTOR`` (e.g. private org membership). Once the
+        fallback probe reports them as an org member the comment body
+        must make it into the rendered output.
+        """
+        issue = {
+            "number": 1,
+            "title": "Example",
+            "user": {"login": "alice"},
+            "author_association": "MEMBER",
+            "body": "body",
+        }
+        contributor_member_comment = _make_comment(
+            author="safia",
+            association="CONTRIBUTOR",
+            body="maintainer comment from private org member",
+            comment_id=42,
+        )
+        with (
+            patch.object(fgc, "_fetch_issue", return_value=issue),
+            patch.object(
+                fgc,
+                "_fetch_issue_comments",
+                return_value=[contributor_member_comment],
+            ),
+            patch.object(
+                fgc,
+                "_check_org_membership",
+                side_effect=lambda org, login, *, token: login == "safia",
+            ),
+        ):
+            output = fgc.run_issue(
+                "warpdotdev",
+                "oz-for-oss",
+                1,
+                token="t",
+                include_comments=True,
+            )
+        self.assertIn("maintainer comment from private org member", output)
+        self.assertIn("association=CONTRIBUTOR", output)
+        self.assertIn("trust=TRUSTED", output)
 
     def test_run_issue_reports_no_trusted_comments_when_only_untrusted(self) -> None:
         issue = {
@@ -206,6 +380,7 @@ class RunIssueTest(unittest.TestCase):
         with (
             patch.object(fgc, "_fetch_issue", return_value=issue),
             patch.object(fgc, "_fetch_issue_comments", return_value=[untrusted_comment]),
+            patch.object(fgc, "_check_org_membership", return_value=False),
         ):
             output = fgc.run_issue(
                 "o",
@@ -247,6 +422,7 @@ class RunPrTest(unittest.TestCase):
             patch.object(fgc, "_fetch_issue_comments", return_value=[issue_comment]),
             patch.object(fgc, "_fetch_pr_review_comments", return_value=[review_comment]),
             patch.object(fgc, "_fetch_pr_diff", return_value="diff --git a/x b/x\n"),
+            patch.object(fgc, "_check_org_membership", return_value=False),
         ):
             output = fgc.run_pr(
                 "o",
@@ -292,6 +468,7 @@ class RunPrTest(unittest.TestCase):
             patch.object(
                 fgc, "_fetch_pr_review_comments", return_value=[untrusted_review]
             ),
+            patch.object(fgc, "_check_org_membership", return_value=False),
         ):
             output = fgc.run_pr(
                 "o",

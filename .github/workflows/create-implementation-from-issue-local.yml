@@ -8,26 +8,75 @@ concurrency:
   group: create-implementation-issue-${{ github.event.issue.number || github.run_id }}
   cancel-in-progress: false
 jobs:
-  create_implementation:
+  # For ``issue_comment`` triggers, ``author_association`` can report
+  # ``CONTRIBUTOR`` for actual org members (private membership, etc.),
+  # so we fall back to ``GET /orgs/{org}/members/{login}`` via the app
+  # token before allowing the implementation run. Non-comment triggers
+  # (assignment / labeling by maintainers) bypass this gate.
+  check_trust:
+    name: Check commenter trust
     if: >-
-      (
-        github.event_name == 'issues' &&
-        github.event.action == 'assigned' &&
-        github.event.assignee.login == 'oz-agent' &&
-        contains(github.event.issue.labels.*.name, 'ready-to-implement')
-      ) || (
-        github.event_name == 'issues' &&
-        github.event.action == 'labeled' &&
-        github.event.label.name == 'ready-to-implement' &&
-        contains(github.event.issue.assignees.*.login, 'oz-agent')
-      ) || (
-        github.event_name == 'issue_comment' &&
-        !github.event.issue.pull_request &&
-        contains(github.event.issue.labels.*.name, 'ready-to-implement') &&
-        contains(github.event.comment.body, '@oz-agent') &&
-        contains(fromJSON('["COLLABORATOR","MEMBER","OWNER"]'), github.event.comment.author_association) &&
-        github.event.comment.user.type != 'Bot' &&
-        !endsWith(github.event.comment.user.login, '[bot]')
+      github.event_name == 'issue_comment' &&
+      !github.event.issue.pull_request &&
+      contains(github.event.issue.labels.*.name, 'ready-to-implement') &&
+      contains(github.event.comment.body, '@oz-agent') &&
+      github.event.comment.user.type != 'Bot' &&
+      !endsWith(github.event.comment.user.login, '[bot]')
+    runs-on: ubuntu-slim
+    outputs:
+      trusted: ${{ steps.evaluate.outputs.trusted }}
+    steps:
+      - name: Create GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.OZ_MGMT_GHA_APP_ID }}
+          owner: ${{ github.repository_owner }}
+          private-key: ${{ secrets.OZ_MGMT_GHA_PRIVATE_KEY }}
+      - name: Evaluate commenter trust
+        id: evaluate
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          ASSOCIATION: ${{ github.event.comment.author_association }}
+          ACTOR: ${{ github.event.comment.user.login }}
+          ORG: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          case "${ASSOCIATION:-}" in
+            OWNER|MEMBER|COLLABORATOR)
+              echo "Treating @${ACTOR} as trusted via author_association=${ASSOCIATION}."
+              echo "trusted=true" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+          if gh api --silent "/orgs/${ORG}/members/${ACTOR}" 2>/dev/null; then
+            echo "Treating @${ACTOR} as trusted via /orgs/${ORG}/members (association=${ASSOCIATION})."
+            echo "trusted=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Ignoring @oz-agent mention from @${ACTOR}; not an org member (association=${ASSOCIATION})."
+            echo "trusted=false" >> "$GITHUB_OUTPUT"
+          fi
+  create_implementation:
+    needs: [check_trust]
+    # ``always()`` so the ``issues`` branch still runs even when the
+    # sibling ``check_trust`` job was skipped (it only runs for
+    # ``issue_comment`` triggers).
+    if: >-
+      always() && (
+        (
+          github.event_name == 'issues' &&
+          github.event.action == 'assigned' &&
+          github.event.assignee.login == 'oz-agent' &&
+          contains(github.event.issue.labels.*.name, 'ready-to-implement')
+        ) || (
+          github.event_name == 'issues' &&
+          github.event.action == 'labeled' &&
+          github.event.label.name == 'ready-to-implement' &&
+          contains(github.event.issue.assignees.*.login, 'oz-agent')
+        ) || (
+          github.event_name == 'issue_comment' &&
+          needs.check_trust.outputs.trusted == 'true'
+        )
       )
     name: Create implementation diff
     permissions:
