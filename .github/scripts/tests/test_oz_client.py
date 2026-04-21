@@ -323,15 +323,12 @@ class BuildAgentConfigTest(unittest.TestCase):
         },
         clear=True,
     )
-    def test_unknown_session_sharing_value_falls_back_to_default(self) -> None:
+    def test_unknown_session_sharing_value_disables_sharing(self) -> None:
         config = build_agent_config(
             config_name="review-pull-request",
             workspace=Path("/tmp"),
         )
-        self.assertEqual(
-            dict(config).get("session_sharing"),
-            {"public_access": "VIEWER"},
-        )
+        self.assertNotIn("session_sharing", dict(config))
 
 
 if __name__ == "__main__":
