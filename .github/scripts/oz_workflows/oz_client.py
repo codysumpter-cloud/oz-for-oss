@@ -19,11 +19,24 @@ def oz_api_base_url() -> str:
     """Return the configured Oz API base URL.
 
     Callers must explicitly set ``WARP_API_BASE_URL`` so that every workflow
-    declares which Oz environment it targets. This avoids silently running
-    against an unexpected environment when the variable is forgotten, which
-    is especially important for forks of this OSS template repository.
+    declares which Oz environment (staging vs. production) it targets. This
+    avoids silently running against staging when the variable is forgotten,
+    which is especially important for forks of this OSS template repository.
     """
     return require_env("WARP_API_BASE_URL")
+
+
+def oz_origin_token() -> str:
+    """Return the origin token required for Oz API requests.
+
+    Callers must explicitly set ``WARP_ORIGIN_TOKEN_ENV_NAME`` to the name of
+    the environment variable that holds the origin token. Pairing it with
+    ``WARP_API_BASE_URL`` forces every workflow to declare which environment
+    it targets and which secret it pulls, and fails fast with a clear error
+    when either is missing.
+    """
+    origin_token_env_name = require_env("WARP_ORIGIN_TOKEN_ENV_NAME")
+    return require_env(origin_token_env_name)
 
 
 def build_oz_client() -> OzAPI:
@@ -32,6 +45,7 @@ def build_oz_client() -> OzAPI:
         api_key=require_env("WARP_API_KEY"),
         base_url=oz_api_base_url(),
         default_headers={
+            "X-Warp-Origin-Token": oz_origin_token(),
             "x-oz-api-source": "GITHUB_ACTION",
         },
     )
