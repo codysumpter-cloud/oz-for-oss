@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Callable, cast
+from typing import Any, Callable, cast
 
 from oz_agent_sdk import OzAPI
 from oz_agent_sdk.types import AgentRunParams, AmbientAgentConfigParam, McpServerConfigParam
@@ -13,6 +13,19 @@ from .env import optional_env, parse_mcp_servers, repo_slug, require_env, worksp
 
 
 TERMINAL_STATES = {"SUCCEEDED", "FAILED", "ERROR", "CANCELLED"}
+
+# Default public-access level for the run's shared session.
+#
+# The oz-for-oss workflows are intended for OSS repositories where community
+# members should be able to view agent activity through the session link
+# without being invited to the run's team. We therefore opt every run into
+# anyone-with-link viewer access by default. Callers that want to opt out or
+# pick a different level can override this via the
+# WARP_SESSION_SHARING_PUBLIC_ACCESS environment variable; set it to "NONE" or
+# "OFF" to disable public sharing for a run.
+DEFAULT_SESSION_SHARING_PUBLIC_ACCESS = "VIEWER"
+_SESSION_SHARING_DISABLED_VALUES = {"NONE", "OFF", "DISABLED", "FALSE", "0"}
+_SESSION_SHARING_SUPPORTED_LEVELS = {"VIEWER", "EDITOR"}
 
 
 def oz_api_base_url() -> str:
@@ -35,6 +48,31 @@ def build_oz_client() -> OzAPI:
             "x-oz-api-source": "GITHUB_ACTION",
         },
     )
+
+
+def _resolve_session_sharing_public_access() -> str | None:
+    """Resolve the configured public-access level for session sharing.
+
+    Returns the level string (``"VIEWER"`` or ``"EDITOR"``) when public session
+    sharing should be enabled for the run, or ``None`` when the caller has
+    explicitly disabled public sharing.
+    """
+    raw = optional_env("WARP_SESSION_SHARING_PUBLIC_ACCESS")
+    if raw == "":
+        return DEFAULT_SESSION_SHARING_PUBLIC_ACCESS
+    normalized = raw.upper()
+    if normalized in _SESSION_SHARING_DISABLED_VALUES:
+        return None
+    if normalized not in _SESSION_SHARING_SUPPORTED_LEVELS:
+        warning(
+            "WARP_SESSION_SHARING_PUBLIC_ACCESS="
+            f"{raw!r} is not a supported value; expected one of "
+            f"{sorted(_SESSION_SHARING_SUPPORTED_LEVELS)} or a disable value "
+            f"({sorted(_SESSION_SHARING_DISABLED_VALUES - {''})}). "
+            "Disabling public session sharing for this run."
+        )
+        return None
+    return normalized
 
 
 def build_agent_config(
@@ -66,6 +104,19 @@ def build_agent_config(
         warning(
             "WARP_AGENT_PROFILE is set, but the Oz Python SDK does not expose CLI profile support. Ignoring it."
         )
+
+    # Opt runs into anyone-with-link viewer access so community members can
+    # follow along via the session link. This relies on the server-side
+    # `session_sharing.public_access` field added in APP-3762; the field is
+    # typed once the Oz SDK is regenerated from the updated OpenAPI spec. In
+    # the meantime the request body is serialized from this TypedDict
+    # (total=False) so the extra key passes through at runtime.
+    public_access = _resolve_session_sharing_public_access()
+    if public_access is not None:
+        cast(dict[str, Any], config)["session_sharing"] = {
+            "public_access": public_access,
+        }
+
     return config
 
 
