@@ -20,6 +20,10 @@ from typing import Any
 
 
 DEFAULT_REPO = "warpdotdev/oz-for-oss"
+# Associations we can trust without probing org membership. When the
+# association is anything else we fall back to the org-membership check
+# below so CONTRIBUTOR comments from actual organization members (e.g.
+# those with private membership) are not silently dropped.
 ORG_MEMBER_ASSOCIATIONS = {"COLLABORATOR", "MEMBER", "OWNER"}
 
 
@@ -32,6 +36,30 @@ def _gh_api(args: list[str]) -> Any:
         check=True,
     )
     return json.loads(result.stdout)
+
+
+def _is_org_member(org: str, login: str, cache: dict[str, bool]) -> bool:
+    """Return whether *login* is a member of *org* via ``gh api``.
+
+    ``GET /orgs/{org}/members/{login}`` returns 204 for members (public or
+    private, when the caller can see them) and non-2xx otherwise. ``gh``
+    exits non-zero for anything other than a 2xx response, so we treat a
+    clean exit as "is a member" and anything else as "not a member".
+    Results are cached per run to keep the loop cheap.
+    """
+    if not org or not login:
+        return False
+    key = login.lower()
+    if key in cache:
+        return cache[key]
+    result = subprocess.run(
+        ["gh", "api", "--silent", f"/orgs/{org}/members/{login}"],
+        capture_output=True,
+        text=True,
+    )
+    member = result.returncode == 0
+    cache[key] = member
+    return member
 
 
 def _iso_now() -> str:
@@ -102,12 +130,19 @@ def _label_events(events: list[dict[str, Any]], cutoff: datetime) -> list[dict[s
 
 
 def _maintainer_comments(
-    comments: list[dict[str, Any]], cutoff: datetime
+    comments: list[dict[str, Any]],
+    cutoff: datetime,
+    *,
+    org: str,
+    membership_cache: dict[str, bool],
 ) -> list[dict[str, Any]]:
     selected: list[dict[str, Any]] = []
     for comment in comments:
         association = comment.get("author_association") or "NONE"
-        if association not in ORG_MEMBER_ASSOCIATIONS:
+        author_login = (comment.get("user") or {}).get("login") or ""
+        if association not in ORG_MEMBER_ASSOCIATIONS and not _is_org_member(
+            org, author_login, membership_cache
+        ):
             continue
         created_at = comment.get("created_at") or ""
         try:
@@ -119,7 +154,7 @@ def _maintainer_comments(
         selected.append(
             {
                 "created_at": created_at,
-                "author": (comment.get("user") or {}).get("login") or "",
+                "author": author_login,
                 "body": comment.get("body") or "",
                 "author_association": association,
             }
@@ -129,6 +164,8 @@ def _maintainer_comments(
 
 def build_payload(repo: str, days: int) -> dict[str, Any]:
     cutoff = _since(days)
+    org = repo.split("/", 1)[0] if "/" in repo else repo
+    membership_cache: dict[str, bool] = {}
     triaged_issues = _gh_api(
         [
             "--paginate",
@@ -158,7 +195,12 @@ def build_payload(repo: str, days: int) -> dict[str, Any]:
         events = _issue_events(repo, issue_number)
         label_events = _label_events(events, cutoff)
         comments = _issue_comments(repo, issue_number)
-        maintainer_comments = _maintainer_comments(comments, cutoff)
+        maintainer_comments = _maintainer_comments(
+            comments,
+            cutoff,
+            org=org,
+            membership_cache=membership_cache,
+        )
 
         if not label_events and not maintainer_comments:
             continue
