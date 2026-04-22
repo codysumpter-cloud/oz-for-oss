@@ -90,5 +90,5 @@ If the prompt says you are running in a cloud workflow:
 
 - still perform the triage as above
 - do not apply labels or edit the issue directly yourself
-- after validating `triage_result.json` with `jq`, upload it via `oz artifact upload triage_result.json`
-- IMPORTANT: the upload command is `oz artifact upload` (singular `artifact`). Do not use `artifacts` (plural) — that is not a valid subcommand and will fail.
+- after validating `triage_result.json` with `jq`, upload it via `oz artifact upload triage_result.json` (or `oz-preview artifact upload triage_result.json` if the `oz` CLI is not available). Either CLI is acceptable — use whichever one is installed in the environment.
+- IMPORTANT: the upload subcommand is `artifact` (singular) on both `oz` and `oz-preview`. Do not use `artifacts` (plural) — that is not a valid subcommand and will fail.

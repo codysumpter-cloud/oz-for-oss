@@ -149,5 +149,5 @@ If the prompt says you are in a cloud-environment workflow and the expected loca
 - Convert the raw diff into `pr_diff.txt` using the annotated format above before reviewing.
 - If the prompt includes spec context to materialize, write it to `spec_context.md` before running the review.
 - Still produce `review.json` and validate it with `jq`.
-- After validation, upload the result via `oz artifact upload review.json`.
-- IMPORTANT: the upload command is `oz artifact upload` (singular `artifact`). Do not use `artifacts` (plural) — that is not a valid subcommand and will fail.
+- After validation, upload the result via `oz artifact upload review.json` (or `oz-preview artifact upload review.json` if the `oz` CLI is not available). Either CLI is acceptable — use whichever one is installed in the environment.
+- IMPORTANT: the upload subcommand is `artifact` (singular) on both `oz` and `oz-preview`. Do not use `artifacts` (plural) — that is not a valid subcommand and will fail.
