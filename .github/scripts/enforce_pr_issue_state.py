@@ -144,7 +144,7 @@ def main() -> None:
             - If there is no clear match, set `close_comment` to a concise PR comment explaining that this {change_kind} PR could not be matched to an issue marked `{required_label}` and include this contribution docs link: {contribution_docs_url}
             - Do not close the PR yourself.
             - Validate the JSON with `jq`.
-            - After validating the JSON, upload it as an artifact via `oz artifact upload issue_association.json`. The subcommand is `artifact` (singular); do not use `artifacts`.
+            - After validating the JSON, upload it as an artifact via `oz artifact upload issue_association.json` (or `oz-preview artifact upload issue_association.json` if the `oz` CLI is not available). Either CLI is acceptable — use whichever one is installed in the environment. The subcommand is `artifact` (singular) on both CLIs; do not use `artifacts`.
             """
         ).strip()
 

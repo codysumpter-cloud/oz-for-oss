@@ -103,7 +103,7 @@ def main() -> None:
               - `branch_name`: the branch you pushed to (use `{branch_name}` exactly).
               - `pr_title`: a conventional-commit-style PR title for the spec changes (e.g. `spec: {issue_title}`).
               - `pr_summary`: the full markdown PR body (this replaces the former `pr_description.md` contents).
-            - After writing `pr-metadata.json`, upload it as an artifact via `oz artifact upload pr-metadata.json`. The subcommand is `artifact` (singular); do not use `artifacts`.
+            - After writing `pr-metadata.json`, upload it as an artifact via `oz artifact upload pr-metadata.json` (or `oz-preview artifact upload pr-metadata.json` if the `oz` CLI is not available). Either CLI is acceptable — use whichever one is installed in the environment. The subcommand is `artifact` (singular) on both CLIs; do not use `artifacts`.
             - If you produce spec changes, commit only the spec changes to branch `{branch_name}` and push that branch to origin.
             - Do not open or update the pull request yourself.
             - If there is no worthwhile spec diff, do not push the branch.

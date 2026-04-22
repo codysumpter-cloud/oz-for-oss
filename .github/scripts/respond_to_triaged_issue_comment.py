@@ -124,7 +124,7 @@ def main() -> None:
             - Do not include HTML metadata inside `analysis_comment`.
             - Validate `issue_response.json` with `jq`.
             - Do not create issue comments or make other GitHub changes.
-            - After validating the JSON, upload it as an artifact via `oz artifact upload issue_response.json`. The subcommand is `artifact` (singular); do not use `artifacts`.
+            - After validating the JSON, upload it as an artifact via `oz artifact upload issue_response.json` (or `oz-preview artifact upload issue_response.json` if the `oz` CLI is not available). Either CLI is acceptable — use whichever one is installed in the environment. The subcommand is `artifact` (singular) on both CLIs; do not use `artifacts`.
             """
         ).strip()
 
