@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 from review_pr import (
     _build_diff_line_map,
     _commentable_lines_for_patch,
     _extract_suggestion_blocks,
+    _format_review_completion_message,
+    _is_non_member_pr,
     _line_content_for_patch,
     _normalize_review_path,
     _normalize_review_payload,
+    _normalize_reviewer_logins,
+    _resolve_non_member_review_action,
+    _stakeholder_logins,
     _validate_suggestion_blocks,
 )
 
@@ -588,6 +594,265 @@ class ValidateSuggestionBlocksTest(unittest.TestCase):
                 else:
                     self.assertEqual(len(errors), 1)
                     self.assertIn(expected_substring, errors[0])
+
+
+class IsNonMemberPrTest(unittest.TestCase):
+    def test_non_member_associations(self) -> None:
+        for association in ["NONE", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR"]:
+            with self.subTest(association=association):
+                pr = SimpleNamespace(
+                    author_association=association,
+                    user=SimpleNamespace(login="alice", type="User"),
+                )
+                self.assertTrue(_is_non_member_pr(pr))
+
+    def test_member_associations(self) -> None:
+        for association in ["OWNER", "MEMBER", "COLLABORATOR"]:
+            with self.subTest(association=association):
+                pr = SimpleNamespace(
+                    author_association=association,
+                    user=SimpleNamespace(login="alice", type="User"),
+                )
+                self.assertFalse(_is_non_member_pr(pr))
+
+    def test_association_normalization(self) -> None:
+        for association in ["  member  ", "member", "Collaborator"]:
+            with self.subTest(association=association):
+                pr = SimpleNamespace(
+                    author_association=association,
+                    user=SimpleNamespace(login="alice", type="User"),
+                )
+                self.assertFalse(_is_non_member_pr(pr))
+
+    def test_empty_or_whitespace_association_defaults_to_member(self) -> None:
+        """When ``author_association`` cannot be resolved positively we must
+        not assume the author is a non-member. Falling back to the
+        ``COMMENT`` path keeps the safe default and avoids posting a
+        formal APPROVE/REQUEST_CHANGES verdict on an unknown author.
+        """
+        for association in ["", "   ", None, 0, object()]:
+            with self.subTest(association=association):
+                pr = SimpleNamespace(
+                    author_association=association,
+                    user=SimpleNamespace(login="alice", type="User"),
+                )
+                self.assertFalse(_is_non_member_pr(pr))
+
+    def test_missing_attribute_defaults_to_member(self) -> None:
+        self.assertFalse(_is_non_member_pr(SimpleNamespace()))
+
+    def test_bot_authored_pr_is_treated_as_member(self) -> None:
+        """Bot-authored PRs must never hit the APPROVE/REQUEST_CHANGES
+        gate. GitHub rejects self-APPROVE on bot-authored PRs and we do
+        not want the review workflow leaving a formal verdict on
+        automation-authored changes regardless of ``author_association``.
+        """
+        bot_cases = [
+            ("bot_type", SimpleNamespace(login="some-user", type="Bot")),
+            ("bot_suffix", SimpleNamespace(login="dependabot[bot]", type="User")),
+            ("oz_agent", SimpleNamespace(login="oz-agent[bot]", type="Bot")),
+        ]
+        for label, user in bot_cases:
+            for association in ["", "NONE", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR", "MEMBER"]:
+                with self.subTest(label=label, association=association):
+                    pr = SimpleNamespace(author_association=association, user=user)
+                    self.assertFalse(_is_non_member_pr(pr))
+
+
+class NormalizeReviewerLoginsTest(unittest.TestCase):
+    def test_strips_at_signs_and_deduplicates(self) -> None:
+        result = _normalize_reviewer_logins(
+            ["@alice", "alice", " bob ", "@@carol"],
+            pr_author_login="dave",
+        )
+        self.assertEqual(result, ["alice", "bob", "carol"])
+
+    def test_caps_to_max_reviewers(self) -> None:
+        result = _normalize_reviewer_logins(
+            ["a", "b", "c", "d", "e"],
+            pr_author_login="",
+        )
+        self.assertEqual(result, ["a", "b", "c"])
+
+    def test_removes_pr_author_case_insensitive(self) -> None:
+        result = _normalize_reviewer_logins(
+            ["Alice", "@BOB", "carol"],
+            pr_author_login="bob",
+        )
+        self.assertEqual(result, ["Alice", "carol"])
+
+    def test_drops_non_string_and_empty_entries(self) -> None:
+        result = _normalize_reviewer_logins(
+            ["", None, 42, "@", "alice"],
+            pr_author_login="",
+        )
+        self.assertEqual(result, ["alice"])
+
+    def test_non_list_returns_empty(self) -> None:
+        self.assertEqual(_normalize_reviewer_logins(None, pr_author_login=""), [])
+        self.assertEqual(_normalize_reviewer_logins("alice", pr_author_login=""), [])
+
+    def test_custom_limit(self) -> None:
+        result = _normalize_reviewer_logins(
+            ["a", "b", "c"],
+            pr_author_login="",
+            limit=2,
+        )
+        self.assertEqual(result, ["a", "b"])
+
+    def test_allowed_logins_filters_non_stakeholders(self) -> None:
+        """Recommendations outside ``.github/STAKEHOLDERS`` must be dropped.
+
+        The agent is asked to choose reviewers from STAKEHOLDERS; if it
+        suggests someone who is not listed, we drop them rather than
+        pulling a random GitHub user into the PR.
+        """
+        result = _normalize_reviewer_logins(
+            ["@alice", "stranger", "BOB"],
+            pr_author_login="",
+            allowed_logins={"alice", "bob"},
+        )
+        self.assertEqual(result, ["alice", "BOB"])
+
+    def test_allowed_logins_none_disables_enforcement(self) -> None:
+        result = _normalize_reviewer_logins(
+            ["alice", "stranger"],
+            pr_author_login="",
+            allowed_logins=None,
+        )
+        self.assertEqual(result, ["alice", "stranger"])
+
+    def test_allowed_logins_empty_drops_all(self) -> None:
+        """An empty allow-list means no recommendations survive.
+
+        This matches repositories that have not populated
+        ``.github/STAKEHOLDERS`` yet — we would rather request no
+        reviewers than request an arbitrary login.
+        """
+        result = _normalize_reviewer_logins(
+            ["alice", "bob"],
+            pr_author_login="",
+            allowed_logins=set(),
+        )
+        self.assertEqual(result, [])
+
+
+class StakeholderLoginsTest(unittest.TestCase):
+    def test_collects_lowercased_logins_from_entries(self) -> None:
+        entries = [
+            {"pattern": "/.github/", "owners": ["Alice", "@BOB"]},
+            {"pattern": "/specs/", "owners": ["alice", "Carol"]},
+        ]
+        self.assertEqual(
+            _stakeholder_logins(entries),
+            {"alice", "bob", "carol"},
+        )
+
+    def test_ignores_blank_and_non_string_owners(self) -> None:
+        entries = [
+            {"pattern": "/a/", "owners": ["", "  ", None, 42, "@"]},
+            {"pattern": "/b/", "owners": ["alice"]},
+        ]
+        self.assertEqual(_stakeholder_logins(entries), {"alice"})
+
+    def test_empty_or_missing_entries(self) -> None:
+        self.assertEqual(_stakeholder_logins([]), set())
+        self.assertEqual(_stakeholder_logins([{"pattern": "/a/"}]), set())
+
+
+class ResolveNonMemberReviewActionTest(unittest.TestCase):
+    def test_approve_returns_event_and_reviewers(self) -> None:
+        event, reviewers = _resolve_non_member_review_action(
+            {
+                "verdict": "approve",
+                "recommended_reviewers": ["@alice", "contributor", "bob"],
+            },
+            pr_author_login="contributor",
+        )
+        self.assertEqual(event, "APPROVE")
+        self.assertEqual(reviewers, ["alice", "bob"])
+
+    def test_request_changes_drops_reviewers(self) -> None:
+        event, reviewers = _resolve_non_member_review_action(
+            {
+                "verdict": "REQUEST_CHANGES",
+                "recommended_reviewers": ["alice"],
+            },
+            pr_author_login="",
+        )
+        self.assertEqual(event, "REQUEST_CHANGES")
+        self.assertEqual(reviewers, [])
+
+    def test_invalid_verdict_raises(self) -> None:
+        for verdict in ["", "COMMENT", "maybe", None]:
+            with self.subTest(verdict=verdict):
+                with self.assertRaisesRegex(ValueError, "`verdict` must be"):
+                    _resolve_non_member_review_action(
+                        {"verdict": verdict, "recommended_reviewers": []},
+                        pr_author_login="",
+                    )
+
+    def test_missing_recommended_reviewers_is_empty(self) -> None:
+        event, reviewers = _resolve_non_member_review_action(
+            {"verdict": "APPROVE"},
+            pr_author_login="",
+        )
+        self.assertEqual(event, "APPROVE")
+        self.assertEqual(reviewers, [])
+
+    def test_allowed_logins_filters_recommended_reviewers(self) -> None:
+        """Reviewers not in STAKEHOLDERS must be dropped on APPROVE.
+
+        The workflow passes the set of STAKEHOLDERS logins so an agent
+        that hallucinates a reviewer login never lands as a real review
+        request.
+        """
+        event, reviewers = _resolve_non_member_review_action(
+            {
+                "verdict": "APPROVE",
+                "recommended_reviewers": ["alice", "stranger", "@bob"],
+            },
+            pr_author_login="",
+            allowed_logins={"alice", "bob"},
+        )
+        self.assertEqual(event, "APPROVE")
+        self.assertEqual(reviewers, ["alice", "bob"])
+
+    def test_allowed_logins_ignored_on_request_changes(self) -> None:
+        event, reviewers = _resolve_non_member_review_action(
+            {
+                "verdict": "REQUEST_CHANGES",
+                "recommended_reviewers": ["alice"],
+            },
+            pr_author_login="",
+            allowed_logins={"alice"},
+        )
+        self.assertEqual(event, "REQUEST_CHANGES")
+        self.assertEqual(reviewers, [])
+
+
+class FormatReviewCompletionMessageTest(unittest.TestCase):
+    def test_approve_with_reviewers_mentions_logins(self) -> None:
+        message = _format_review_completion_message("APPROVE", ["alice", "bob"])
+        self.assertIn("approved", message)
+        self.assertIn("@alice, @bob", message)
+
+    def test_approve_without_reviewers(self) -> None:
+        message = _format_review_completion_message("APPROVE", [])
+        self.assertIn("approved", message)
+        self.assertIn("No matching stakeholder", message)
+
+    def test_request_changes(self) -> None:
+        self.assertIn(
+            "requested changes",
+            _format_review_completion_message("REQUEST_CHANGES", []),
+        )
+
+    def test_comment_default(self) -> None:
+        self.assertIn(
+            "posted feedback",
+            _format_review_completion_message("COMMENT", []),
+        )
 
 
 if __name__ == "__main__":
