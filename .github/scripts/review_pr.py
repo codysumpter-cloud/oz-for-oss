@@ -95,10 +95,29 @@ def _is_non_member_pr(pr: Any) -> bool:
     return normalized not in ORG_MEMBER_ASSOCIATIONS
 
 
+def _stakeholder_logins(entries: list[dict[str, Any]]) -> set[str]:
+    """Return the set of owner logins that appear in ``.github/STAKEHOLDERS``.
+
+    Logins are lowercased so membership checks against agent-supplied
+    reviewer logins stay case-insensitive, matching GitHub's own
+    treatment of usernames.
+    """
+    logins: set[str] = set()
+    for entry in entries or []:
+        for owner in entry.get("owners", []) or []:
+            if not isinstance(owner, str):
+                continue
+            login = owner.strip().lstrip("@").lower()
+            if login:
+                logins.add(login)
+    return logins
+
+
 def _normalize_reviewer_logins(
     candidates: Any,
     *,
     pr_author_login: str,
+    allowed_logins: set[str] | None = None,
     limit: int = _MAX_STAKEHOLDER_REVIEWERS,
 ) -> list[str]:
     """Normalize and cap a list of recommended reviewer logins from the agent.
@@ -107,6 +126,12 @@ def _normalize_reviewer_logins(
     de-duplicates while preserving first-seen order, removes the PR
     author (GitHub rejects self-review requests), and caps the result
     at ``limit`` entries so we don't over-notify maintainers.
+
+    When ``allowed_logins`` is provided, any candidate whose login does
+    not appear in that set (compared case-insensitively) is dropped so
+    the agent cannot request a review from someone outside of
+    ``.github/STAKEHOLDERS``. Passing ``None`` disables the enforcement
+    (keeping the legacy behavior that accepts any non-empty login).
     """
     if not isinstance(candidates, list):
         return []
@@ -119,6 +144,8 @@ def _normalize_reviewer_logins(
         if not login:
             continue
         if login.lower() == (pr_author_login or "").strip().lower():
+            continue
+        if allowed_logins is not None and login.lower() not in allowed_logins:
             continue
         if login in seen:
             continue
@@ -133,6 +160,7 @@ def _resolve_non_member_review_action(
     review: dict[str, Any],
     *,
     pr_author_login: str,
+    allowed_logins: set[str] | None = None,
 ) -> tuple[str, list[str]]:
     """Extract and validate the verdict + reviewer list for a non-member PR.
 
@@ -142,6 +170,11 @@ def _resolve_non_member_review_action(
     GitHub logins to request a review from (always empty on
     ``REQUEST_CHANGES``). Raises ``ValueError`` when the agent returned
     an unsupported ``verdict``.
+
+    When ``allowed_logins`` is provided, any recommended reviewer whose
+    login is not listed in ``.github/STAKEHOLDERS`` is dropped before
+    the review request is issued so the agent cannot pull in reviewers
+    outside of the repository's stakeholder roster.
     """
     verdict_raw = str(review.get("verdict") or "").strip().upper()
     if verdict_raw not in _ALLOWED_NON_MEMBER_VERDICTS:
@@ -152,6 +185,7 @@ def _resolve_non_member_review_action(
         _normalize_reviewer_logins(
             review.get("recommended_reviewers"),
             pr_author_login=pr_author_login,
+            allowed_logins=allowed_logins,
         )
         if verdict_raw == "APPROVE"
         else []
@@ -516,10 +550,12 @@ def main() -> None:
             getattr(getattr(pr, "user", None), "login", "") or ""
         )
         non_member_review_section = ""
+        stakeholder_logins: set[str] = set()
         if is_non_member:
             stakeholders_entries = load_stakeholders(
                 Path(workspace()) / ".github" / "STAKEHOLDERS"
             )
+            stakeholder_logins = _stakeholder_logins(stakeholders_entries)
             stakeholders_block = format_stakeholders_for_prompt(
                 stakeholders_entries
             )
@@ -642,6 +678,7 @@ def main() -> None:
                     event, recommended_reviewers = _resolve_non_member_review_action(
                         review,
                         pr_author_login=pr_author_login,
+                        allowed_logins=stakeholder_logins,
                     )
                 except ValueError:
                     # The agent returned an unsupported ``verdict``.

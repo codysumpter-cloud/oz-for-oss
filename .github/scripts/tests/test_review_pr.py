@@ -14,6 +14,7 @@ from review_pr import (
     _normalize_review_payload,
     _normalize_reviewer_logins,
     _resolve_non_member_review_action,
+    _stakeholder_logins,
     _validate_suggestion_blocks,
 )
 
@@ -699,6 +700,65 @@ class NormalizeReviewerLoginsTest(unittest.TestCase):
         )
         self.assertEqual(result, ["a", "b"])
 
+    def test_allowed_logins_filters_non_stakeholders(self) -> None:
+        """Recommendations outside ``.github/STAKEHOLDERS`` must be dropped.
+
+        The agent is asked to choose reviewers from STAKEHOLDERS; if it
+        suggests someone who is not listed, we drop them rather than
+        pulling a random GitHub user into the PR.
+        """
+        result = _normalize_reviewer_logins(
+            ["@alice", "stranger", "BOB"],
+            pr_author_login="",
+            allowed_logins={"alice", "bob"},
+        )
+        self.assertEqual(result, ["alice", "BOB"])
+
+    def test_allowed_logins_none_disables_enforcement(self) -> None:
+        result = _normalize_reviewer_logins(
+            ["alice", "stranger"],
+            pr_author_login="",
+            allowed_logins=None,
+        )
+        self.assertEqual(result, ["alice", "stranger"])
+
+    def test_allowed_logins_empty_drops_all(self) -> None:
+        """An empty allow-list means no recommendations survive.
+
+        This matches repositories that have not populated
+        ``.github/STAKEHOLDERS`` yet — we would rather request no
+        reviewers than request an arbitrary login.
+        """
+        result = _normalize_reviewer_logins(
+            ["alice", "bob"],
+            pr_author_login="",
+            allowed_logins=set(),
+        )
+        self.assertEqual(result, [])
+
+
+class StakeholderLoginsTest(unittest.TestCase):
+    def test_collects_lowercased_logins_from_entries(self) -> None:
+        entries = [
+            {"pattern": "/.github/", "owners": ["Alice", "@BOB"]},
+            {"pattern": "/specs/", "owners": ["alice", "Carol"]},
+        ]
+        self.assertEqual(
+            _stakeholder_logins(entries),
+            {"alice", "bob", "carol"},
+        )
+
+    def test_ignores_blank_and_non_string_owners(self) -> None:
+        entries = [
+            {"pattern": "/a/", "owners": ["", "  ", None, 42, "@"]},
+            {"pattern": "/b/", "owners": ["alice"]},
+        ]
+        self.assertEqual(_stakeholder_logins(entries), {"alice"})
+
+    def test_empty_or_missing_entries(self) -> None:
+        self.assertEqual(_stakeholder_logins([]), set())
+        self.assertEqual(_stakeholder_logins([{"pattern": "/a/"}]), set())
+
 
 class ResolveNonMemberReviewActionTest(unittest.TestCase):
     def test_approve_returns_event_and_reviewers(self) -> None:
@@ -738,6 +798,36 @@ class ResolveNonMemberReviewActionTest(unittest.TestCase):
             pr_author_login="",
         )
         self.assertEqual(event, "APPROVE")
+        self.assertEqual(reviewers, [])
+
+    def test_allowed_logins_filters_recommended_reviewers(self) -> None:
+        """Reviewers not in STAKEHOLDERS must be dropped on APPROVE.
+
+        The workflow passes the set of STAKEHOLDERS logins so an agent
+        that hallucinates a reviewer login never lands as a real review
+        request.
+        """
+        event, reviewers = _resolve_non_member_review_action(
+            {
+                "verdict": "APPROVE",
+                "recommended_reviewers": ["alice", "stranger", "@bob"],
+            },
+            pr_author_login="",
+            allowed_logins={"alice", "bob"},
+        )
+        self.assertEqual(event, "APPROVE")
+        self.assertEqual(reviewers, ["alice", "bob"])
+
+    def test_allowed_logins_ignored_on_request_changes(self) -> None:
+        event, reviewers = _resolve_non_member_review_action(
+            {
+                "verdict": "REQUEST_CHANGES",
+                "recommended_reviewers": ["alice"],
+            },
+            pr_author_login="",
+            allowed_logins={"alice"},
+        )
+        self.assertEqual(event, "REQUEST_CHANGES")
         self.assertEqual(reviewers, [])
 
 
