@@ -537,21 +537,21 @@ def main() -> None:
         else:
             repo_local_section = ""
 
-        # Non-member PRs go through an additional "review action" gate: the
+        # All non-bot, non-spec PRs go through the review-action gate: the
         # agent is asked to emit a verdict (APPROVE or REQUEST_CHANGES) and
         # a list of matching ``.github/STAKEHOLDERS`` logins to request as
         # human reviewers, and the workflow turns those into a real
-        # pull-request review plus reviewer requests. Member/collaborator
-        # PRs keep the existing COMMENT-only behavior. Spec-only PRs are
-        # intentionally exempted from the gate so humans stay in the loop
-        # earlier for spec changes.
-        is_non_member = _is_non_member_pr(pr) and not spec_only
+        # pull-request review plus reviewer requests. PRs authored by
+        # automation accounts fall back to COMMENT-only behavior. Spec-only
+        # PRs are intentionally exempted from the gate so humans stay in
+        # the loop earlier for spec changes.
+        is_review_gated = not spec_only and not is_automation_user(getattr(pr, "user", None))
         pr_author_login = str(
             getattr(getattr(pr, "user", None), "login", "") or ""
         )
-        non_member_review_section = ""
+        review_action_section = ""
         stakeholder_logins: set[str] = set()
-        if is_non_member:
+        if is_review_gated:
             stakeholders_entries = load_stakeholders(
                 Path(workspace()) / ".github" / "STAKEHOLDERS"
             )
@@ -559,12 +559,11 @@ def main() -> None:
             stakeholders_block = format_stakeholders_for_prompt(
                 stakeholders_entries
             )
-            non_member_review_section = dedent(
+            review_action_section = dedent(
                 f"""
-                Non-Member Review Action:
-                - The PR author (@{pr_author_login or 'unknown'}) is not a
-                  repository member or collaborator, so this review must
-                  commit to a verdict rather than just leaving comments.
+                Review Action:
+                - This review must commit to a verdict rather than just
+                  leaving comments.
                 - Choose exactly one ``verdict`` for the review, using the
                   GitHub review event naming:
                   - ``APPROVE`` when the PR looks ready for a human to
@@ -647,12 +646,12 @@ def main() -> None:
                 "\n\n" + repo_local_section.rstrip() + "\n\nCloud Workflow Requirements:",
                 1,
             )
-        if non_member_review_section:
-            # Append the non-member review-action block after the Cloud
-            # Workflow Requirements so the base review behavior (comments
-            # etc.) is still described up front, and the additional
+        if review_action_section:
+            # Append the review-action block after the Cloud Workflow
+            # Requirements so the base review behavior (comments etc.) is
+            # still described up front, and the additional
             # verdict/stakeholder contract is laid out separately.
-            prompt = prompt + "\n\n" + non_member_review_section
+            prompt = prompt + "\n\n" + review_action_section
 
         config = build_agent_config(
             config_name="review-pull-request",
@@ -673,7 +672,7 @@ def main() -> None:
             summary, comments = _normalize_review_payload(
                 review, diff_line_map, diff_content_map
             )
-            if is_non_member:
+            if is_review_gated:
                 try:
                     event, recommended_reviewers = _resolve_non_member_review_action(
                         review,
@@ -687,7 +686,7 @@ def main() -> None:
                     # failing the whole workflow and throwing away the
                     # feedback that was produced.
                     logger.exception(
-                        "Falling back to COMMENT for non-member PR #%s in %s/%s due to invalid review action payload",
+                        "Falling back to COMMENT for PR #%s in %s/%s due to invalid review action payload",
                         pr_number,
                         owner,
                         repo,
@@ -698,10 +697,10 @@ def main() -> None:
                 event = "COMMENT"
                 recommended_reviewers = []
             if not summary and not comments and event == "COMMENT":
-                # For member PRs the legacy short-circuit stands: if the
-                # agent had nothing to say, skip posting an empty review.
-                # Non-member PRs always post so the verdict lands on the
-                # PR even when the agent has no inline comments.
+                # For bot-authored PRs the COMMENT short-circuit stands:
+                # if the agent had nothing to say, skip posting an empty
+                # review. Review-gated PRs always post so the verdict lands
+                # on the PR even when the agent has no inline comments.
                 progress.complete("I completed the review and did not identify any actionable feedback for this pull request.")
                 return
             review_body = f"{summary or 'Automated review'}\n\n{POWERED_BY_SUFFIX}"
