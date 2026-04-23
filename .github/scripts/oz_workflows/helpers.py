@@ -85,13 +85,16 @@ def is_trusted_commenter(
       endpoint, request error, ...) leaves the author untrusted. We fail
       closed on errors to avoid accidentally granting trust.
     """
-    comment = event.get("comment") if isinstance(event, dict) else None
-    if not isinstance(comment, dict):
+    # Support both comment events (event["comment"]) and review events (event["review"]).
+    actor = event.get("comment") if isinstance(event, dict) else None
+    if not isinstance(actor, dict):
+        actor = event.get("review") if isinstance(event, dict) else None
+    if not isinstance(actor, dict):
         return False
-    association = str(comment.get("author_association") or "").upper()
+    association = str(actor.get("author_association") or "").upper()
     if association in ORG_MEMBER_ASSOCIATIONS:
         return True
-    login = (comment.get("user") or {}).get("login") or ""
+    login = (actor.get("user") or {}).get("login") or ""
     if not login or not org:
         return False
     path = (
@@ -438,14 +441,15 @@ def format_review_start_line(
 
 
 def format_pr_comment_start_line(
-    *, is_review_reply: bool, has_spec_context: bool
+    *, is_review_reply: bool, has_spec_context: bool, is_review_body: bool = False
 ) -> str:
     """State-aware opening line for the respond-to-pr-comment workflow."""
-    source = (
-        "an inline review-thread comment"
-        if is_review_reply
-        else "a PR conversation comment"
-    )
+    if is_review_reply:
+        source = "an inline review-thread comment"
+    elif is_review_body:
+        source = "a PR review body"
+    else:
+        source = "a PR conversation comment"
     spec_clause = (
         " Spec context was found and will be used to ground the change."
         if has_spec_context

@@ -1264,6 +1264,12 @@ class StateAwareStartLineTest(unittest.TestCase):
                 is_review_reply=False, has_spec_context=False
             ),
         )
+        self.assertIn(
+            "a PR review body",
+            format_pr_comment_start_line(
+                is_review_reply=False, is_review_body=True, has_spec_context=False
+            ),
+        )
 
     def test_pr_comment_start_line_mentions_spec_context(self) -> None:
         self.assertIn(

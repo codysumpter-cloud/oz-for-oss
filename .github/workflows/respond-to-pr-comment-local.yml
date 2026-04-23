@@ -4,6 +4,8 @@ on:
     types: [created]
   pull_request_review_comment:
     types: [created]
+  pull_request_review:
+    types: [submitted]
 concurrency:
   group: respond-to-pr-comment-${{ github.event.pull_request.number || github.event.issue.number }}
   cancel-in-progress: false
@@ -15,13 +17,32 @@ jobs:
   # ``GET /orgs/{org}/members/{login}`` probe so we do not drop
   # legitimate maintainer comments without also opening the door to
   # non-member CONTRIBUTORs.
+  #
+  # Three GitHub events can carry an ``@oz-agent`` mention on a PR:
+  # an ``issue_comment`` on the PR conversation, a
+  # ``pull_request_review_comment`` on a specific line, and the
+  # top-level body of a ``pull_request_review``. The first two expose
+  # the payload under ``github.event.comment``; the last exposes it
+  # under ``github.event.review``. We dispatch all three here so a
+  # mention in a review body triggers the agent the same way an inline
+  # comment or conversation comment does.
   check_trust:
     name: Check commenter trust
     if: >-
-      contains(github.event.comment.body, '@oz-agent') &&
-      (github.event_name == 'pull_request_review_comment' || (github.event_name == 'issue_comment' && github.event.issue.pull_request)) &&
-      github.event.comment.user.type != 'Bot' &&
-      !endsWith(github.event.comment.user.login, '[bot]')
+      (
+        (
+          (github.event_name == 'pull_request_review_comment' || (github.event_name == 'issue_comment' && github.event.issue.pull_request)) &&
+          contains(github.event.comment.body, '@oz-agent') &&
+          github.event.comment.user.type != 'Bot' &&
+          !endsWith(github.event.comment.user.login, '[bot]')
+        ) ||
+        (
+          github.event_name == 'pull_request_review' &&
+          contains(github.event.review.body, '@oz-agent') &&
+          github.event.review.user.type != 'Bot' &&
+          !endsWith(github.event.review.user.login, '[bot]')
+        )
+      )
     runs-on: ubuntu-slim
     outputs:
       trusted: ${{ steps.evaluate.outputs.trusted }}
@@ -37,8 +58,13 @@ jobs:
         id: evaluate
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
-          ASSOCIATION: ${{ github.event.comment.author_association }}
-          ACTOR: ${{ github.event.comment.user.login }}
+          # ``pull_request_review`` events carry the author under
+          # ``github.event.review``; comment-based events carry it under
+          # ``github.event.comment``. Use GitHub expression fall-through
+          # so either shape resolves to the right identity without
+          # needing parallel branches below.
+          ASSOCIATION: ${{ github.event.comment.author_association || github.event.review.author_association }}
+          ACTOR: ${{ github.event.comment.user.login || github.event.review.user.login }}
           ORG: ${{ github.repository_owner }}
         run: |
           set -euo pipefail

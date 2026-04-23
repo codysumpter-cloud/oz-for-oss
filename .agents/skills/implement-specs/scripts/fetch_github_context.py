@@ -427,6 +427,14 @@ def _fetch_pr_review_comments(
     )
 
 
+def _fetch_pr_reviews(
+    owner: str, repo: str, number: int, *, token: str
+) -> list[dict[str, Any]]:
+    return _gh_paginated_json(
+        f"/repos/{owner}/{repo}/pulls/{number}/reviews", token=token
+    )
+
+
 def _fetch_pr_diff(owner: str, repo: str, number: int, *, token: str) -> str:
     _, body, _ = _gh_request(
         f"/repos/{owner}/{repo}/pulls/{number}",
@@ -490,6 +498,34 @@ def _render_pr_body_section(
         provenance=provenance,
         body=str(pr.get("body") or "").strip() or "(no description provided)",
     )
+
+
+def _render_pr_review_section(
+    review: dict[str, Any],
+    *,
+    trust: _TrustResolver | None = None,
+) -> str:
+    user = review.get("user") or {}
+    author = user.get("login") or "unknown"
+    association = review.get("author_association")
+    trust_label = (
+        trust.trust_label(association, author) if trust is not None else None
+    )
+    review_id = review.get("id")
+    state = (review.get("state") or "").upper()
+    submitted_at = review.get("submitted_at") or ""
+    extra_parts = [f"id={review_id}", f"state={state}"]
+    if submitted_at:
+        extra_parts.append(f"submitted_at={submitted_at}")
+    provenance = _format_provenance(
+        kind="pr-review",
+        author=author,
+        association=association,
+        extra=" | ".join(extra_parts),
+        trust=trust_label,
+    )
+    body = str(review.get("body") or "").strip()
+    return _section("PR review body", provenance, body or "(no review body)")
 
 
 def _render_trust_banner() -> str:
@@ -562,13 +598,24 @@ def run_pr(
     if include_comments:
         issue_comments = _fetch_issue_comments(owner, repo, number, token=token)
         review_comments = _fetch_pr_review_comments(owner, repo, number, token=token)
+        reviews = _fetch_pr_reviews(owner, repo, number, token=token)
         filtered_issue = _filter_comments(issue_comments, trust=trust)
         filtered_review = _filter_comments(review_comments, trust=trust)
-        if not filtered_issue and not filtered_review:
+        # Only include reviews with non-empty bodies from trusted authors.
+        filtered_reviews = [
+            r for r in _filter_comments(reviews, trust=trust)
+            if (r.get("body") or "").strip()
+        ]
+        if not filtered_issue and not filtered_review and not filtered_reviews:
             sections.append(
                 "## Pull request discussion\n"
                 "(no comments from trusted authors found for this pull request)"
             )
+        # Reviews are rendered before conversation/inline comments regardless
+        # of submitted_at order. The agent locates the triggering item by id,
+        # not by position, so chronological ordering is not required here.
+        for review in filtered_reviews:
+            sections.append(_render_pr_review_section(review, trust=trust))
         for comment in filtered_issue:
             sections.append(
                 _render_comment_section(
