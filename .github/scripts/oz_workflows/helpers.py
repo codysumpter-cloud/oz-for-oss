@@ -441,14 +441,15 @@ def format_review_start_line(
 
 
 def format_pr_comment_start_line(
-    *, is_review_reply: bool, has_spec_context: bool
+    *, is_review_reply: bool, has_spec_context: bool, is_review_body: bool = False
 ) -> str:
     """State-aware opening line for the respond-to-pr-comment workflow."""
-    source = (
-        "an inline review-thread comment"
-        if is_review_reply
-        else "a PR conversation comment"
-    )
+    if is_review_reply:
+        source = "an inline review-thread comment"
+    elif is_review_body:
+        source = "a PR review body"
+    else:
+        source = "a PR conversation comment"
     spec_clause = (
         " Spec context was found and will be used to ground the change."
         if has_spec_context

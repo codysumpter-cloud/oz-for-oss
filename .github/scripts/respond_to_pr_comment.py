@@ -138,6 +138,9 @@ def _handle_review_body(
     pr_number = int(event["pull_request"]["number"])
     pr = github.get_pull(pr_number)
     requester = (review.get("user") or {}).get("login") or ""
+    # GitHub's REST API has no reactions endpoint for pull request review bodies
+    # (only for comments), so no create_reaction("eyes") call is made here.
+    # The progress issue comment is the sole user-visible acknowledgement.
 
     _run_implementation(
         client,
@@ -194,6 +197,7 @@ def _run_implementation(
     progress.start(
         format_pr_comment_start_line(
             is_review_reply=review_reply_target is not None,
+            is_review_body=trigger_kind == "review_body",
             has_spec_context=has_spec_context,
         )
     )
