@@ -16,6 +16,7 @@ from oz_workflows.helpers import (
     find_matching_spec_prs,
     is_automation_user,
     is_spec_only_pr,
+    is_trusted_commenter,
     org_member_comments_text,
     POWERED_BY_SUFFIX,
     resolve_coauthor_line,
@@ -80,6 +81,150 @@ class IsAutomationUserTest(unittest.TestCase):
 
     def test_returns_false_for_none_user(self) -> None:
         self.assertFalse(is_automation_user(None))
+
+
+class IsTrustedCommenterTest(unittest.TestCase):
+    """Trust evaluation for the ``respond-to-pr-comment`` gate.
+
+    The trust check must produce a deterministic yes/no BEFORE the agent
+    runs so the agent does not have to infer trust from the presence of
+    the triggering comment in ``fetch_github_context.py`` output. That
+    inference was the root cause of issue #311: a missing fetch-script
+    output looked identical to "commenter was filtered as untrusted",
+    so any unrelated fetch failure caused the agent to silently no-op
+    on legitimate org-member comments.
+    """
+
+    def _client_with_org_membership(
+        self, *, status: int, raise_exception: bool = False
+    ) -> object:
+        """Build a fake PyGithub client whose requester returns *status*.
+
+        ``is_trusted_commenter`` calls ``client.requester.requestJson``
+        directly (PyGithub exposes the requester as a public property),
+        so the fake only needs that single method.
+        """
+
+        calls: list[tuple[str, str]] = []
+
+        def _request_json(verb: str, path: str):
+            calls.append((verb, path))
+            if raise_exception:
+                raise RuntimeError("boom")
+            return status, {}, ""
+
+        requester = SimpleNamespace(requestJson=_request_json)
+        client = SimpleNamespace(requester=requester, calls=calls)
+        return client
+
+    def test_static_allowlist_short_circuits_without_api_call(self) -> None:
+        """``OWNER``/``MEMBER``/``COLLABORATOR`` authors skip the org probe."""
+        for association in ("OWNER", "MEMBER", "COLLABORATOR"):
+            with self.subTest(association=association):
+                client = self._client_with_org_membership(status=204)
+                event = {
+                    "comment": {
+                        "author_association": association,
+                        "user": {"login": "alice"},
+                    }
+                }
+                self.assertTrue(
+                    is_trusted_commenter(client, event, org="acme")
+                )
+                # Static allowlist must NOT make an API call.
+                self.assertEqual(client.calls, [])
+
+    def test_contributor_promoted_via_org_membership_probe(self) -> None:
+        """Private org members still report as ``CONTRIBUTOR`` on event payloads.
+
+        GitHub's ``author_association`` field is scoped to the repository,
+        so an org member whose membership is private is reported as
+        ``CONTRIBUTOR`` on the PR/comment event. We must fall back to
+        ``GET /orgs/{org}/members/{login}``; a 204 response promotes the
+        author to trusted.
+        """
+        client = self._client_with_org_membership(status=204)
+        event = {
+            "comment": {
+                "author_association": "CONTRIBUTOR",
+                "user": {"login": "private-member"},
+            }
+        }
+        self.assertTrue(is_trusted_commenter(client, event, org="acme"))
+        self.assertEqual(
+            client.calls, [("GET", "/orgs/acme/members/private-member")]
+        )
+
+    def test_non_member_falls_through_and_is_untrusted(self) -> None:
+        """A 404 on the org-membership probe keeps the author untrusted."""
+        client = self._client_with_org_membership(status=404)
+        event = {
+            "comment": {
+                "author_association": "NONE",
+                "user": {"login": "outsider"},
+            }
+        }
+        self.assertFalse(is_trusted_commenter(client, event, org="acme"))
+
+    def test_probe_redirect_is_untrusted(self) -> None:
+        """A 302 redirect (caller can't see private membership) is untrusted."""
+        client = self._client_with_org_membership(status=302)
+        event = {
+            "comment": {
+                "author_association": "CONTRIBUTOR",
+                "user": {"login": "someone"},
+            }
+        }
+        self.assertFalse(is_trusted_commenter(client, event, org="acme"))
+
+    def test_fails_closed_when_probe_raises(self) -> None:
+        """Exceptions during the probe must NOT grant trust."""
+        client = self._client_with_org_membership(
+            status=204, raise_exception=True
+        )
+        event = {
+            "comment": {
+                "author_association": "CONTRIBUTOR",
+                "user": {"login": "someone"},
+            }
+        }
+        self.assertFalse(is_trusted_commenter(client, event, org="acme"))
+
+    def test_missing_comment_is_untrusted(self) -> None:
+        """Events without a comment block cannot be evaluated as trusted."""
+        self.assertFalse(
+            is_trusted_commenter(
+                self._client_with_org_membership(status=204),
+                {"sender": {"login": "alice"}},
+                org="acme",
+            )
+        )
+
+    def test_missing_login_is_untrusted(self) -> None:
+        """Skip the probe (and fail closed) when we have no login to probe for."""
+        client = self._client_with_org_membership(status=204)
+        event = {
+            "comment": {
+                "author_association": "CONTRIBUTOR",
+                "user": {"login": ""},
+            }
+        }
+        self.assertFalse(is_trusted_commenter(client, event, org="acme"))
+        self.assertEqual(client.calls, [])
+
+    def test_url_encodes_org_and_login(self) -> None:
+        """Unusual org/login characters must be URL-encoded in the probe path."""
+        client = self._client_with_org_membership(status=204)
+        event = {
+            "comment": {
+                "author_association": "CONTRIBUTOR",
+                "user": {"login": "weird user"},
+            }
+        }
+        is_trusted_commenter(client, event, org="acme corp")
+        self.assertEqual(
+            client.calls, [("GET", "/orgs/acme%20corp/members/weird%20user")]
+        )
 
 
 class ResolveProgressRequesterLoginTest(unittest.TestCase):

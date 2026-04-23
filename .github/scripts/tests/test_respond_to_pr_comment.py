@@ -250,5 +250,155 @@ class RunImplementationPromptTest(unittest.TestCase):
         self.assertNotIn("Spec for retry logic", prompt)
 
 
+class MainTrustGateTest(unittest.TestCase):
+    """Verify ``main`` resolves commenter trust before the agent runs.
+
+    The bug (issue #311): the prompt asked the agent to infer trust from
+    the presence of the triggering comment in ``fetch_github_context.py``
+    output. Any missing output (script path issue, transient API failure,
+    pagination edge case, truncation, ...) looked identical to "author
+    was filtered as untrusted", which silently no-op'd legitimate org-
+    member comments. The fix moves trust evaluation into Python so the
+    decision is deterministic and cannot be confused with fetch failures.
+    """
+
+    def _patches(
+        self,
+        *,
+        event: dict,
+        event_name: str,
+        is_trusted: bool,
+    ):
+        """Patch ``main`` dependencies so we can assert dispatch behavior.
+
+        The patches cover: env helpers, the GitHub/Auth constructors, the
+        trust helper, and the two event-kind handlers. Callers enter the
+        resulting ``contextlib.ExitStack`` via ``with`` and inspect the
+        returned MagicMocks.
+        """
+        from contextlib import ExitStack
+
+        stack = ExitStack()
+        stack.enter_context(
+            patch("respond_to_pr_comment.repo_parts", return_value=("acme", "widgets"))
+        )
+        stack.enter_context(patch("respond_to_pr_comment.load_event", return_value=event))
+        stack.enter_context(patch("respond_to_pr_comment.optional_env", return_value=event_name))
+        stack.enter_context(patch("respond_to_pr_comment.require_env", return_value="token"))
+        stack.enter_context(patch("respond_to_pr_comment.Auth.Token"))
+        stack.enter_context(patch("respond_to_pr_comment.Github"))
+        stack.enter_context(patch("respond_to_pr_comment.repo_slug", return_value="acme/widgets"))
+        trust_mock = stack.enter_context(
+            patch(
+                "respond_to_pr_comment.is_trusted_commenter",
+                return_value=is_trusted,
+            )
+        )
+        notice_mock = stack.enter_context(
+            patch("respond_to_pr_comment.notice")
+        )
+        review_handler = stack.enter_context(
+            patch("respond_to_pr_comment._handle_review_comment")
+        )
+        issue_handler = stack.enter_context(
+            patch("respond_to_pr_comment._handle_issue_comment")
+        )
+        return stack, trust_mock, notice_mock, review_handler, issue_handler
+
+    def test_untrusted_commenter_skips_handler_and_emits_notice(self) -> None:
+        """Untrusted commenters must NOT reach ``_handle_*`` or the agent."""
+        from respond_to_pr_comment import main
+
+        event = {
+            "comment": {
+                "id": 999,
+                "user": {"login": "outsider", "type": "User"},
+                "author_association": "NONE",
+            },
+            "issue": {"number": 7, "pull_request": {}},
+        }
+        stack, trust_mock, notice_mock, review_handler, issue_handler = self._patches(
+            event=event, event_name="issue_comment", is_trusted=False
+        )
+        with stack:
+            main()
+        trust_mock.assert_called_once()
+        notice_mock.assert_called_once()
+        message = notice_mock.call_args.args[0]
+        self.assertIn("outsider", message)
+        self.assertIn("NONE", message)
+        review_handler.assert_not_called()
+        issue_handler.assert_not_called()
+
+    def test_trusted_issue_commenter_dispatches_to_issue_handler(self) -> None:
+        """A trusted commenter on a PR conversation comment reaches the agent."""
+        from respond_to_pr_comment import main
+
+        event = {
+            "comment": {
+                "id": 42,
+                "user": {"login": "alice", "type": "User"},
+                "author_association": "MEMBER",
+            },
+            "issue": {"number": 7, "pull_request": {}},
+        }
+        stack, trust_mock, notice_mock, review_handler, issue_handler = self._patches(
+            event=event, event_name="issue_comment", is_trusted=True
+        )
+        with stack:
+            main()
+        trust_mock.assert_called_once()
+        notice_mock.assert_not_called()
+        review_handler.assert_not_called()
+        issue_handler.assert_called_once()
+
+    def test_trusted_review_commenter_dispatches_to_review_handler(self) -> None:
+        """A trusted inline review comment reaches ``_handle_review_comment``."""
+        from respond_to_pr_comment import main
+
+        event = {
+            "comment": {
+                "id": 42,
+                "user": {"login": "alice", "type": "User"},
+                "author_association": "MEMBER",
+            },
+            "pull_request": {"number": 9},
+        }
+        stack, trust_mock, notice_mock, review_handler, issue_handler = self._patches(
+            event=event,
+            event_name="pull_request_review_comment",
+            is_trusted=True,
+        )
+        with stack:
+            main()
+        trust_mock.assert_called_once()
+        review_handler.assert_called_once()
+        issue_handler.assert_not_called()
+
+    def test_automation_user_short_circuits_before_trust_check(self) -> None:
+        """Bot authors are dropped without even probing org membership."""
+        from respond_to_pr_comment import main
+
+        event = {
+            "comment": {
+                "id": 1,
+                "user": {"login": "dependabot[bot]", "type": "Bot"},
+                "author_association": "NONE",
+            },
+            "issue": {"number": 7, "pull_request": {}},
+        }
+        stack, trust_mock, notice_mock, review_handler, issue_handler = self._patches(
+            event=event, event_name="issue_comment", is_trusted=False
+        )
+        with stack:
+            main()
+        # Automation user bailed BEFORE we constructed the Github
+        # client, so the trust check must not have been consulted.
+        trust_mock.assert_not_called()
+        notice_mock.assert_not_called()
+        review_handler.assert_not_called()
+        issue_handler.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
