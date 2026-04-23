@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -64,7 +65,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from .actions import notice, warning
+from .actions import notice
 from .env import optional_env
 
 logger = logging.getLogger(__name__)
@@ -87,13 +88,16 @@ class DockerAgentRun:
 
     ``run_id`` and ``session_link`` mirror the ``RunItem`` fields consumed
     by :func:`oz_workflows.helpers.record_run_session_link` so callers can
-    reuse the same progress-comment plumbing.
+    reuse the same progress-comment plumbing. ``output`` holds the parsed
+    JSON the agent wrote to ``/mnt/output/<output_filename>``; the helper
+    reads and cleans up the backing tempdir before returning, so callers
+    never need to touch a filesystem path.
     """
 
     run_id: str = ""
     session_link: str = ""
     conversation_id: str = ""
-    output_dir: Path = field(default_factory=Path)
+    output: dict[str, Any] = field(default_factory=dict)
     exit_code: int = 0
 
 
@@ -130,12 +134,15 @@ def run_agent_in_docker(
        the run id and session-share link.
     3. Enforces *timeout_seconds* using a ``threading.Timer`` so we don't
        hang the workflow if the container stops responding.
-    4. Returns a :class:`DockerAgentRun` describing the run. The caller
-       typically reads ``<run.output_dir>/<output_filename>`` to pick up
-       the agent's structured artifact.
+    4. Reads and JSON-decodes *output_filename* from the output dir,
+       stashes the parsed payload on ``run.output``, and deletes the
+       tempdir before returning. Callers read ``run.output`` directly;
+       no filesystem state survives this call.
 
-    The caller is responsible for validating that the expected output
-    file exists and for cleaning up *run.output_dir* when done.
+    Raises :class:`DockerAgentError` on a non-zero exit code, a missing
+    or malformed output file, or any other failure before ``run.output``
+    is populated. Raises :class:`DockerAgentTimeout` when the watchdog
+    fires. Either way, the output directory is removed.
     """
     repo_path = Path(repo_dir).resolve()
     if not repo_path.is_dir():
@@ -152,7 +159,7 @@ def run_agent_in_docker(
     if group_label:
         print(f"::group::{group_label}", flush=True)
 
-    run = DockerAgentRun(output_dir=output_dir)
+    run = DockerAgentRun()
     try:
         argv = _build_docker_argv(
             image=image,
@@ -170,15 +177,20 @@ def run_agent_in_docker(
             on_event=on_event,
             timeout_seconds=timeout_seconds,
         )
+
+        if run.exit_code != 0:
+            raise DockerAgentError(
+                f"Docker agent exited with code {run.exit_code} (image={image})"
+            )
+        run.output = _read_output_json(output_dir / output_filename)
+        return run
     finally:
         if group_label:
             print("::endgroup::", flush=True)
-
-    if run.exit_code != 0:
-        raise DockerAgentError(
-            f"Docker agent exited with code {run.exit_code} (image={image})"
-        )
-    return run
+        # Unconditional cleanup so callers (including
+        # ``scripts/local_triage.py`` and any future local tooling) never
+        # have to track or remove the backing tempdir themselves.
+        shutil.rmtree(output_dir, ignore_errors=True)
 
 
 def _build_docker_argv(
@@ -237,11 +249,19 @@ def _run_and_stream(
     on_event: Callable[[DockerAgentRun], None] | None,
     timeout_seconds: int,
 ) -> None:
-    """Spawn the container, stream stdout, and parse events."""
+    """Spawn the container, stream stdout, and parse events.
+
+    stderr is merged into stdout via ``stderr=subprocess.STDOUT``. The
+    previous ``stderr=subprocess.PIPE`` shape could deadlock if the
+    container wrote more than the pipe buffer (~64KB on Linux) before
+    exiting, since this loop only drained stdout. Merging keeps the
+    drain single-threaded and gives operators one contiguous log stream
+    to read.
+    """
     proc = subprocess.Popen(
         argv,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
     )
 
@@ -270,10 +290,6 @@ def _run_and_stream(
         )
 
     run.exit_code = int(proc.returncode or 0)
-    if run.exit_code != 0 and proc.stderr is not None:
-        stderr = proc.stderr.read() or ""
-        if stderr.strip():
-            warning(f"Docker agent stderr (truncated): {stderr[:2000]}")
 
 
 def _ingest_stdout_line(
@@ -284,9 +300,15 @@ def _ingest_stdout_line(
 ) -> None:
     """Parse a single stdout line and update *run* when it's a known event.
 
-    Unknown or non-JSON lines are ignored here. The raw stdout has
-    already been echoed back to the host's stdout above so operators
-    can still see everything during the run.
+    Only ``type="system"`` events that actually change a tracked field
+    (``run_id``, ``session_link``, ``conversation_id``) trigger the
+    ``on_event`` callback. Noisier events -- ``agent``, ``tool_call``,
+    ``tool_result``, ``skill_invoked``, etc. -- are ignored here because
+    callbacks like ``_record_triage_session_link`` issue a GitHub
+    ``PATCH /comments/:id`` per invocation and would otherwise hit
+    comment-edit rate limits on chatty runs. The raw stdout is already
+    echoed back to the host's stdout so operators can still see
+    everything during the run.
     """
     stripped = line.strip()
     if not stripped:
@@ -298,37 +320,48 @@ def _ingest_stdout_line(
     if not isinstance(event, dict):
         return
 
-    kind = event.get("type")
-    if kind == "system":
-        _apply_system_event(event, run=run)
-    # ``skill_invoked``, ``agent``, ``tool_call``, ``tool_result``, and
-    # the other message types have their own shape but none carry the
-    # run id or session link. We still let ``on_event`` see every event
-    # so future callers can consume them without changing this module.
-
-    if on_event is not None:
-        try:
-            on_event(run)
-        except Exception:
-            logger.exception("Docker agent on_event callback raised")
+    if event.get("type") != "system":
+        return
+    if not _apply_system_event(event, run=run):
+        return
+    if on_event is None:
+        return
+    try:
+        on_event(run)
+    except Exception:
+        logger.exception("Docker agent on_event callback raised")
 
 
-def _apply_system_event(event: dict[str, Any], *, run: DockerAgentRun) -> None:
+def _apply_system_event(event: dict[str, Any], *, run: DockerAgentRun) -> bool:
     """Apply a ``{"type": "system", "event_type": ...}`` payload to *run*.
+
+    Returns ``True`` iff the event actually changed a tracked field on
+    *run* (so callers can fire ``on_event`` only on real state
+    transitions). The three recognized ``event_type`` values come from
+    the ``JsonSystemEvent`` Rust enum in
+    ``deep-forest/app/src/ai/agent_sdk/driver/output.rs``:
+    ``run_started``, ``shared_session_established``, and
+    ``conversation_started``. See the module docstring for emit sites
+    and guarantees. Any other value is silently ignored (returns
+    ``False``) so new variants added upstream do not break the parser.
     """
     event_type = event.get("event_type")
     if event_type == "run_started":
         run_id = str(event.get("run_id") or "").strip()
         if run_id and run.run_id != run_id:
             run.run_id = run_id
+            return True
     elif event_type == "shared_session_established":
         join_url = str(event.get("join_url") or "").strip()
         if join_url and run.session_link != join_url:
             run.session_link = join_url
+            return True
     elif event_type == "conversation_started":
         conversation_id = str(event.get("conversation_id") or "").strip()
         if conversation_id and run.conversation_id != conversation_id:
             run.conversation_id = conversation_id
+            return True
+    return False
 
 
 def _format_argv_for_log(argv: Iterable[str]) -> str:
@@ -354,18 +387,14 @@ def _format_argv_for_log(argv: Iterable[str]) -> str:
     return " ".join(rendered)
 
 
-def read_output_json(
-    run: DockerAgentRun,
-    *,
-    filename: str,
-) -> dict[str, Any]:
-    """Read and JSON-decode *filename* from the container's output directory.
+def _read_output_json(path: Path) -> dict[str, Any]:
+    """Read and JSON-decode *path*, raising ``DockerAgentError`` on problems.
 
-    Raises :class:`DockerAgentError` when the file is missing or does not
-    decode to a JSON object so callers don't have to re-implement the
-    same fallback wiring the old artifact-polling helper had.
+    Internal helper used by :func:`run_agent_in_docker` to pull the
+    agent's result JSON out of the mounted output directory before the
+    tempdir is removed. Returns a JSON object (``dict``); raises when
+    the file is missing, unreadable, malformed, or not a JSON object.
     """
-    path = run.output_dir / filename
     if not path.is_file():
         raise DockerAgentError(
             f"Docker agent did not produce expected output file: {path}"
@@ -399,7 +428,6 @@ __all__ = [
     "DockerAgentTimeout",
     "OUTPUT_MOUNT",
     "REPO_MOUNT",
-    "read_output_json",
     "resolve_triage_image",
     "run_agent_in_docker",
 ]

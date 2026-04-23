@@ -17,7 +17,7 @@ from oz_workflows.docker_agent import (
     _build_docker_argv,
     _format_argv_for_log,
     _ingest_stdout_line,
-    read_output_json,
+    _read_output_json,
     resolve_triage_image,
     run_agent_in_docker,
 )
@@ -87,12 +87,12 @@ class BuildDockerArgvTest(unittest.TestCase):
 
 
 class ApplySystemEventTest(unittest.TestCase):
-    """``_apply_system_event`` maps each known event to exactly one field."""
+    """``_apply_system_event`` returns True iff a tracked field changed."""
 
     def test_event_parsing_table(self) -> None:
         cases = [
             (
-                "run_started",
+                "run_started_populates_run_id",
                 {
                     "type": "system",
                     "event_type": "run_started",
@@ -101,9 +101,10 @@ class ApplySystemEventTest(unittest.TestCase):
                 },
                 "run_id",
                 "abc-123",
+                True,
             ),
             (
-                "shared_session_established",
+                "shared_session_established_populates_session_link",
                 {
                     "type": "system",
                     "event_type": "shared_session_established",
@@ -111,9 +112,10 @@ class ApplySystemEventTest(unittest.TestCase):
                 },
                 "session_link",
                 "https://app.warp.dev/x",
+                True,
             ),
             (
-                "conversation_started",
+                "conversation_started_populates_conversation_id",
                 {
                     "type": "system",
                     "event_type": "conversation_started",
@@ -121,71 +123,90 @@ class ApplySystemEventTest(unittest.TestCase):
                 },
                 "conversation_id",
                 "conv-7",
+                True,
             ),
             (
                 "unknown_event_ignored",
                 {"type": "system", "event_type": "future_event", "value": "?"},
                 None,
                 None,
+                False,
             ),
         ]
-        for label, event, attr, expected in cases:
+        for label, event, attr, expected, expected_changed in cases:
             with self.subTest(label=label):
                 run = DockerAgentRun()
-                _apply_system_event(event, run=run)
+                changed = _apply_system_event(event, run=run)
+                self.assertEqual(changed, expected_changed)
                 if attr is None:
                     self.assertEqual(run, DockerAgentRun())
                 else:
                     self.assertEqual(getattr(run, attr), expected)
 
+    def test_repeat_event_does_not_report_change(self) -> None:
+        """Applying the same ``run_started`` payload twice only reports a change once.
+
+        Guards against a chatty CLI re-emitting the same event mid-run:
+        the callback should fire on the first transition, not every time
+        the JSON line happens to reappear.
+        """
+        run = DockerAgentRun()
+        payload = {"type": "system", "event_type": "run_started", "run_id": "r", "run_url": "u"}
+        self.assertTrue(_apply_system_event(payload, run=run))
+        self.assertFalse(_apply_system_event(payload, run=run))
+
 
 class IngestStdoutLineTest(unittest.TestCase):
-    """JSON event parsing + callback plumbing for streaming stdout."""
+    """JSON event parsing + callback throttling for streaming stdout."""
 
-    def test_calls_on_event_with_updated_run(self) -> None:
+    def test_fires_on_event_only_for_tracked_state_changes(self) -> None:
+        """``on_event`` is invoked once per *distinct* tracked field change.
+
+        Feeds a realistic stream: one ``run_started``, one
+        ``shared_session_established``, one repeat of the same
+        ``run_started`` (no-op), and one noisy ``type="agent"`` line.
+        The callback must fire exactly twice.
+        """
         run = DockerAgentRun()
-        events: list[tuple[str, str]] = []
+        observed: list[tuple[str, str]] = []
 
         def _on_event(current: DockerAgentRun) -> None:
-            events.append((current.run_id, current.session_link))
+            observed.append((current.run_id, current.session_link))
 
-        _ingest_stdout_line(
-            json.dumps(
-                {"type": "system", "event_type": "run_started", "run_id": "r1", "run_url": "u"}
-            ),
-            run=run,
-            on_event=_on_event,
+        run_started = json.dumps(
+            {"type": "system", "event_type": "run_started", "run_id": "r1", "run_url": "u"}
         )
-        _ingest_stdout_line(
-            json.dumps(
-                {"type": "system", "event_type": "shared_session_established", "join_url": "link"}
-            ),
-            run=run,
-            on_event=_on_event,
+        session_established = json.dumps(
+            {"type": "system", "event_type": "shared_session_established", "join_url": "link"}
         )
-        # Non-system events still invoke the callback but don't mutate
-        # run_id / session_link.
-        _ingest_stdout_line(
-            json.dumps({"type": "agent", "text": "hello"}),
-            run=run,
-            on_event=_on_event,
-        )
+        agent_text = json.dumps({"type": "agent", "text": "reasoning..."})
 
+        _ingest_stdout_line(run_started, run=run, on_event=_on_event)
+        _ingest_stdout_line(session_established, run=run, on_event=_on_event)
+        # Repeat should not fire the callback again (idempotent state).
+        _ingest_stdout_line(run_started, run=run, on_event=_on_event)
+        # Non-system events should not fire the callback at all.
+        _ingest_stdout_line(agent_text, run=run, on_event=_on_event)
+
+        self.assertEqual(observed, [("r1", ""), ("r1", "link")])
         self.assertEqual(run.run_id, "r1")
         self.assertEqual(run.session_link, "link")
-        self.assertEqual(
-            events,
-            [("r1", ""), ("r1", "link"), ("r1", "link")],
-        )
 
-    def test_ignores_non_json_lines(self) -> None:
+    def test_ignores_non_json_and_non_system_lines(self) -> None:
+        """Garbage lines + non-system event types never mutate *run*."""
         run = DockerAgentRun()
         _ingest_stdout_line("[INFO] spinning up container", run=run, on_event=None)
         _ingest_stdout_line("   \n", run=run, on_event=None)
         _ingest_stdout_line("null", run=run, on_event=None)
+        _ingest_stdout_line(
+            json.dumps({"type": "tool_call", "tool": "run_command"}),
+            run=run,
+            on_event=None,
+        )
         self.assertEqual(run, DockerAgentRun())
 
     def test_callback_exception_does_not_propagate(self) -> None:
+        """A raising ``on_event`` must not bubble out to the stdout drain."""
         run = DockerAgentRun()
 
         def _on_event(_: DockerAgentRun) -> None:
@@ -237,11 +258,15 @@ class ResolveTriageImageTest(unittest.TestCase):
 
 
 class _FakeProcess:
-    """Stand-in for :class:`subprocess.Popen` returns."""
+    """Stand-in for :class:`subprocess.Popen` returns.
 
-    def __init__(self, stdout_lines: list[str], returncode: int = 0, stderr: str = "") -> None:
+    stderr is ``None`` because production code now uses
+    ``stderr=subprocess.STDOUT`` -- stderr is merged into stdout.
+    """
+
+    def __init__(self, stdout_lines: list[str], returncode: int = 0) -> None:
         self.stdout = io.StringIO("".join(stdout_lines))
-        self.stderr = io.StringIO(stderr)
+        self.stderr = None
         self.returncode = returncode
         self.killed = False
 
@@ -252,8 +277,35 @@ class _FakeProcess:
         return self.returncode
 
 
+class ReadOutputJsonTest(unittest.TestCase):
+    """The internal ``_read_output_json`` helper used before tempdir cleanup."""
+
+    def test_reads_and_parses_json(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "triage_result.json"
+            path.write_text(json.dumps({"summary": "ok"}), encoding="utf-8")
+            self.assertEqual(_read_output_json(path), {"summary": "ok"})
+
+    def test_raises_when_file_missing(self) -> None:
+        with TemporaryDirectory() as tmp:
+            with self.assertRaises(DockerAgentError):
+                _read_output_json(Path(tmp) / "triage_result.json")
+
+    def test_raises_when_not_json_object(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "triage_result.json"
+            path.write_text("[]", encoding="utf-8")
+            with self.assertRaises(DockerAgentError):
+                _read_output_json(path)
+
+
 class RunAgentInDockerTest(unittest.TestCase):
-    """Drive the full helper with a fake Popen to cover wiring + error paths."""
+    """Drive the full helper with a fake Popen to cover wiring + error paths.
+
+    The fake ``tempfile.mkdtemp`` captures the output directory path so we
+    can (a) pre-populate the expected result file, and (b) assert the
+    directory is cleaned up by ``run_agent_in_docker``'s ``finally`` block.
+    """
 
     def _stdout_lines(self) -> list[str]:
         return [
@@ -268,8 +320,15 @@ class RunAgentInDockerTest(unittest.TestCase):
         *,
         stdout_lines: list[str],
         returncode: int = 0,
-        stderr: str = "",
-    ) -> tuple[DockerAgentRun, list[DockerAgentRun]]:
+        write_output: bool = True,
+        output_payload: dict | None = None,
+    ) -> tuple[DockerAgentRun, list[DockerAgentRun], Path]:
+        """Drive ``run_agent_in_docker`` against a fake subprocess.
+
+        Returns the final ``DockerAgentRun``, the list of ``on_event``
+        observations, and the path to the captured output dir so callers
+        can assert cleanup behavior.
+        """
         observed: list[DockerAgentRun] = []
 
         def _on_event(current: DockerAgentRun) -> None:
@@ -278,44 +337,98 @@ class RunAgentInDockerTest(unittest.TestCase):
                     run_id=current.run_id,
                     session_link=current.session_link,
                     conversation_id=current.conversation_id,
-                    output_dir=current.output_dir,
+                    output=dict(current.output),
                     exit_code=current.exit_code,
                 )
             )
 
-        fake_proc = _FakeProcess(stdout_lines, returncode=returncode, stderr=stderr)
-        with TemporaryDirectory() as repo_dir:
-            with patch.object(docker_agent.subprocess, "Popen", return_value=fake_proc) as popen:
-                with patch.object(docker_agent.threading, "Timer") as timer_cls:
-                    timer_cls.return_value = MagicMock()
-                    run = run_agent_in_docker(
-                        prompt="hello",
-                        skill_name="triage-issue",
-                        title="test",
-                        image="oz-for-oss-triage",
-                        repo_dir=repo_dir,
-                        output_filename="triage_result.json",
-                        on_event=_on_event,
-                    )
-                    self.assertTrue(popen.called)
-        return run, observed
+        output_dirs: list[Path] = []
+        real_mkdtemp = docker_agent.tempfile.mkdtemp
 
-    def test_happy_path_extracts_run_id_and_session_link(self) -> None:
-        run, observed = self._run(stdout_lines=self._stdout_lines())
+        def _capturing_mkdtemp(*args: object, **kwargs: object) -> str:
+            path = real_mkdtemp(*args, **kwargs)  # type: ignore[arg-type]
+            output_dirs.append(Path(path))
+            if write_output:
+                payload = output_payload if output_payload is not None else {"summary": "ok"}
+                (Path(path) / "triage_result.json").write_text(
+                    json.dumps(payload), encoding="utf-8"
+                )
+            return path
+
+        fake_proc = _FakeProcess(stdout_lines, returncode=returncode)
+        with TemporaryDirectory() as repo_dir:
+            with patch.object(docker_agent.tempfile, "mkdtemp", side_effect=_capturing_mkdtemp):
+                with patch.object(docker_agent.subprocess, "Popen", return_value=fake_proc) as popen:
+                    with patch.object(docker_agent.threading, "Timer") as timer_cls:
+                        timer_cls.return_value = MagicMock()
+                        run = run_agent_in_docker(
+                            prompt="hello",
+                            skill_name="triage-issue",
+                            title="test",
+                            image="oz-for-oss-triage",
+                            repo_dir=repo_dir,
+                            output_filename="triage_result.json",
+                            on_event=_on_event,
+                        )
+                        self.assertTrue(popen.called)
+        self.assertEqual(len(output_dirs), 1, "helper should mkdtemp exactly once")
+        return run, observed, output_dirs[0]
+
+    def test_happy_path_populates_output_and_cleans_up(self) -> None:
+        run, observed, output_dir = self._run(
+            stdout_lines=self._stdout_lines(),
+            output_payload={"summary": "triaged", "labels": ["bug"]},
+        )
         self.assertEqual(run.run_id, "oz-run-42")
         self.assertEqual(run.session_link, "https://warp/session")
         self.assertEqual(run.exit_code, 0)
-        self.assertEqual(observed[0].run_id, "oz-run-42")
-        self.assertEqual(observed[1].session_link, "https://warp/session")
+        self.assertEqual(run.output, {"summary": "triaged", "labels": ["bug"]})
+        # Cleanup always fires in the helper's ``finally`` block.
+        self.assertFalse(output_dir.exists())
+        # on_event fires only on state-changing system events.
+        self.assertEqual(
+            [(r.run_id, r.session_link) for r in observed],
+            [("oz-run-42", ""), ("oz-run-42", "https://warp/session")],
+        )
 
-    def test_raises_on_nonzero_exit(self) -> None:
+    def test_raises_on_nonzero_exit_and_still_cleans_up(self) -> None:
+        output_dirs: list[Path] = []
+        real_mkdtemp = docker_agent.tempfile.mkdtemp
+
+        def _capturing_mkdtemp(*args: object, **kwargs: object) -> str:
+            path = real_mkdtemp(*args, **kwargs)  # type: ignore[arg-type]
+            output_dirs.append(Path(path))
+            return path
+
+        fake_proc = _FakeProcess(
+            [
+                json.dumps({"type": "system", "event_type": "run_started", "run_id": "r", "run_url": "u"}) + "\n",
+            ],
+            returncode=1,
+        )
+        with TemporaryDirectory() as repo_dir:
+            with patch.object(docker_agent.tempfile, "mkdtemp", side_effect=_capturing_mkdtemp):
+                with patch.object(docker_agent.subprocess, "Popen", return_value=fake_proc):
+                    with patch.object(docker_agent.threading, "Timer") as timer_cls:
+                        timer_cls.return_value = MagicMock()
+                        with self.assertRaises(DockerAgentError):
+                            run_agent_in_docker(
+                                prompt="hello",
+                                skill_name="triage-issue",
+                                title="test",
+                                image="oz-for-oss-triage",
+                                repo_dir=repo_dir,
+                                output_filename="triage_result.json",
+                            )
+        self.assertEqual(len(output_dirs), 1)
+        self.assertFalse(output_dirs[0].exists())
+
+    def test_raises_when_output_file_missing(self) -> None:
+        """A successful container that forgets to write the result still errors cleanly."""
         with self.assertRaises(DockerAgentError):
             self._run(
-                stdout_lines=[
-                    json.dumps({"type": "system", "event_type": "run_started", "run_id": "r", "run_url": "u"}) + "\n",
-                ],
-                returncode=1,
-                stderr="bad time\n",
+                stdout_lines=self._stdout_lines(),
+                write_output=False,
             )
 
     def test_missing_repo_dir_raises(self) -> None:
@@ -329,57 +442,41 @@ class RunAgentInDockerTest(unittest.TestCase):
                 output_filename="triage_result.json",
             )
 
-    def test_timeout_raises(self) -> None:
-        """When the Timer fires before the process completes, we raise."""
+    def test_timeout_raises_and_cleans_up(self) -> None:
+        """When the Timer fires before the process completes, we raise + clean up."""
 
         fake_proc = _FakeProcess([], returncode=0)
 
         def _timer_cls(_timeout: float, callback):  # type: ignore[no-untyped-def]
             timer = MagicMock()
-            # Simulate the watchdog firing immediately.
-            timer.start.side_effect = callback
+            timer.start.side_effect = callback  # fire immediately
             return timer
 
+        output_dirs: list[Path] = []
+        real_mkdtemp = docker_agent.tempfile.mkdtemp
+
+        def _capturing_mkdtemp(*args: object, **kwargs: object) -> str:
+            path = real_mkdtemp(*args, **kwargs)  # type: ignore[arg-type]
+            output_dirs.append(Path(path))
+            return path
+
         with TemporaryDirectory() as repo_dir:
-            with patch.object(docker_agent.subprocess, "Popen", return_value=fake_proc):
-                with patch.object(docker_agent.threading, "Timer", side_effect=_timer_cls):
-                    with self.assertRaises(DockerAgentTimeout):
-                        run_agent_in_docker(
-                            prompt="hello",
-                            skill_name="triage-issue",
-                            title="test",
-                            image="oz-for-oss-triage",
-                            repo_dir=repo_dir,
-                            output_filename="triage_result.json",
-                            timeout_seconds=1,
-                        )
+            with patch.object(docker_agent.tempfile, "mkdtemp", side_effect=_capturing_mkdtemp):
+                with patch.object(docker_agent.subprocess, "Popen", return_value=fake_proc):
+                    with patch.object(docker_agent.threading, "Timer", side_effect=_timer_cls):
+                        with self.assertRaises(DockerAgentTimeout):
+                            run_agent_in_docker(
+                                prompt="hello",
+                                skill_name="triage-issue",
+                                title="test",
+                                image="oz-for-oss-triage",
+                                repo_dir=repo_dir,
+                                output_filename="triage_result.json",
+                                timeout_seconds=1,
+                            )
         self.assertTrue(fake_proc.killed)
-
-
-class ReadOutputJsonTest(unittest.TestCase):
-    def test_reads_and_parses_json(self) -> None:
-        with TemporaryDirectory() as tmp:
-            run = DockerAgentRun(output_dir=Path(tmp))
-            (Path(tmp) / "triage_result.json").write_text(
-                json.dumps({"summary": "ok"}), encoding="utf-8"
-            )
-            self.assertEqual(
-                read_output_json(run, filename="triage_result.json"),
-                {"summary": "ok"},
-            )
-
-    def test_raises_when_file_missing(self) -> None:
-        with TemporaryDirectory() as tmp:
-            run = DockerAgentRun(output_dir=Path(tmp))
-            with self.assertRaises(DockerAgentError):
-                read_output_json(run, filename="triage_result.json")
-
-    def test_raises_when_not_json_object(self) -> None:
-        with TemporaryDirectory() as tmp:
-            run = DockerAgentRun(output_dir=Path(tmp))
-            (Path(tmp) / "triage_result.json").write_text("[]", encoding="utf-8")
-            with self.assertRaises(DockerAgentError):
-                read_output_json(run, filename="triage_result.json")
+        self.assertEqual(len(output_dirs), 1)
+        self.assertFalse(output_dirs[0].exists())
 
 
 if __name__ == "__main__":

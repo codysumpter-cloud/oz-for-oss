@@ -8,7 +8,6 @@ from github import Auth, Github
 
 from oz_workflows.docker_agent import (
     REPO_MOUNT,
-    read_output_json,
     resolve_triage_image,
     run_agent_in_docker,
 )
@@ -190,7 +189,7 @@ def main() -> None:
                 model=model,
             )
             record_run_session_link(progress, run)
-            result = read_output_json(run, filename="issue_response.json")
+            result = run.output
             analysis_comment = extract_analysis_comment(result)
             if not analysis_comment:
                 analysis_comment = (

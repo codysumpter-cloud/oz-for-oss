@@ -53,7 +53,7 @@ FROM warpdotdev/warp-agent:latest
 # user unchanged from the base image.
 USER root
 RUN apt-get update -qq \
-    && apt-get install -y -qq --no-install-recommends jq > /dev/null 2>&1 \
+    && apt-get install -y -qq --no-install-recommends jq \
     && rm -rf /var/lib/apt/lists/*
 USER warp-agent
 

@@ -13,7 +13,6 @@ from github.Repository import Repository
 from oz_workflows.actions import append_summary, warning
 from oz_workflows.docker_agent import (
     REPO_MOUNT,
-    read_output_json,
     resolve_triage_image,
     run_agent_in_docker,
 )
@@ -253,7 +252,7 @@ def process_issue(
             model=model,
         )
         _record_triage_session_link(progress, run, is_retriage=is_retriage)
-        result = read_output_json(run, filename="triage_result.json")
+        result = run.output
         apply_triage_result(
             github,
             owner,
