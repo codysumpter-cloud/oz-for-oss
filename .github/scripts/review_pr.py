@@ -95,6 +95,34 @@ def _is_non_member_pr(pr: Any) -> bool:
     return normalized not in ORG_MEMBER_ASSOCIATIONS
 
 
+def _should_gate_review(pr: Any, *, spec_only: bool) -> bool:
+    """Return True if the PR should go through the review-action gate.
+
+    The review-action gate asks the agent to commit to a verdict
+    (``APPROVE`` or ``REQUEST_CHANGES``) and a list of recommended
+    reviewers, which the workflow turns into a formal pull-request
+    review plus reviewer requests.
+
+    A PR is gated when:
+    - it is not a spec-only PR (spec-only PRs intentionally stay on the
+      ``COMMENT`` path so humans stay in the loop earlier for spec
+      changes), and
+    - it is not authored by an automation account (bots, including the
+      Oz bot reviewing its own PRs, always fall back to ``COMMENT`` so
+      we never attempt an APPROVE/REQUEST_CHANGES on an automation
+      PR; GitHub also rejects self-APPROVE on bot-authored PRs).
+
+    Note: organization membership is intentionally not part of this
+    predicate. All non-bot, non-spec PRs receive the gate regardless of
+    the author's ``author_association``.
+    """
+    if spec_only:
+        return False
+    if is_automation_user(getattr(pr, "user", None)):
+        return False
+    return True
+
+
 def _stakeholder_logins(entries: list[dict[str, Any]]) -> set[str]:
     """Return the set of owner logins that appear in ``.github/STAKEHOLDERS``.
 
@@ -545,7 +573,7 @@ def main() -> None:
         # automation accounts fall back to COMMENT-only behavior. Spec-only
         # PRs are intentionally exempted from the gate so humans stay in
         # the loop earlier for spec changes.
-        is_review_gated = not spec_only and not is_automation_user(getattr(pr, "user", None))
+        is_review_gated = _should_gate_review(pr, spec_only=spec_only)
         pr_author_login = str(
             getattr(getattr(pr, "user", None), "login", "") or ""
         )

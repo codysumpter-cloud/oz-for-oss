@@ -14,6 +14,7 @@ from review_pr import (
     _normalize_review_payload,
     _normalize_reviewer_logins,
     _resolve_non_member_review_action,
+    _should_gate_review,
     _stakeholder_logins,
     _validate_suggestion_blocks,
 )
@@ -657,6 +658,94 @@ class IsNonMemberPrTest(unittest.TestCase):
                 with self.subTest(label=label, association=association):
                     pr = SimpleNamespace(author_association=association, user=user)
                     self.assertFalse(_is_non_member_pr(pr))
+
+
+class ShouldGateReviewTest(unittest.TestCase):
+    """Covers the ``_should_gate_review`` production predicate.
+
+    The review-action gate applies to every non-bot, non-spec PR
+    regardless of ``author_association``. These tests lock in that
+    contract so future revisions (for example, restoring a
+    members-excluded gate) have to update the predicate and its tests
+    together.
+    """
+
+    def test_non_bot_pr_is_gated_regardless_of_association(self) -> None:
+        """Org membership must not affect the gate decision.
+
+        The whole point of this change is to apply the gate to member
+        and non-member PRs alike, so every realistic
+        ``author_association`` value should still result in a gated
+        review when the author is not an automation account.
+        """
+        associations = [
+            "NONE",
+            "CONTRIBUTOR",
+            "FIRST_TIME_CONTRIBUTOR",
+            "COLLABORATOR",
+            "MEMBER",
+            "OWNER",
+            "",
+            None,
+        ]
+        for association in associations:
+            with self.subTest(association=association):
+                pr = SimpleNamespace(
+                    author_association=association,
+                    user=SimpleNamespace(login="alice", type="User"),
+                )
+                self.assertTrue(_should_gate_review(pr, spec_only=False))
+
+    def test_spec_only_pr_is_not_gated(self) -> None:
+        pr = SimpleNamespace(
+            author_association="NONE",
+            user=SimpleNamespace(login="alice", type="User"),
+        )
+        self.assertFalse(_should_gate_review(pr, spec_only=True))
+
+    def test_bot_authored_pr_is_not_gated(self) -> None:
+        """Bot PRs always fall back to COMMENT regardless of spec_only.
+
+        GitHub rejects self-APPROVE on bot-authored PRs and we do not
+        want the review workflow leaving a formal verdict on
+        automation-authored changes.
+        """
+        bot_cases = [
+            ("bot_type", SimpleNamespace(login="some-user", type="Bot")),
+            ("bot_suffix", SimpleNamespace(login="dependabot[bot]", type="User")),
+            ("oz_agent", SimpleNamespace(login="oz-agent[bot]", type="Bot")),
+        ]
+        for label, user in bot_cases:
+            with self.subTest(label=label):
+                pr = SimpleNamespace(
+                    author_association="MEMBER",
+                    user=user,
+                )
+                self.assertFalse(_should_gate_review(pr, spec_only=False))
+                self.assertFalse(_should_gate_review(pr, spec_only=True))
+
+    def test_spec_only_short_circuits_before_user_check(self) -> None:
+        """Spec-only PRs skip the gate even when ``pr.user`` is missing.
+
+        This guards against regressions where the gate accidentally
+        depends on a fully-populated ``pr`` object for spec PRs.
+        """
+        self.assertFalse(
+            _should_gate_review(SimpleNamespace(), spec_only=True)
+        )
+
+    def test_missing_user_attribute_is_treated_as_non_bot(self) -> None:
+        """A PR with no ``user`` attribute falls through to the gate.
+
+        ``is_automation_user`` returns False for a missing/None user,
+        so the predicate must gate such a PR. In production the PR
+        object from PyGithub always has a ``user`` populated; this
+        test just documents the defensive behavior for a bare
+        ``SimpleNamespace``.
+        """
+        self.assertTrue(
+            _should_gate_review(SimpleNamespace(), spec_only=False)
+        )
 
 
 class NormalizeReviewerLoginsTest(unittest.TestCase):
