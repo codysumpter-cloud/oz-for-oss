@@ -1,5 +1,6 @@
 from __future__ import annotations
 from contextlib import closing
+import os
 
 from datetime import timedelta
 from textwrap import dedent
@@ -26,7 +27,12 @@ from oz_workflows.helpers import (
 )
 from oz_workflows.oz_client import build_agent_config, run_agent
 
-FETCH_CONTEXT_SCRIPT = ".agents/skills/implement-specs/scripts/fetch_github_context.py"
+# The fetch_github_context.py script lives in the oz-for-oss repo, which is
+# checked out by the workflow at the path given by WORKFLOW_CODE_PATH
+# (defaulting to __oz_shared). The bare relative path used here previously
+# pointed into the caller's repo root, where the script does not exist.
+_WORKFLOW_CODE_PATH = os.environ.get("WORKFLOW_CODE_PATH", "__oz_shared")
+FETCH_CONTEXT_SCRIPT = f"{_WORKFLOW_CODE_PATH}/.agents/skills/implement-specs/scripts/fetch_github_context.py"
 
 
 def main() -> None:
