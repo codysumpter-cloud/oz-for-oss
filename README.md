@@ -1,6 +1,6 @@
 # oz-for-oss
 
-Oz for OSS contains a set of workflows to help manage the overhead of maintaining an open-source project. It consists of workflows that trigger Oz agents to triage issues, generate product and tech specs, create implementation PRs, and reviews pull requests.
+Oz for OSS contains a set of workflows to help manage the overhead of maintaining an open-source project. It consists of workflows that trigger Oz agents to triage issues, generate product and tech specs, create implementation PRs, and review pull requests.
 
 The automation is organized as GitHub Actions workflows under `.github/workflows/` that invoke Python entrypoints in `.github/scripts/` (with shared helpers in `.github/scripts/oz_workflows/`), backed by triage label definitions in `.github/issue-triage/`, a CODEOWNERS-style stakeholder map in `.github/STAKEHOLDERS`, and committed spec artifacts under `specs/GH{number}/product.md` and `specs/GH{number}/tech.md`. Together these cover issue triage, product and tech spec creation, issue implementation scaffolding, PR issue-state enforcement, PR review orchestration, and unready-assignment guidance for Oz.
 
