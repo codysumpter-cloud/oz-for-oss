@@ -421,6 +421,7 @@ class RunPrTest(unittest.TestCase):
             patch.object(fgc, "_fetch_pull", return_value=pr),
             patch.object(fgc, "_fetch_issue_comments", return_value=[issue_comment]),
             patch.object(fgc, "_fetch_pr_review_comments", return_value=[review_comment]),
+            patch.object(fgc, "_fetch_pr_reviews", return_value=[]),
             patch.object(fgc, "_fetch_pr_diff", return_value="diff --git a/x b/x\n"),
             patch.object(fgc, "_check_org_membership", return_value=False),
         ):
@@ -439,6 +440,120 @@ class RunPrTest(unittest.TestCase):
         self.assertIn("line=42", output)
         self.assertIn("## Pull request diff", output)
         self.assertIn("diff --git a/x b/x", output)
+
+    def test_run_pr_includes_pr_review_bodies(self) -> None:
+        """PR review top-level bodies must appear in run_pr output so the
+        agent can locate the triggering review by its id."""
+        pr = {
+            "number": 5,
+            "title": "Test",
+            "user": {"login": "alice"},
+            "author_association": "MEMBER",
+            "body": "pr body",
+            "head": {"ref": "feat"},
+            "base": {"ref": "main"},
+        }
+        review_with_body = {
+            "id": 4158886048,
+            "user": {"login": "seemeroland"},
+            "author_association": "MEMBER",
+            "body": "@oz-agent address the comment",
+            "state": "COMMENTED",
+            "submitted_at": "2026-04-23T01:05:22Z",
+        }
+        with (
+            patch.object(fgc, "_fetch_pull", return_value=pr),
+            patch.object(fgc, "_fetch_issue_comments", return_value=[]),
+            patch.object(fgc, "_fetch_pr_review_comments", return_value=[]),
+            patch.object(fgc, "_fetch_pr_reviews", return_value=[review_with_body]),
+            patch.object(fgc, "_check_org_membership", return_value=False),
+        ):
+            output = fgc.run_pr(
+                "o",
+                "r",
+                5,
+                token="t",
+                include_comments=True,
+                include_diff=False,
+            )
+        self.assertIn("## PR review body", output)
+        self.assertIn("id=4158886048", output)
+        self.assertIn("author=@seemeroland", output)
+        self.assertIn("@oz-agent address the comment", output)
+        self.assertIn("kind=pr-review", output)
+
+    def test_run_pr_excludes_review_bodies_with_empty_body(self) -> None:
+        """Approved reviews with no body text should not generate noise in output."""
+        pr = {
+            "number": 6,
+            "title": "Test",
+            "user": {"login": "alice"},
+            "author_association": "MEMBER",
+            "body": "pr body",
+            "head": {"ref": "feat"},
+            "base": {"ref": "main"},
+        }
+        approve_review = {
+            "id": 9999,
+            "user": {"login": "bob"},
+            "author_association": "MEMBER",
+            "body": "",
+            "state": "APPROVED",
+            "submitted_at": "2026-04-23T00:00:00Z",
+        }
+        with (
+            patch.object(fgc, "_fetch_pull", return_value=pr),
+            patch.object(fgc, "_fetch_issue_comments", return_value=[]),
+            patch.object(fgc, "_fetch_pr_review_comments", return_value=[]),
+            patch.object(fgc, "_fetch_pr_reviews", return_value=[approve_review]),
+            patch.object(fgc, "_check_org_membership", return_value=False),
+        ):
+            output = fgc.run_pr(
+                "o",
+                "r",
+                6,
+                token="t",
+                include_comments=True,
+                include_diff=False,
+            )
+        self.assertNotIn("id=9999", output)
+        self.assertIn("no comments from trusted authors", output)
+
+    def test_run_pr_drops_untrusted_review_bodies(self) -> None:
+        """Review bodies from untrusted authors must not appear in output."""
+        pr = {
+            "number": 7,
+            "title": "T",
+            "user": {"login": "alice"},
+            "author_association": "MEMBER",
+            "body": "pr body",
+            "head": {"ref": "feat"},
+            "base": {"ref": "main"},
+        }
+        untrusted_review = {
+            "id": 8888,
+            "user": {"login": "evil"},
+            "author_association": "NONE",
+            "body": "EVIL_REVIEW_BODY_PAYLOAD",
+            "state": "COMMENTED",
+            "submitted_at": "2026-04-23T00:00:00Z",
+        }
+        with (
+            patch.object(fgc, "_fetch_pull", return_value=pr),
+            patch.object(fgc, "_fetch_issue_comments", return_value=[]),
+            patch.object(fgc, "_fetch_pr_review_comments", return_value=[]),
+            patch.object(fgc, "_fetch_pr_reviews", return_value=[untrusted_review]),
+            patch.object(fgc, "_check_org_membership", return_value=False),
+        ):
+            output = fgc.run_pr(
+                "o",
+                "r",
+                7,
+                token="t",
+                include_comments=True,
+                include_diff=False,
+            )
+        self.assertNotIn("EVIL_REVIEW_BODY_PAYLOAD", output)
 
     def test_run_pr_drops_untrusted_comments_from_every_thread(self) -> None:
         pr = {
@@ -468,6 +583,7 @@ class RunPrTest(unittest.TestCase):
             patch.object(
                 fgc, "_fetch_pr_review_comments", return_value=[untrusted_review]
             ),
+            patch.object(fgc, "_fetch_pr_reviews", return_value=[]),
             patch.object(fgc, "_check_org_membership", return_value=False),
         ):
             output = fgc.run_pr(
@@ -480,6 +596,39 @@ class RunPrTest(unittest.TestCase):
             )
         self.assertNotIn("EVIL_ISSUE_PAYLOAD", output)
         self.assertNotIn("EVIL_REVIEW_PAYLOAD", output)
+
+
+class RenderPrReviewSectionTest(unittest.TestCase):
+    def test_renders_review_id_author_state_and_body(self) -> None:
+        review = {
+            "id": 4158886048,
+            "user": {"login": "seemeroland"},
+            "author_association": "MEMBER",
+            "body": "@oz-agent address the comment",
+            "state": "COMMENTED",
+            "submitted_at": "2026-04-23T01:05:22Z",
+        }
+        rendered = fgc._render_pr_review_section(review)
+        self.assertIn("## PR review body", rendered)
+        self.assertIn("kind=pr-review", rendered)
+        self.assertIn("id=4158886048", rendered)
+        self.assertIn("author=@seemeroland", rendered)
+        self.assertIn("association=MEMBER", rendered)
+        self.assertIn("state=COMMENTED", rendered)
+        self.assertIn("submitted_at=2026-04-23T01:05:22Z", rendered)
+        self.assertIn("@oz-agent address the comment", rendered)
+
+    def test_renders_empty_body_placeholder(self) -> None:
+        review = {
+            "id": 1,
+            "user": {"login": "bob"},
+            "author_association": "MEMBER",
+            "body": "",
+            "state": "APPROVED",
+            "submitted_at": "2026-01-01T00:00:00Z",
+        }
+        rendered = fgc._render_pr_review_section(review)
+        self.assertIn("(no review body)", rendered)
 
 
 class CliSmokeTest(unittest.TestCase):

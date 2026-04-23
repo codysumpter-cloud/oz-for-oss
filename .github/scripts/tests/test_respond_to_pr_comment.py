@@ -400,5 +400,109 @@ class MainTrustGateTest(unittest.TestCase):
         issue_handler.assert_not_called()
 
 
+class HandleReviewBodyTest(unittest.TestCase):
+    """Tests for pull_request_review event dispatch and _handle_review_body."""
+
+    def _run_main_for_review_event(
+        self,
+        *,
+        review_body: str = "@oz-agent address the comment",
+        author_login: str = "seemeroland",
+        is_bot: bool = False,
+    ) -> dict:
+        from respond_to_pr_comment import main
+
+        event = {
+            "review": {
+                "id": 4158886048,
+                "user": {"login": author_login, "type": "Bot" if is_bot else "User"},
+                "body": review_body,
+                "state": "COMMENTED",
+                "author_association": "MEMBER",
+                "submitted_at": "2026-04-23T01:05:22Z",
+            },
+            "pull_request": {"number": 1064},
+            "sender": {"login": author_login},
+        }
+        called: dict = {}
+
+        def fake_handle_review_body(client, github, owner, repo, ev):
+            called["handled"] = True
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "GITHUB_EVENT_NAME": "pull_request_review",
+                    "GITHUB_REPOSITORY": "warpdotdev/warp-external",
+                    "GH_TOKEN": "fake-token",
+                },
+            ),
+            patch("respond_to_pr_comment.load_event", return_value=event),
+            patch("respond_to_pr_comment.repo_parts", return_value=("warpdotdev", "warp-external")),
+            patch("respond_to_pr_comment.repo_slug", return_value="warpdotdev/warp-external"),
+            patch("respond_to_pr_comment.require_env", return_value="fake-token"),
+            patch("respond_to_pr_comment.optional_env", return_value="pull_request_review"),
+            patch("respond_to_pr_comment._handle_review_body", side_effect=fake_handle_review_body),
+            patch("respond_to_pr_comment.Github"),
+            patch("respond_to_pr_comment.is_trusted_commenter", return_value=True),
+        ):
+            main()
+        return called
+
+    def test_dispatches_to_handle_review_body_for_review_event(self) -> None:
+        called = self._run_main_for_review_event()
+        self.assertTrue(called.get("handled"), "Expected _handle_review_body to be called")
+
+    def test_skips_bot_review_authors(self) -> None:
+        called = self._run_main_for_review_event(is_bot=True)
+        self.assertFalse(called.get("handled"), "Expected bot review to be skipped")
+
+    def test_handle_review_body_calls_run_implementation_with_review_id(self) -> None:
+        from respond_to_pr_comment import _handle_review_body
+
+        client = MagicMock()
+        github = MagicMock()
+        pr = _make_pr(number=1064)
+        github.get_pull.return_value = pr
+
+        event = {
+            "review": {
+                "id": 4158886048,
+                "user": {"login": "seemeroland"},
+                "body": "@oz-agent address the comment",
+                "state": "COMMENTED",
+                "author_association": "MEMBER",
+            },
+            "pull_request": {"number": 1064},
+        }
+        spec_context, run = _base_patches()
+        captured: dict = {}
+
+        with (
+            patch("respond_to_pr_comment.workspace", return_value="/tmp/workspace"),
+            patch("respond_to_pr_comment.resolve_spec_context_for_pr", return_value=spec_context),
+            patch("respond_to_pr_comment.WorkflowProgressComment"),
+            patch("respond_to_pr_comment.resolve_coauthor_line", return_value=""),
+            patch("respond_to_pr_comment.build_agent_config", return_value=MagicMock()),
+            patch(
+                "respond_to_pr_comment.run_agent",
+                side_effect=lambda **kw: (captured.update(kw), run)[1],
+            ),
+            patch("respond_to_pr_comment.branch_updated_since", return_value=False),
+            patch("respond_to_pr_comment.try_load_pr_metadata_artifact", return_value=None),
+            patch("respond_to_pr_comment.try_load_resolved_review_comments_artifact", return_value=[]),
+        ):
+            _handle_review_body(client, github, "warpdotdev", "warp-external", event)
+
+        prompt = captured.get("prompt", "")
+        # Must include the review id so the agent can locate the triggering item
+        self.assertIn("4158886048", prompt)
+        # Must not expose the review body directly in the prompt
+        self.assertNotIn("@oz-agent address the comment", prompt)
+        # Must indicate this was triggered by a PR review body
+        self.assertIn("PR review body", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()
