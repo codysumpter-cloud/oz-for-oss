@@ -26,7 +26,7 @@ jobs:
         github.event.comment.user.type != 'Bot' &&
         !endsWith(github.event.comment.user.login, '[bot]')
       )
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       issues: write
@@ -34,6 +34,7 @@ jobs:
       WORKFLOW_CODE_REPOSITORY: warpdotdev/oz-for-oss
       WORKFLOW_CODE_REF: ${{ github.repository == 'warpdotdev/oz-for-oss' && github.sha || 'main' }}
       WORKFLOW_CODE_PATH: __oz_shared
+      TRIAGE_IMAGE: oz-for-oss-triage
     steps:
       - name: Create GitHub App token
         id: app_token
@@ -53,6 +54,12 @@ jobs:
           ref: ${{ env.WORKFLOW_CODE_REF }}
           path: ${{ env.WORKFLOW_CODE_PATH }}
           token: ${{ steps.app_token.outputs.token }}
+      - name: Build triage agent container
+        run: |
+          docker build \
+            -f ${{ env.WORKFLOW_CODE_PATH }}/docker/triage/Dockerfile \
+            -t ${{ env.TRIAGE_IMAGE }} \
+            ${{ env.WORKFLOW_CODE_PATH }}
       - name: Set up Oz Python environment
         uses: warpdotdev/oz-for-oss/.github/actions/setup-oz-python@main
         with:
@@ -65,7 +72,5 @@ jobs:
           TRIAGE_ISSUE_NUMBER: ${{ inputs.issue_number || '' }}
           WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
           WARP_AGENT_MODEL: ${{ vars.WARP_AGENT_MODEL || '' }}
-          WARP_AGENT_MCP: ${{ vars.WARP_AGENT_MCP || '' }}
-          WARP_ENVIRONMENT_ID: ${{ vars.WARP_ENVIRONMENT_ID || '' }}
           WARP_API_BASE_URL: https://app.warp.dev/api/v1
         run: python "${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/triage_new_issues.py"
