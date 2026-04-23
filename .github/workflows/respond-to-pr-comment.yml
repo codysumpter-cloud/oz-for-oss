@@ -10,9 +10,13 @@ on:
         required: true
 jobs:
   respond:
+    # ``pull_request_review`` events carry the author under
+    # ``github.event.review``; comment-based events carry it under
+    # ``github.event.comment``. Fall through to the populated shape so
+    # the bot guard works for all supported event types.
     if: >-
-      github.event.comment.user.type != 'Bot' &&
-      !endsWith(github.event.comment.user.login, '[bot]')
+      (github.event.comment.user.type || github.event.review.user.type) != 'Bot' &&
+      !endsWith(github.event.comment.user.login || github.event.review.user.login, '[bot]')
     name: Respond to PR comment
     runs-on: ubuntu-slim
     env:
