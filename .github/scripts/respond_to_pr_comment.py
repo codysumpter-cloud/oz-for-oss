@@ -35,12 +35,9 @@ def main() -> None:
     owner, repo = repo_parts()
     event = load_event()
     github_event_name = optional_env("GITHUB_EVENT_NAME")
-    if github_event_name == "pull_request_review":
-        if is_automation_user((event.get("review") or {}).get("user")):
-            return
-    else:
-        if is_automation_user((event.get("comment") or {}).get("user")):
-            return
+    user_payload_key = "review" if github_event_name == "pull_request_review" else "comment"
+    if is_automation_user((event.get(user_payload_key) or {}).get("user")):
+        return
     with closing(Github(auth=Auth.Token(require_env("GH_TOKEN")))) as client:
         # Decide whether the commenter is trusted BEFORE starting the
         # agent run. Prior versions of this workflow passed the triggering
@@ -55,7 +52,7 @@ def main() -> None:
         # resolve it deterministically here using the same static +
         # org-membership fallback that ``fetch_github_context.py`` uses.
         if not is_trusted_commenter(client, event, org=owner):
-            event_actor = event.get("review" if github_event_name == "pull_request_review" else "comment") or {}
+            event_actor = event.get(user_payload_key) or {}
             login = (event_actor.get("user") or {}).get("login") or "unknown"
             association = event_actor.get("author_association") or "NONE"
             notice(
