@@ -611,6 +611,9 @@ def run_pr(
                 "## Pull request discussion\n"
                 "(no comments from trusted authors found for this pull request)"
             )
+        # Reviews are rendered before conversation/inline comments regardless
+        # of submitted_at order. The agent locates the triggering item by id,
+        # not by position, so chronological ordering is not required here.
         for review in filtered_reviews:
             sections.append(_render_pr_review_section(review, trust=trust))
         for comment in filtered_issue:
