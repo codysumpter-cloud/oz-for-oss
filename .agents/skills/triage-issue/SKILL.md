@@ -84,11 +84,20 @@ If a companion file is not referenced in the prompt, rely on the core contract a
 - If the prompt asks for a comment-based triage summary, populate `issue_body` with the markdown that should be posted in the issue thread.
 - Do not create commits, branches, pull requests, or durable GitHub comments by default.
 
-## Cloud workflow mode
+## Docker workflow mode
 
-If the prompt says you are running in a cloud workflow:
+The triage workflows now run inside a Docker container that exposes a
+writable volume at `/mnt/output`. When the prompt says you are running
+in a cloud or Docker workflow:
 
 - still perform the triage as above
 - do not apply labels or edit the issue directly yourself
-- after validating `triage_result.json` with `jq`, upload it via `oz artifact upload triage_result.json` (or `oz-preview artifact upload triage_result.json` if the `oz` CLI is not available). Either CLI is acceptable — use whichever one is installed in the environment.
-- IMPORTANT: the upload subcommand is `artifact` (singular) on both `oz` and `oz-preview`. Do not use `artifacts` (plural) — that is not a valid subcommand and will fail.
+- after validating `triage_result.json` (or the equivalent result file
+  the prompt names, e.g. `issue_response.json`) with `jq`, write the
+  file to `/mnt/output/<filename>.json`. The host driver reads that
+  file once the container exits, so you do not need to call any
+  artifact upload CLI.
+- do not run `oz artifact upload` or `oz-preview artifact upload`. The
+  stable `oz` CLI in this container does not expose an `artifact
+  upload` subcommand, and the host-side workflow reads the output
+  directly from the mounted volume instead.

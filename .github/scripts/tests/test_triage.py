@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from triage_new_issues import (
     TRIAGE_DISCLAIMER,
+    _container_companion_path,
     _lowercase_first,
     _record_triage_session_link,
     apply_triage_result,
@@ -1058,6 +1059,35 @@ class TriageHeuristicsPromptTest(unittest.TestCase):
         self.assertNotIn("area:keyboard-layout", heuristics)
         self.assertNotIn("release branch", heuristics)
         self.assertNotIn("Warpify", heuristics)
+
+
+class ContainerCompanionPathTest(unittest.TestCase):
+    """Companion-skill paths must resolve inside the container."""
+
+    def test_rewrites_host_path_to_container_mount(self) -> None:
+        with TemporaryDirectory() as tmp:
+            host_workspace = Path(tmp)
+            companion = host_workspace / ".agents" / "skills" / "triage-issue-local" / "SKILL.md"
+            companion.parent.mkdir(parents=True)
+            companion.write_text("body", encoding="utf-8")
+
+            result = _container_companion_path(
+                companion, host_workspace=host_workspace
+            )
+            self.assertEqual(
+                result,
+                Path("/mnt/repo/.agents/skills/triage-issue-local/SKILL.md"),
+            )
+
+    def test_returns_original_when_path_outside_workspace(self) -> None:
+        with TemporaryDirectory() as workspace_dir, TemporaryDirectory() as other_dir:
+            host_workspace = Path(workspace_dir)
+            outside = Path(other_dir) / "SKILL.md"
+            outside.write_text("body", encoding="utf-8")
+            self.assertEqual(
+                _container_companion_path(outside, host_workspace=host_workspace),
+                outside,
+            )
 
 
 class FakeTriageComment:
