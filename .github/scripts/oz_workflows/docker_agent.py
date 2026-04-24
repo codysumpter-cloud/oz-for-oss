@@ -34,8 +34,9 @@ emit sites and the condition that causes each to fire, are:
   emitted when the terminal driver reports a successful share handshake
   (``AgentDriver::handle_terminal_driver_event`` ->
   ``write_session_joined`` in ``driver.rs``). It is only emitted when
-  ``--share`` is passed; ``_build_docker_argv`` always adds ``--share`` so
-  we rely on this event to populate ``session_link``.
+  ``--share`` is passed; ``_build_docker_argv`` always adds
+  ``--share public:view`` so we rely on this event to populate
+  ``session_link``.
 * ``event_type="conversation_started"``, payload ``{conversation_id}`` --
   emitted once per run when the first server conversation token arrives,
   from the ``BlocklistAIHistoryEvent::UpdatedStreamingExchange`` handler
@@ -235,6 +236,7 @@ def _build_docker_argv(
             "--name",
             title,
             "--share",
+            "public:view",
         ]
     )
     if model:
