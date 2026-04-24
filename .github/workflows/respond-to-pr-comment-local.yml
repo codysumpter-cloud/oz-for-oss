@@ -13,8 +13,8 @@ jobs:
   # Mention, bot, event-type, and trust gates all live in the reusable
   # workflow (``respond-to-pr-comment.yml``). This adapter exists only
   # to subscribe to the three GitHub events that can carry an
-  # ``@oz-agent`` / ``@warp-agent`` mention on a PR and delegate them
-  # through ``workflow_call``.
+  # ``@oz-agent`` mention on a PR and delegate them through
+  # ``workflow_call``.
   respond:
     permissions:
       contents: write

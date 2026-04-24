@@ -12,8 +12,8 @@ jobs:
   # workflow (``create-spec-from-issue.yml``). This adapter exists only
   # to subscribe to the GitHub events that can trigger spec creation
   # (``issues`` assign/label by a maintainer, or a trusted
-  # ``@oz-agent`` / ``@warp-agent`` issue comment) and delegate them
-  # through ``workflow_call``.
+  # ``@oz-agent`` issue comment) and delegate them through
+  # ``workflow_call``.
   create_spec:
     permissions:
       contents: write
