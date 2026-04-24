@@ -1,0 +1,16 @@
+# act configuration for local workflow testing
+# https://github.com/nektos/act
+#
+# This file is read by act automatically when run from the repository root.
+# Run: act <event> -e tools/act/events/<fixture>.json
+
+# Map the custom runner label to a standard image.
+# The workflows use ubuntu-slim; act resolves this to ubuntu-latest.
+-P ubuntu-slim=catthehacker/ubuntu:act-22.04
+-P ubuntu-latest=catthehacker/ubuntu:act-22.04
+
+# Load fake secrets from the template (copy .secrets.template → .secrets and fill in values)
+--secret-file tools/act/.secrets
+
+# Use the full checkout action (requires Docker)
+--use-gitignore=false

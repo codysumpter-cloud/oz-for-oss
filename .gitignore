@@ -12,3 +12,6 @@ implementation_summary.md
 pr_description.md
 pr-metadata.json
 issue_comments.txt
+
+# act secrets — copy from tools/act/.secrets.template, never commit
+tools/act/.secrets

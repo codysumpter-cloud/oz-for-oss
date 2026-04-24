@@ -1,0 +1,29 @@
+{
+  "action": "opened",
+  "number": 10,
+  "pull_request": {
+    "number": 10,
+    "title": "Fix widget crash on startup",
+    "body": "Closes #42\n\n## Changes\n\n- Fixed null pointer in widget initializer",
+    "state": "open",
+    "draft": false,
+    "html_url": "https://github.com/testorg/testrepo/pull/10",
+    "user": {
+      "login": "contributor",
+      "type": "User"
+    },
+    "head": {
+      "ref": "fix/widget-crash",
+      "sha": "abc1234567890"
+    },
+    "base": {
+      "ref": "main"
+    },
+    "labels": [],
+    "author_association": "CONTRIBUTOR"
+  },
+  "sender": {
+    "login": "contributor",
+    "type": "User"
+  }
+}

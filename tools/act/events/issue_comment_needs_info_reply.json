@@ -1,0 +1,35 @@
+{
+  "action": "created",
+  "issue": {
+    "number": 42,
+    "title": "Widget crashes on startup",
+    "body": "## What happened\n\nThe widget crashes every time.",
+    "state": "open",
+    "labels": [
+      {"name": "bug"},
+      {"name": "needs-info"},
+      {"name": "repro:unknown"}
+    ],
+    "user": {
+      "login": "reporter",
+      "type": "User"
+    },
+    "pull_request": null,
+    "created_at": "2026-04-24T00:00:00Z",
+    "assignees": []
+  },
+  "comment": {
+    "id": 1001,
+    "body": "I'm on macOS 14.2 and this crashes every single time.",
+    "user": {
+      "login": "reporter",
+      "type": "User"
+    },
+    "author_association": "NONE",
+    "created_at": "2026-04-24T01:00:00Z"
+  },
+  "sender": {
+    "login": "reporter",
+    "type": "User"
+  }
+}
