@@ -32,7 +32,7 @@ jobs:
       issues: write
     env:
       WORKFLOW_CODE_REPOSITORY: warpdotdev/oz-for-oss
-      WORKFLOW_CODE_REF: ${{ github.repository == 'warpdotdev/oz-for-oss' && github.sha || 'main' }}
+      WORKFLOW_CODE_REF: ${{ github.workflow_sha }}
       WORKFLOW_CODE_PATH: __oz_shared
       TRIAGE_IMAGE: oz-for-oss-triage
     steps:
