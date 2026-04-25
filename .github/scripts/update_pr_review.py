@@ -70,7 +70,6 @@ def main() -> None:
             "`.agents/skills/review-spec-local/SKILL.md` based on recent "
             "human PR review feedback."
         ),
-        reviewer="captainsafia",
     )
 
 

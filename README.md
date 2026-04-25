@@ -59,7 +59,28 @@ Use the `*-local.yml` files in this repository as reference adapters. Copy them 
 
 Each adapter is deliberately thin — it defines the GitHub event triggers and conditions, then delegates to the reusable workflow.
 
-### 4. Bootstrap triage configuration (optional)
+### 4. Configure shared Oz workflow settings (optional)
+
+Repositories can commit `.github/oz/config.yml` to make workflow-level defaults visible and reviewable in source control. Oz resolves that file from the consuming repository first; if it is absent there, the workflows fall back to the bundled `.github/oz/config.yml` shipped with `oz-for-oss`. Discovery stops at the first existing file — the two locations are not merged.
+
+The initial supported settings live under `self_improvement`:
+
+```yaml
+version: 1
+self_improvement:
+  reviewers:
+    - octocat
+    - repo-maintainer
+  base_branch: auto
+```
+
+- `self_improvement.reviewers` — optional list of GitHub handles. Set `[]` to disable automatic reviewer requests.
+- `self_improvement.base_branch` — optional branch name, or `auto` to detect the repository default branch from git metadata.
+- `SELF_IMPROVEMENT_REVIEWERS` and `SELF_IMPROVEMENT_BASE_BRANCH` remain high-precedence overrides for one-off runs.
+
+The bundled fallback config is intentionally neutral: it does not ship a Warp-specific reviewer list and defaults the base branch to `auto`.
+
+### 5. Bootstrap triage configuration (optional)
 
 If you want the triage agent to apply area and status labels, run the `bootstrap-issue-config` skill on your target repository. The skill fetches existing labels and classifies them into area, feature, and status categories; analyzes recent issues and issue templates to discover additional labels; generates or updates `.github/issue-triage/config.json` with label definitions (colors and descriptions); generates or updates `.github/STAKEHOLDERS` by inspecting CODEOWNERS, recent git contributors, and existing stakeholder information; and creates any missing labels on the repository via the GitHub API.
 

@@ -10,9 +10,12 @@ references (not inlines) the companion file when one exists.
 
 from __future__ import annotations
 
+import fnmatch
 import re
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+
+from .workflow_config import SelfImprovementConfig, load_self_improvement_config
 
 
 _FRONTMATTER_PATTERN = re.compile(
@@ -142,16 +145,183 @@ def branch_exists(repo_root: Path, branch: str) -> bool:
     return result.returncode == 0
 
 
-def changed_files_since_origin_main(repo_root: Path, branch: str) -> list[str]:
-    """Return the list of paths changed on *branch* relative to ``origin/main``."""
+def _remote_branch_exists(repo_root: Path, branch: str) -> bool:
+    """Return ``True`` when *branch* exists on ``origin``."""
     result = subprocess.run(
-        ["git", "diff", "--name-only", f"origin/main...{branch}"],
+        ["git", "ls-remote", "--exit-code", "--heads", "origin", branch],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+def _ensure_remote_tracking_branch(repo_root: Path, branch: str) -> None:
+    """Ensure the ``origin/<branch>`` tracking ref exists locally."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", f"refs/remotes/origin/{branch}"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return
+    subprocess.run(
+        ["git", "fetch", "origin", f"{branch}:refs/remotes/origin/{branch}"],
+        cwd=str(repo_root),
+        check=True,
+    )
+
+
+def changed_files_since_base_branch(
+    repo_root: Path, branch: str, base_branch: str
+) -> list[str]:
+    """Return the list of paths changed on *branch* relative to ``origin/<base_branch>``."""
+    _ensure_remote_tracking_branch(repo_root, base_branch)
+    result = subprocess.run(
+        ["git", "diff", "--name-only", f"origin/{base_branch}...{branch}"],
         cwd=str(repo_root),
         capture_output=True,
         text=True,
         check=True,
     )
     return [line for line in result.stdout.splitlines() if line.strip()]
+
+
+def _detect_default_branch(repo_root: Path) -> str | None:
+    symbolic_ref = subprocess.run(
+        ["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    if symbolic_ref.returncode == 0:
+        resolved = symbolic_ref.stdout.strip()
+        if resolved.startswith("origin/"):
+            return resolved.removeprefix("origin/")
+        if resolved:
+            return resolved
+
+    remote_show = subprocess.run(
+        ["git", "remote", "show", "origin"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    if remote_show.returncode != 0:
+        return None
+    for line in remote_show.stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("HEAD branch: "):
+            branch = stripped.removeprefix("HEAD branch: ").strip()
+            if branch:
+                return branch
+    return None
+
+
+def resolve_self_improvement_base_branch(
+    repo_root: Path, config: SelfImprovementConfig
+) -> str:
+    """Resolve the base branch for self-improvement runs."""
+    if config.base_branch:
+        if not _remote_branch_exists(repo_root, config.base_branch):
+            raise RuntimeError(
+                "Configured self-improvement base branch "
+                f"{config.base_branch!r} does not exist on origin."
+            )
+        return config.base_branch
+
+    detected = _detect_default_branch(repo_root)
+    if not detected:
+        raise RuntimeError(
+            "Unable to detect the default branch for origin. Set "
+            "SELF_IMPROVEMENT_BASE_BRANCH or self_improvement.base_branch in "
+            ".github/oz/config.yml."
+        )
+    if not _remote_branch_exists(repo_root, detected):
+        raise RuntimeError(
+            f"Detected default branch {detected!r}, but it does not exist on origin."
+        )
+    return detected
+
+
+def _normalize_repo_relative_path(raw_path: str) -> str:
+    path = raw_path.strip().replace("\\", "/")
+    if path.startswith("./"):
+        return path[2:]
+    return path
+
+
+def _normalize_ownership_pattern(raw_pattern: str) -> str:
+    return raw_pattern.strip().replace("\\", "/").lstrip("/")
+
+
+def _pattern_matches(path: str, raw_pattern: str) -> bool:
+    pattern = _normalize_ownership_pattern(raw_pattern)
+    if not pattern:
+        return False
+    if pattern.endswith("/"):
+        return path.startswith(pattern)
+    if "/" not in pattern:
+        return fnmatch.fnmatch(path, f"*/{pattern}") or fnmatch.fnmatch(path, pattern)
+    return PurePosixPath(path).match(pattern)
+
+
+def _parse_ownership_rules(ownership_file: Path) -> list[tuple[str, list[str]]]:
+    rules: list[tuple[str, list[str]]] = []
+    for raw_line in ownership_file.read_text(encoding="utf-8").splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        pattern, raw_owners = parts[0], parts[1:]
+        owners = [owner.removeprefix("@") for owner in raw_owners if owner.startswith("@")]
+        if owners:
+            rules.append((pattern, owners))
+    return rules
+
+
+def _resolve_reviewers_from_ownership_file(
+    ownership_file: Path, changed_files: list[str]
+) -> list[str]:
+    rules = _parse_ownership_rules(ownership_file)
+    reviewers: list[str] = []
+    seen: set[str] = set()
+    for raw_path in changed_files:
+        path = _normalize_repo_relative_path(raw_path)
+        matched_owners: list[str] = []
+        for pattern, owners in rules:
+            if _pattern_matches(path, pattern):
+                matched_owners = owners
+        for owner in matched_owners:
+            if owner not in seen:
+                seen.add(owner)
+                reviewers.append(owner)
+    return reviewers
+
+
+def resolve_self_improvement_reviewers(
+    repo_root: Path,
+    changed_files: list[str],
+    config: SelfImprovementConfig,
+) -> list[str]:
+    """Resolve reviewer handles for self-improvement pull requests."""
+    if config.reviewers is not None:
+        return list(config.reviewers)
+
+    ownership_candidates = [
+        repo_root / ".github" / "STAKEHOLDERS",
+        repo_root / ".github" / "CODEOWNERS",
+        repo_root / "CODEOWNERS",
+    ]
+    for ownership_file in ownership_candidates:
+        if ownership_file.is_file():
+            return _resolve_reviewers_from_ownership_file(
+                ownership_file, changed_files
+            )
+    return []
 
 
 def _pr_exists_for_branch(repo_root: Path, branch: str) -> bool:
@@ -183,22 +353,14 @@ def maybe_push_update_branch(
     loop_name: str,
     pr_title: str,
     pr_body: str,
-    base_branch: str = "main",
-    reviewer: str | None = None,
 ) -> None:
-    """Enforce the write surface, push *branch*, and open a PR if one is missing.
-
-    When the agent left a local commit on *branch*, collect the changed
-    paths against ``origin/main`` and pass them to
-    :func:`assert_write_surface`. A violation aborts the loop rather than
-    silently widening the surface. When the guard passes the branch is
-    pushed and a PR is opened (tagging *reviewer* when provided) so a human
-    reviewer is notified instead of the branch landing silently. When no
-    local commit exists, do nothing.
-    """
+    """Enforce the write surface, push *branch*, and open a PR if one is missing."""
     if not branch_exists(repo_root, branch):
         return
-    changed_files = changed_files_since_origin_main(repo_root, branch)
+
+    config = load_self_improvement_config(repo_root)
+    base_branch = resolve_self_improvement_base_branch(repo_root, config)
+    changed_files = changed_files_since_base_branch(repo_root, branch, base_branch)
     if not changed_files:
         return
     assert_write_surface(
@@ -206,14 +368,12 @@ def maybe_push_update_branch(
         allowed_prefixes=allowed_prefixes,
         loop_name=loop_name,
     )
+    reviewers = resolve_self_improvement_reviewers(repo_root, changed_files, config)
     subprocess.run(
         ["git", "push", "origin", branch],
         cwd=str(repo_root),
         check=True,
     )
-    # Creating the PR is the new notification step. Prior versions of each
-    # entrypoint told the agent to open the PR itself; pulling that into
-    # the Python entrypoint ensures the branch is never pushed silently.
     if _pr_exists_for_branch(repo_root, branch):
         return
     create_cmd = [
@@ -229,6 +389,6 @@ def maybe_push_update_branch(
         "--body",
         pr_body,
     ]
-    if reviewer:
-        create_cmd.extend(["--reviewer", reviewer])
+    if reviewers:
+        create_cmd.extend(["--reviewer", ",".join(reviewers)])
     subprocess.run(create_cmd, cwd=str(repo_root), check=True)

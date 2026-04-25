@@ -62,7 +62,6 @@ def main() -> None:
             "`.agents/skills/dedupe-issue-local/SKILL.md` based on recent "
             "closed-as-duplicate events and their canonical-issue links."
         ),
-        reviewer="captainsafia",
     )
 
 
