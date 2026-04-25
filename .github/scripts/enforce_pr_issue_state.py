@@ -23,6 +23,14 @@ def _is_pr_author_org_member(pr: dict) -> bool:
     return association in ORG_MEMBER_ASSOCIATIONS
 
 
+def _explicit_issue_search_text(pr: dict | object) -> str:
+    """Return the PR text that should be scanned for explicit issue references."""
+    title = pr.get("title", "") if isinstance(pr, dict) else getattr(pr, "title", "")
+    body = pr.get("body", "") if isinstance(pr, dict) else getattr(pr, "body", "")
+    text_parts = [str(value).strip() for value in (title, body) if isinstance(value, str) and value.strip()]
+    return "\n\n".join(text_parts)
+
+
 def main() -> None:
     owner, repo = repo_parts()
     pr_number = int(require_env("PR_NUMBER"))
@@ -59,7 +67,11 @@ def main() -> None:
         contribution_docs_url = f"https://github.com/{owner}/{repo}/blob/main/CONTRIBUTING.md"
 
         explicit_issue = None
-        for issue_number in extract_issue_numbers_from_text(owner, repo, pr.body or ""):
+        for issue_number in extract_issue_numbers_from_text(
+            owner,
+            repo,
+            _explicit_issue_search_text(pr),
+        ):
             issue = github.get_issue(issue_number)
             if not issue.pull_request:
                 explicit_issue = issue
