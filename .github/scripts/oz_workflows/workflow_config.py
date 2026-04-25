@@ -170,7 +170,7 @@ def load_self_improvement_config(workspace_root: Path) -> SelfImprovementConfig:
         reviewers = env_reviewers
 
     env_base_branch = _parse_env_base_branch(config_path)
-    if env_base_branch is not None:
+    if "SELF_IMPROVEMENT_BASE_BRANCH" in os.environ:
         base_branch = env_base_branch
 
     return SelfImprovementConfig(reviewers=reviewers, base_branch=base_branch)
