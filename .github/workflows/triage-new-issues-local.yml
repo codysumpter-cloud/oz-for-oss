@@ -50,6 +50,6 @@ jobs:
       issues: write
     uses: ./.github/workflows/triage-new-issues.yml
     with:
-      issue_number: ${{ github.event.inputs.issue_number || '' }}
+      issue_number: ${{ github.event.issue.number || github.event.inputs.issue_number || '' }}
       lookback_minutes: ${{ github.event.inputs.lookback_minutes || '60' }}
     secrets: inherit
