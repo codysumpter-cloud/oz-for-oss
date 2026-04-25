@@ -1,6 +1,12 @@
 name: Create Spec from Issue
 on:
   workflow_call:
+    inputs:
+      issue_number:
+        description: Optional issue number to create a spec for immediately
+        required: false
+        default: ''
+        type: string
     secrets:
       OZ_MGMT_GHA_APP_ID:
         required: true
@@ -73,6 +79,9 @@ jobs:
     if: >-
       always() && (
         (
+          github.event_name == 'workflow_dispatch' &&
+          inputs.issue_number != ''
+        ) || (
           github.event_name == 'issues' &&
           github.event.action == 'assigned' &&
           github.event.assignee.login == 'oz-agent' &&
@@ -122,6 +131,7 @@ jobs:
           requirements-path: ${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/requirements.txt
       - name: Run create-spec workflow
         env:
+          ISSUE_NUMBER: ${{ inputs.issue_number || '' }}
           PYTHONPATH: ${{ env.WORKFLOW_CODE_PATH }}/.github/scripts
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           WARP_API_KEY: ${{ secrets.WARP_API_KEY }}

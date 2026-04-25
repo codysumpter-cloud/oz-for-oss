@@ -4,8 +4,14 @@ on:
     types: [assigned, labeled]
   issue_comment:
     types: [created]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to create a spec for
+        required: true
+        type: string
 concurrency:
-  group: create-spec-issue-${{ github.event.issue.number || github.run_id }}
+  group: create-spec-issue-${{ github.event.issue.number || inputs.issue_number || github.run_id }}
   cancel-in-progress: false
 jobs:
   # Mention, bot, event-type, and trust gates all live in the reusable
@@ -20,4 +26,6 @@ jobs:
       issues: write
       pull-requests: write
     uses: ./.github/workflows/create-spec-from-issue.yml
+    with:
+      issue_number: ${{ github.event.inputs.issue_number || '' }}
     secrets: inherit

@@ -42,6 +42,19 @@ def load_event() -> dict[str, Any]:
         return json.load(handle)
 
 
+def resolve_issue_number(event: dict[str, Any], *, env_var: str = "ISSUE_NUMBER") -> int:
+    """Resolve an issue number from the event payload or a workflow input env var."""
+    issue_number = (event.get("issue") or {}).get("number")
+    if issue_number not in (None, ""):
+        return int(issue_number)
+    override = optional_env(env_var)
+    if override:
+        return int(override)
+    raise RuntimeError(
+        f"Unable to resolve issue number from event payload or ${env_var}."
+    )
+
+
 
 def parse_mcp_servers(raw_value: str, cwd: Path) -> dict[str, Any] | None:
     """Parse inline MCP JSON or a JSON file path into a server config object."""

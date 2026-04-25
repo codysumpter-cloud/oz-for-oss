@@ -8,7 +8,14 @@ from github import Auth, Github
 
 from oz_workflows.actions import append_summary
 from oz_workflows.artifacts import load_pr_metadata_artifact
-from oz_workflows.env import load_event, repo_parts, repo_slug, workspace, require_env
+from oz_workflows.env import (
+    load_event,
+    repo_parts,
+    repo_slug,
+    resolve_issue_number,
+    workspace,
+    require_env,
+)
 from oz_workflows.helpers import (
     branch_updated_since,
     build_next_steps_section,
@@ -36,13 +43,26 @@ def main() -> None:
     event = load_event()
     if is_automation_user((event.get("comment") or {}).get("user")):
         return
-    issue = event["issue"]
-    issue_number = int(issue["number"])
-    issue_title = issue["title"]
-    default_branch = event["repository"]["default_branch"]
+    issue_number = resolve_issue_number(event)
     with closing(Github(auth=Auth.Token(require_env("GH_TOKEN")))) as client:
         github = client.get_repo(repo_slug())
         issue_data = github.get_issue(issue_number)
+        issue_title = str(issue_data.title or "")
+        default_branch = str(
+            getattr(github, "default_branch", "")
+            or (event.get("repository") or {}).get("default_branch")
+            or "main"
+        )
+        issue_labels = [
+            str(label.name or "")
+            for label in (issue_data.labels or [])
+            if str(label.name or "").strip()
+        ]
+        issue_assignees = [
+            login
+            for assignee in (issue_data.assignees or [])
+            if (login := get_login(assignee))
+        ]
         # Only call add_to_assignees when oz-agent is not already assigned.
         # The POST /issues/{n}/assignees call is otherwise a no-op that still
         # consumes API quota on every workflow run.
@@ -138,8 +158,8 @@ def main() -> None:
 
             Issue Metadata:
             - Title: {issue_title}
-            - Labels: {", ".join(label["name"] for label in issue.get("labels", [])) or "None"}
-            - Assignees: {", ".join(assignee["login"] for assignee in issue.get("assignees", [])) or "None"}
+            - Labels: {", ".join(issue_labels) or "None"}
+            - Assignees: {", ".join(issue_assignees) or "None"}
 
             Plan Context:
             {spec_context_text}
@@ -184,7 +204,7 @@ def main() -> None:
                 on_poll=lambda current_run: record_run_session_link(progress, current_run),
             )
 
-            commit_type = conventional_commit_prefix(issue.get("labels", []))
+            commit_type = conventional_commit_prefix(list(issue_data.labels or []))
             fallback_title = f"{commit_type}: {issue_title}"
 
             # Load the structured metadata artifact to discover the
