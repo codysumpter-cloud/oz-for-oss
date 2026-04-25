@@ -64,7 +64,6 @@ def main() -> None:
             "(and, when warranted, `.github/issue-triage/config.json`) "
             "based on recent maintainer signals on triaged issues."
         ),
-        reviewer="captainsafia",
     )
 
 
