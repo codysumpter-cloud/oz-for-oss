@@ -54,7 +54,7 @@ When duplicates are present, duplicate detection continues to take precedence ov
 
 #### Statements section content
 
-The statements section is addressed to the reporter and contains a short paragraph introduction followed by a bulleted list of the agent's statements, in the order provided by the agent. Each statement is a single markdown string — it may include inline code, links, and file references (e.g. `` `src/auth/middleware.py:42` ``) but should remain concise (roughly one to three sentences each).
+The statements section is addressed to the reporter and contains a short paragraph introduction followed by a bulleted list of the agent's statements, in the order provided by the agent. Each statement is a single markdown string — it may include inline code, links, and file references (e.g. `` `src/auth/middleware.py:42` ``) but should remain concise (roughly one to two sentences each).
 
 Example rendered output when the reporter login is `alice`:
 
