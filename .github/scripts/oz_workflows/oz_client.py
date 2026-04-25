@@ -83,7 +83,11 @@ def build_agent_config(
     """Build the agent configuration payload sent to the Oz API."""
     environment_id = optional_env("WARP_ENVIRONMENT_ID")
     if not environment_id:
-        raise RuntimeError("Missing Oz environment configuration. Set WARP_ENVIRONMENT_ID")
+        raise RuntimeError(
+            "Missing required Oz environment configuration. Set "
+            "WARP_ENVIRONMENT_ID to your Oz cloud environment UID "
+            "(find it with `oz environment list` or in the Oz web app)."
+        )
 
     config: AmbientAgentConfigParam = {
         "environment_id": environment_id,

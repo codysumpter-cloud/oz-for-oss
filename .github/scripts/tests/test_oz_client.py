@@ -222,11 +222,13 @@ class BuildAgentConfigTest(unittest.TestCase):
 
     @patch.dict(os.environ, {}, clear=True)
     def test_requires_warp_environment_id(self) -> None:
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(RuntimeError) as ctx:
             build_agent_config(
                 config_name="review-pull-request",
                 workspace=Path("/tmp"),
             )
+        self.assertIn("WARP_ENVIRONMENT_ID", str(ctx.exception))
+        self.assertIn("oz environment list", str(ctx.exception))
 
     @patch.dict(os.environ, {"WARP_ENVIRONMENT_ID": "default-env"}, clear=True)
     def test_defaults_session_sharing_to_viewer(self) -> None:

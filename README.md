@@ -34,13 +34,20 @@ Add the following **secrets** to each target repository (or at the organization 
 | `OZ_MGMT_GHA_PRIVATE_KEY` | The PEM-encoded private key for that App. |
 | `WARP_API_KEY` | Your Warp API key, used to invoke Oz agents. |
 
-Optionally, set the following **repository variables** (not secrets) to customize agent behavior:
+Set the following **repository variable** (not a secret) for reusable workflows
+that invoke Oz cloud agents directly:
+
+| Variable | Description |
+|---|---|
+| `WARP_ENVIRONMENT_ID` | **Required** for workflows that call the Oz API to run cloud agents (for example, spec creation, implementation, PR review, and PR/issue comment response workflows). Set this to the Oz cloud environment UID the agent should run in. You can find the UID with `oz environment list` or on the environment details page in the Oz web app. |
+ 
+Optionally, set the following additional **repository variables** (not secrets)
+to customize agent behavior:
 
 | Variable | Description |
 |---|---|
 | `WARP_AGENT_MODEL` | Override the default Oz model (e.g. a specific model identifier). |
 | `WARP_AGENT_MCP` | MCP configuration for the agent, if any. |
-| `WARP_ENVIRONMENT_ID` | Cloud environment UID for Oz agent runs. |
 
 ### 3. Add local adapter workflows
 
