@@ -6,7 +6,7 @@
 
 The current self-improvement implementation still hardcodes repository-specific values in shared Python entrypoints. The reviewer handle is passed directly from the three shipped self-improvement scripts, and the shared push helper assumes both `origin/main` for diffing and `main` for PR creation. That breaks OSS consumers whose maintainers are not Warp employees and whose default branch is not `main`.
 
-This change needs more than a string replacement. The fix should introduce one repo-visible, extensible configuration contract, reuse the existing "consumer repo first, bundled workflow repo second" fallback model, and keep the self-improvement loops working when no consumer override exists.
+This change needs more than a string replacement. The fix should introduce one repo-visible, extensible configuration contract for Oz workflows, reuse the existing "consumer repo first, bundled workflow repo second" fallback model, and keep the self-improvement loops working when no consumer override exists.
 
 ### Relevant code
 
@@ -28,7 +28,7 @@ The issue text predates the current narrowed self-improvement loops. In this che
 - `changed_files_since_origin_main()` diffs against `origin/main`
 - `maybe_push_update_branch()` defaults `base_branch="main"` for PR creation
 
-There is no generic workflow config file today. The only committed structured repo state near this area is `.github/issue-triage/config.json` and `.github/STAKEHOLDERS`, which means reviewer and base-branch behavior can only be changed by editing Python.
+There is no generic workflow config file today. The only committed structured repo state near this area is `.github/issue-triage/config.json` and `.github/STAKEHOLDERS`, which means reviewer and base-branch behavior can only be changed by editing Python and there is no shared path for other workflow-level settings.
 
 The workflow layout already supports a two-root lookup model. Each self-improvement workflow checks out:
 
@@ -41,12 +41,12 @@ The workflow layout already supports a two-root lookup model. Each self-improvem
 
 #### 1. Add a neutral, versioned workflow config file
 
-Add `.github/oz/config.yml` to the repository with neutral defaults suitable for bundled fallback use.
+Add `.github/oz/config.yml` to the repository with neutral defaults suitable for bundled fallback use. The file is a shared workflow config path for Oz workflows generally, with this issue only implementing the initial `self_improvement` section.
 
 Initial shape:
 
 ```yaml
-schema_version: 1
+version: 1
 self_improvement:
   base_branch: auto
 ```
@@ -55,7 +55,7 @@ self_improvement:
 
 The config contract is:
 
-- `schema_version: int` — required, initially `1`
+- `version: int` — required, initially `1`
 - `self_improvement.reviewers: list[str]` — optional; present empty list disables reviewer requests
 - `self_improvement.base_branch: str` — optional; `auto` means detect the repository default branch
 
@@ -66,7 +66,7 @@ YAML is chosen over JSON and TOML here. JSON is less friendly for maintainers ed
 Add a new helper module, for example `.github/scripts/oz_workflows/workflow_config.py`, with two responsibilities:
 
 - resolve `.github/oz/config.yml` using the same two-root strategy already used by `oz_client.py`
-- parse and validate the `self_improvement` section into a typed object
+- parse and validate the `self_improvement` section into a typed object while leaving room for other top-level workflow sections in the same file
 
 Proposed API:
 
@@ -86,11 +86,12 @@ Implementation notes:
 - Search order should be:
   1. consuming repo workspace `.github/oz/config.yml`
   2. workflow code root `.github/oz/config.yml`
+- Stop after the first existing file. Do not merge keys from both config locations; the discovered file is the only YAML config source for that run.
 - If neither file exists, raise loudly. The bundled fallback should ship with the repository, so missing both is a packaging error rather than a user-state case.
-- Environment overrides apply after file load:
+- Environment overrides apply after selecting and loading that single file:
   - `SELF_IMPROVEMENT_REVIEWERS` overrides `reviewers`
   - `SELF_IMPROVEMENT_BASE_BRANCH` overrides `base_branch`
-- Invalid YAML, wrong `schema_version`, or invalid active-key types should raise a `RuntimeError` with the resolved file path in the message.
+- Invalid YAML, wrong `version`, or invalid active-key types should raise a `RuntimeError` with the resolved file path in the message.
 
 #### 3. Resolve reviewers from config or repo-owned metadata
 
@@ -210,7 +211,7 @@ Testing changes:
   - consuming repo config wins over bundled fallback
   - bundled fallback is used when consumer config is absent
   - env vars override file values
-  - unsupported schema version fails
+  - unsupported config `version` fails
   - missing `reviewers` means auto, empty list means disabled
 - extend `.github/scripts/tests/test_repo_local.py`
   - `changed_files_since_base_branch()` uses the provided base branch
@@ -225,14 +226,14 @@ For a consuming repository with explicit config:
 
 1. `update-pr-review.yml` checks out the consuming repo and the workflow code.
 2. `update_pr_review.py` runs Oz and leaves a local commit on `oz-agent/update-pr-review`.
-3. `maybe_push_update_branch()` loads `.github/oz/config.yml` from the consuming repo workspace.
+3. `maybe_push_update_branch()` discovers `.github/oz/config.yml` in the consuming repo workspace and uses it as the only YAML config input for the run.
 4. The helper resolves `reviewers` and `base_branch` from config/env.
 5. The helper diffs against `origin/<resolved_base>`, validates the write surface, pushes the branch, and creates the PR with `--base <resolved_base>` and `--reviewer <configured reviewers>`.
 
 For a consuming repository with no config file:
 
 1. The helper does not find `.github/oz/config.yml` in the workspace.
-2. It falls back to the bundled `.github/oz/config.yml` in the checked-out workflow code.
+2. It falls back to the bundled `.github/oz/config.yml` in the checked-out workflow code and uses that file alone.
 3. `base_branch` resolves to `auto`, so the helper detects the actual default branch from git metadata.
 4. `reviewers` remains auto, so the helper derives reviewer handles from `.github/STAKEHOLDERS` or CODEOWNERS when present.
 5. If no owners are found, the PR opens without a reviewer instead of tagging a hardcoded Warp maintainer.
