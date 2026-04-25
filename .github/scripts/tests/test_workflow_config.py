@@ -125,6 +125,37 @@ class LoadSelfImprovementConfigTest(unittest.TestCase):
             self.assertEqual(config.reviewers, ["hubot", "mona"])
             self.assertEqual(config.base_branch, "release")
 
+    def test_config_reviewers_reject_at_prefixed_handles(self) -> None:
+        with TemporaryDirectory() as tempdir:
+            workspace_root = Path(tempdir)
+            config_path = _write_config(
+                workspace_root,
+                (
+                    "version: 1\n"
+                    "self_improvement:\n"
+                    "  reviewers:\n"
+                    "    - \"@octocat\"\n"
+                ),
+            )
+            with self.assertRaises(RuntimeError) as ctx:
+                load_self_improvement_config(workspace_root)
+            self.assertIn(str(config_path), str(ctx.exception))
+            self.assertIn("without a leading '@'", str(ctx.exception))
+
+    def test_env_reviewers_reject_at_prefixed_handles(self) -> None:
+        with TemporaryDirectory() as tempdir:
+            workspace_root = Path(tempdir)
+            config_path = _write_config(workspace_root, "version: 1\n")
+            with patch.dict(
+                os.environ,
+                {"SELF_IMPROVEMENT_REVIEWERS": "@hubot,mona"},
+                clear=False,
+            ):
+                with self.assertRaises(RuntimeError) as ctx:
+                    load_self_improvement_config(workspace_root)
+            self.assertIn(str(config_path), str(ctx.exception))
+            self.assertIn("without a leading '@'", str(ctx.exception))
+
     def test_invalid_version_fails(self) -> None:
         with TemporaryDirectory() as tempdir:
             workspace_root = Path(tempdir)

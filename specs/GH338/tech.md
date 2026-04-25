@@ -56,7 +56,7 @@ self_improvement:
 The config contract is:
 
 - `version: int` — required, initially `1`
-- `self_improvement.reviewers: list[str]` — optional; present empty list disables reviewer requests
+- `self_improvement.reviewers: list[str]` — optional bare GitHub handles (no leading `@`); present empty list disables reviewer requests
 - `self_improvement.base_branch: str` — optional; `auto` means detect the repository default branch
 
 YAML is chosen over JSON and TOML here. JSON is less friendly for maintainers editing by hand, and TOML would avoid a dependency but is less aligned with how GitHub maintainers already work in `.github/`. The implementation should use `yaml.safe_load` plus explicit schema validation so the parser remains predictable.
@@ -89,7 +89,7 @@ Implementation notes:
 - Stop after the first existing file. Do not merge keys from both config locations; the discovered file is the only YAML config source for that run.
 - If neither file exists, raise loudly. The bundled fallback should ship with the repository, so missing both is a packaging error rather than a user-state case.
 - Environment overrides apply after selecting and loading that single file:
-  - `SELF_IMPROVEMENT_REVIEWERS` overrides `reviewers`
+  - `SELF_IMPROVEMENT_REVIEWERS` overrides `reviewers` and uses the same bare-handle format as the YAML file
   - `SELF_IMPROVEMENT_BASE_BRANCH` overrides `base_branch`
 - Invalid YAML, wrong `version`, or invalid active-key types should raise a `RuntimeError` with the resolved file path in the message.
 

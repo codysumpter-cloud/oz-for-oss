@@ -72,7 +72,7 @@ self_improvement:
 
 The initial self-improvement keys are:
 
-- `self_improvement.reviewers`: optional list of GitHub handles
+- `self_improvement.reviewers`: optional list of GitHub handles written without the `@` prefix
 - `self_improvement.base_branch`: optional string branch name, or `auto`
 
 The file format must tolerate future sections and future scalar/list values without requiring a different config mechanism.
@@ -91,6 +91,7 @@ Self-improvement PR reviewer selection works as follows:
 Behavior details:
 
 - A present but empty list (`reviewers: []`) means "do not request reviewers automatically".
+- Explicit reviewer handles in `.github/oz/config.yml` and `SELF_IMPROVEMENT_REVIEWERS` must be provided without the `@` prefix.
 - Derived reviewers should be based on the files the loop changed, not on a hardcoded global owner list.
 - The bundled fallback config must never contain a Warp-specific reviewer handle.
 

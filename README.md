@@ -77,6 +77,7 @@ self_improvement:
 - `self_improvement.reviewers` — optional list of GitHub handles. Set `[]` to disable automatic reviewer requests.
 - `self_improvement.base_branch` — optional branch name, or `auto` to detect the repository default branch from git metadata.
 - `SELF_IMPROVEMENT_REVIEWERS` and `SELF_IMPROVEMENT_BASE_BRANCH` remain high-precedence overrides for one-off runs.
+- Provide reviewer handles without the `@` prefix in both `.github/oz/config.yml` and `SELF_IMPROVEMENT_REVIEWERS`.
 
 The bundled fallback config is intentionally neutral: it does not ship a Warp-specific reviewer list and defaults the base branch to `auto`.
 
