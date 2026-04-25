@@ -7,10 +7,6 @@ on:
         required: false
         default: ''
         type: string
-      workflow_code_ref:
-        description: Immutable ref for the checked out workflow helper code
-        required: true
-        type: string
     secrets:
       OZ_MGMT_GHA_APP_ID:
         required: true
@@ -108,7 +104,7 @@ jobs:
       pull-requests: write
     env:
       WORKFLOW_CODE_REPOSITORY: warpdotdev/oz-for-oss
-      WORKFLOW_CODE_REF: ${{ inputs.workflow_code_ref || github.workflow_sha }}
+      WORKFLOW_CODE_REF: ${{ github.workflow_sha }}
       WORKFLOW_CODE_PATH: __oz_shared
     steps:
       - name: Create GitHub App token

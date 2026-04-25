@@ -16,6 +16,4 @@ jobs:
       issues: write
       pull-requests: write
     uses: ./.github/workflows/trigger-implementation-on-plan-approved.yml
-    with:
-      workflow_code_ref: ${{ github.workflow_sha }}
     secrets: inherit

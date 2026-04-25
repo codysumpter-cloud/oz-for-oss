@@ -11,6 +11,4 @@ jobs:
     permissions:
       issues: write
     uses: ./.github/workflows/comment-on-unready-assigned-issue.yml
-    with:
-      workflow_code_ref: ${{ github.workflow_sha }}
     secrets: inherit
