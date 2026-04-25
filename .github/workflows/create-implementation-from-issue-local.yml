@@ -28,4 +28,5 @@ jobs:
     uses: ./.github/workflows/create-implementation-from-issue.yml
     with:
       issue_number: ${{ github.event.inputs.issue_number || '' }}
+      workflow_code_ref: ${{ github.workflow_sha }}
     secrets: inherit

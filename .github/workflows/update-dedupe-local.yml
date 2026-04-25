@@ -17,4 +17,5 @@ jobs:
     uses: ./.github/workflows/update-dedupe.yml
     with:
       lookback_days: ${{ github.event.inputs.lookback_days || '7' }}
+      workflow_code_ref: ${{ github.workflow_sha }}
     secrets: inherit

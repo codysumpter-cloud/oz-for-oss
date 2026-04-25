@@ -52,4 +52,5 @@ jobs:
     with:
       issue_number: ${{ github.event.issue.number || github.event.inputs.issue_number || '' }}
       lookback_minutes: ${{ github.event.inputs.lookback_minutes || '60' }}
+      workflow_code_ref: ${{ github.workflow_sha }}
     secrets: inherit

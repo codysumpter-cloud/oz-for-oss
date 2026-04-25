@@ -7,6 +7,10 @@ on:
         required: false
         default: ""
         type: string
+      workflow_code_ref:
+        description: Immutable ref for the checked out workflow helper code
+        required: true
+        type: string
       trigger_source:
         description: Source that requested the review
         required: false
@@ -46,7 +50,7 @@ jobs:
     env:
       WARP_ENVIRONMENT_ID: ${{ vars.WARP_ENVIRONMENT_ID || '' }}
       WORKFLOW_CODE_REPOSITORY: warpdotdev/oz-for-oss
-      WORKFLOW_CODE_REF: ${{ github.repository == 'warpdotdev/oz-for-oss' && github.sha || 'main' }}
+      WORKFLOW_CODE_REF: ${{ inputs.workflow_code_ref || github.workflow_sha }}
       WORKFLOW_CODE_PATH: __oz_shared
     permissions:
       contents: read

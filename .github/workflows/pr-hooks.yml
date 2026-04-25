@@ -59,6 +59,7 @@ jobs:
     with:
       pr_number: ${{ github.event.pull_request.number }}
       requester: ${{ github.actor }}
+      workflow_code_ref: ${{ github.workflow_sha }}
     secrets: inherit
   run_tests_after_enforcement:
     needs: [enforce_issue_state]
@@ -90,6 +91,7 @@ jobs:
       pr_number: ${{ github.event.pull_request.number }}
       trigger_source: pull_request_target
       requester: ${{ github.actor }}
+      workflow_code_ref: ${{ github.workflow_sha }}
     secrets: inherit
   review_pr_on_demand:
     needs: [resolve_review_context]
@@ -103,4 +105,5 @@ jobs:
       requester: ${{ needs.resolve_review_context.outputs.requester }}
       focus: ${{ needs.resolve_review_context.outputs.focus }}
       comment_id: ${{ needs.resolve_review_context.outputs.comment_id }}
+      workflow_code_ref: ${{ github.workflow_sha }}
     secrets: inherit
