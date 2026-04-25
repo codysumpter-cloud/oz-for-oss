@@ -1,136 +1,70 @@
 # Issue #333: Support agent statements in triage response alongside follow-up questions
-
 ## Product Spec
-
 ### Summary
-
-The triage response comment should be able to render concise, reporter-facing informational statements (root-cause findings, repro confirmation, relevant file pointers) directly in the visible section of the comment, alongside or before follow-up questions. Today, those observations are only visible to maintainers because they are collapsed behind the `<details>` block.
-
+The triage response comment should be able to render concise, reporter-facing informational statements directly in the visible section of the comment, ahead of follow-up questions when both are present. These statements should focus on findings the reporter can act on immediately, such as version guidance, settings/workaround hints, or environment-specific explanations.
 ### Problem
-
-When the triage agent produces useful, reporter-relevant findings — for example "I reproduced this locally against commit abc123" or "The failing path is in `src/auth/middleware.py:42`" — those observations are placed inside the maintainer-only `<details>` section via the agent's `issue_body` markdown field. The visible section above the fold can currently only show one of:
-
-- follow-up questions (`follow_up_questions`), or
-- duplicate detection (`duplicate_of`).
-
-Reporters therefore never see the agent's diagnostic conclusions unless a maintainer manually surfaces them. This hurts transparency and keeps reporters in the dark about the agent's actual findings, even when those findings are relevant enough to share immediately.
-
+Today, reporter-relevant conclusions from triage live inside the maintainer-only `<details>` block via `issue_body`. Reporters therefore do not see useful findings unless a maintainer manually surfaces them, even when those findings are safe and helpful to share immediately.
 ### Goals
-
-- Allow the triage agent to share short, informational statements with the issue reporter in the visible part of the triage comment.
-- Render statements alongside follow-up questions when both are present, with statements rendered first so the agent's conclusions precede its questions.
-- Keep maintainer-only content (full `issue_body` triage summary, question reasoning, duplicate reasoning) unchanged in the `<details>` block.
-- Preserve existing behavior when the agent does not produce statements (backward compatibility).
-
+- Allow the triage agent to share short, reporter-facing findings above the fold.
+- Render those findings before follow-up questions when both are present.
+- Keep maintainer-only content (`issue_body`, duplicate reasoning, question reasoning) unchanged inside `<details>`.
+- Preserve existing behavior when no statements are provided.
 ### Non-goals
-
-- Removing or restructuring the existing `issue_body` maintainer summary. Statements are a new, focused surface, not a replacement for the full maintainer analysis.
-- Changing duplicate-detection rendering. When duplicates are present, statements are not rendered above the fold (see "User experience" below).
-- Changing how labels, reproducibility, or SME candidates are applied or rendered.
-- Adding rich formatting primitives (tables, images, collapsible regions) inside statements.
-- Changing the `triage_result.json` schema beyond adding the new optional `statements` field.
-
-### Figma / design references
-
-Figma: none provided. This is a workflow-level change that only affects the markdown content of an existing GitHub issue comment.
-
+- Replacing `issue_body` as the maintainer-facing summary.
+- Changing duplicate-detection rendering beyond keeping duplicates mutually exclusive with statements and follow-up questions.
+- Changing label application, SME selection, or reproducibility handling.
+- Adding richer formatting primitives beyond markdown already supported in issue comments.
 ### User experience
-
 #### Comment layout
-
-The visible ("above the fold") portion of the triage comment is rendered in this order when statements and/or follow-up questions are present:
-
-1. Session link preamble line (existing behavior).
-2. Statements section (new), if `statements` is non-empty.
-3. Follow-up questions section (existing), if `follow_up_questions` is non-empty and no duplicates were found.
-
-The maintainer `<details>` block and trailing disclaimer remain at the bottom, unchanged.
-
-When only statements are present (no follow-up questions, no duplicates), the visible section shows statements as the primary user-facing content.
-
-When both statements and follow-up questions are present, statements render first, then the follow-up questions section.
-
-When duplicates are present, duplicate detection continues to take precedence over follow-up questions. Statements are still rendered above the duplicate section when both are present, so the reporter sees the agent's findings before the overlap call-out. This preserves the existing duplicate-vs-follow-up mutual exclusivity while letting statements coexist with either.
-
+The visible portion of the triage comment is rendered in this order:
+1. Session-link preamble line.
+2. Statements section, when `statements` is non-empty and no duplicates were found.
+3. Follow-up questions section, when `follow_up_questions` is non-empty and no duplicates were found.
+4. Duplicate section, when `duplicate_of` is non-empty.
+When duplicates are present, the duplicate section is the only visible reporter-facing guidance. Statements and follow-up questions are both omitted above the fold in that case.
 #### Statements section content
-
-The statements section is addressed to the reporter and contains a short paragraph introduction followed by a bulleted list of the agent's statements, in the order provided by the agent. Each statement is a single markdown string — it may include inline code, links, and file references (e.g. `` `src/auth/middleware.py:42` ``) but should remain concise (roughly one to two sentences each).
-
-Example rendered output when the reporter login is `alice`:
-
+The statements section contains a short intro line addressed to the reporter followed by a single markdown string provided by the agent. That markdown string may be a short paragraph or a compact bulleted list, but it should stay concise and reporter-facing.
+Example when the reporter login is `alice`:
 ```
 @alice — here's what I found while triaging this issue:
 
-- I was able to reproduce this locally against commit abc123.
-- The failing path is in `src/auth/middleware.py:42`.
+This behavior appears to already be fixed in newer Warp releases, and the current code suggests it is limited to SSH-backed sessions. If you need a workaround in the meantime, check whether the relevant session setting is enabled.
 ```
-
-When the reporter login is unavailable, the intro line omits the mention but keeps the same structure.
-
-If statements are present alongside follow-up questions, the combined visible section reads:
-
-```
-@alice — here's what I found while triaging this issue:
-
-- I was able to reproduce this locally against commit abc123.
-- The failing path is in `src/auth/middleware.py:42`.
-
-@alice — I have a few follow-up questions before I can narrow this down:
-
-1. …
-2. …
-
-Reply in-thread with those details and the triage workflow will automatically re-evaluate the issue and update the diagnosis, labels, and next steps.
-```
-
+If follow-up questions are also present, the statements section appears first and the existing follow-up block appears underneath it.
 #### Behavior rules and invariants
-
-- `statements` is an optional array of plain markdown strings in `triage_result.json`. When it is missing, null, or empty, the visible comment is identical to today's behavior.
-- Empty, whitespace-only, or duplicate statement strings are filtered out before rendering. If every statement is invalid, the statements section is omitted.
-- Statements are rendered literally as markdown. They must not be mutated or reformatted beyond trimming surrounding whitespace.
-- Statements never appear inside the maintainer `<details>` block. They are strictly above the fold.
-- The full `issue_body` triage summary and the existing maintainer-only reasoning sections continue to live in the `<details>` block. Statements are additive, not a replacement for `issue_body`.
-- The existing triage disclaimer continues to appear exactly once, at the bottom of the comment.
-- When duplicates are present, statements still render above the duplicates section if the agent provides any. Follow-up questions remain suppressed in the duplicate case (existing behavior).
-
-#### Prompt guidance
-
-The triage prompt in `build_triage_prompt` instructs the agent when to populate `statements` versus `follow_up_questions`:
-
-- `statements` are concise, reporter-facing findings worth sharing immediately: root-cause conclusions, repro confirmation, relevant file or line pointers, or environment-specific explanations.
-- `follow_up_questions` remain focused on information only the reporter can provide.
-- `statements` are not a substitute for `issue_body`; they are a short, filtered view of what is most useful for the reporter to see up front.
-- The agent should prefer empty `statements` over speculative or low-confidence findings.
-
-#### Backward compatibility
-
-- When `statements` is absent, null, or empty, the rendered comment is byte-identical to the pre-change output.
-- Existing `triage_result.json` payloads without a `statements` key remain valid.
-- Existing unit and integration tests continue to pass without modification to assertions that are unrelated to the new section.
-
+- `statements` is an optional markdown string in `triage_result.json`.
+- Missing, null, non-string, empty, or whitespace-only `statements` values are treated as absent.
+- Surrounding whitespace is trimmed before rendering. Internal markdown content is preserved exactly.
+- Statements never appear inside the maintainer `<details>` block.
+- When duplicates are present, statements are suppressed from the visible section.
+- The triage disclaimer still appears exactly once at the bottom of the comment.
+### Prompt guidance
+The triage prompt should instruct the agent to use `statements` for concise reporter-facing findings that are worth sharing immediately, such as:
+- the behavior likely being fixed in a newer version,
+- a relevant setting or workaround the reporter can try,
+- the issue appearing limited to a particular environment based on the current code.
+The prompt should also make clear that:
+- `follow_up_questions` are only for information the reporter alone can provide,
+- `statements` should stay empty when `duplicate_of` is populated,
+- `statements` do not replace `issue_body`.
+### Backward compatibility
+- Payloads without `statements` continue to render exactly as they do today.
+- Existing `triage_result.json` producers remain valid if they omit the new field.
 ### Success criteria
-
-1. `triage_result.json` accepts an optional `statements: list[str]` field. Results without `statements` still validate and render as today.
-2. The triage comment's visible section renders statements above follow-up questions when both are present.
-3. When only `statements` is populated, the visible section shows the statements block and omits the follow-up questions block.
-4. When neither `statements` nor `follow_up_questions` is populated (and no duplicates are detected), the visible section falls back to the existing "finished triaging" preamble.
-5. Statements render as a bulleted markdown list addressed to the reporter, with an `@reporter` mention when the reporter login is known.
-6. Empty, whitespace-only, and duplicate statement strings are filtered out. If all statements are invalid, the section is omitted entirely.
-7. Maintainer content in the `<details>` block is unchanged by this feature: `issue_body`, duplicate reasoning, and question reasoning continue to render exactly as before.
-8. The triage disclaimer appears exactly once, at the bottom of the comment.
-9. Duplicate detection continues to suppress follow-up questions. When duplicates are present, statements may still render above the duplicate section.
-10. The prompt in `build_triage_prompt` instructs the agent on when to use `statements` vs. `follow_up_questions`, and the agent's output guide includes a `statements` field in the JSON schema.
-11. Existing tests pass; new unit tests cover `extract_statements` and `build_statements_section`.
-
+1. `triage_result.json` accepts an optional `statements: string` field.
+2. Statements render above follow-up questions when both are present.
+3. When only `statements` is populated, the visible section shows the statements block and omits follow-up questions.
+4. When duplicates are present, both statements and follow-up questions are suppressed above the fold.
+5. Statements render as a markdown block addressed to the reporter, with an `@reporter` mention when available.
+6. Empty or whitespace-only statements are omitted after trimming.
+7. Maintainer content in the `<details>` block remains unchanged.
+8. The triage disclaimer appears exactly once at the bottom of the comment.
+9. The prompt distinguishes `statements` from `follow_up_questions` and instructs the agent not to emit `statements` for duplicate cases.
+10. Existing tests pass, and new unit tests cover `extract_statements`, `build_statements_section`, and visible comment layout behavior.
 ### Validation
-
-- **Unit tests** covering:
-  - `extract_statements` normalization: strips whitespace, filters empty/duplicate entries, returns `[]` for missing or non-list inputs.
-  - `build_statements_section` rendering: includes reporter mention when present, omits it cleanly when absent, emits bulleted markdown, and preserves markdown content in each entry.
-  - Comment layout integration (analogous to the existing `MutualExclusivityTest`): verifies that statements render before follow-up questions, that duplicates still suppress follow-up questions, and that the maintainer `<details>` block is unchanged.
-- **Backward compatibility regression**: a `triage_result.json` payload without a `statements` field produces the same rendered comment as before.
-- **Manual validation**: trigger a triage run on a test issue where the agent produces both statements and follow-up questions; confirm the reporter-facing section shows statements first, followed by the follow-up questions and existing reply-in-thread guidance.
-
+- Unit tests for `extract_statements` normalization.
+- Unit tests for `build_statements_section` rendering with and without a reporter login.
+- Layout tests proving statements render before follow-up questions, duplicates suppress statements, and maintainer details remain unchanged.
+- Regression coverage showing payloads without `statements` still render the old layout.
 ### Open questions
-
-- None. Behavior, ordering, and backward compatibility are defined above. Any future changes (e.g. allowing statements alongside duplicate detection in a different visual treatment, or formatting statements as prose rather than bullets) are out of scope for this spec.
+- None.
