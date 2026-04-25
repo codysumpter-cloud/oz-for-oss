@@ -40,7 +40,7 @@ jobs:
       comment_id: ${{ steps.resolve.outputs.comment_id }}
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - name: Set up Oz Python environment
         uses: ./.github/actions/setup-oz-python
       - name: Resolve review context

@@ -31,7 +31,7 @@ jobs:
           echo "has_code_changes=$has_code" >> "$GITHUB_OUTPUT"
       - name: Checkout PR
         if: steps.filter.outputs.has_code_changes == 'true'
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           ref: refs/pull/${{ inputs.pr_number }}/merge
       - name: Lint GitHub Actions workflows
