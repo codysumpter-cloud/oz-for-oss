@@ -84,7 +84,6 @@ jobs:
       github.event_name == 'pull_request_target' &&
       github.event.action != 'synchronize' &&
       github.event.pull_request.draft == false &&
-      !startsWith(github.event.pull_request.head.ref, 'cherrypick') &&
       needs.enforce_issue_state.outputs.allow_review == 'true'
     uses: ./.github/workflows/review-pull-request.yml
     with:
