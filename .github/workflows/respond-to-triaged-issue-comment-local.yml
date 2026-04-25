@@ -6,16 +6,12 @@ concurrency:
   group: respond-to-triaged-issue-comment-${{ github.event.comment.id || github.run_id }}
   cancel-in-progress: false
 jobs:
+  # Mention, bot, event-type, and trust gates all live in the reusable
+  # workflow (``respond-to-triaged-issue-comment.yml``). This adapter
+  # exists only to subscribe to the GitHub event that can carry an
+  # ``@oz-agent`` mention on a triaged issue and delegate it through
+  # ``workflow_call``.
   respond_inline:
-    if: >-
-      github.event_name == 'issue_comment' &&
-      !github.event.issue.pull_request &&
-      github.event.comment.user.type != 'Bot' &&
-      !endsWith(github.event.comment.user.login, '[bot]') &&
-      contains(github.event.comment.body, '@oz-agent') &&
-      contains(github.event.issue.labels.*.name, 'triaged') &&
-      !contains(github.event.issue.labels.*.name, 'ready-to-spec') &&
-      !contains(github.event.issue.labels.*.name, 'ready-to-implement')
     permissions:
       contents: read
       issues: write

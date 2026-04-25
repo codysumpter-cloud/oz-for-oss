@@ -6,6 +6,7 @@ from typing import Any
 
 from github import Auth, Github
 
+from oz_workflows.actions import notice
 from oz_workflows.docker_agent import (
     REPO_MOUNT,
     resolve_triage_image,
@@ -17,6 +18,7 @@ from oz_workflows.helpers import (
     format_issue_comments_for_prompt,
     format_respond_to_triaged_start_line,
     is_automation_user,
+    is_trusted_commenter,
     record_run_session_link,
     triggering_comment_prompt_text,
 )
@@ -137,6 +139,20 @@ def main() -> None:
     triggering_comment_id = int((event.get("comment") or {}).get("id") or 0) or None
     requester = ((event.get("comment") or {}).get("user") or {}).get("login") or ""
     with closing(Github(auth=Auth.Token(require_env("GH_TOKEN")))) as client:
+        # Decide whether the commenter is trusted BEFORE starting the
+        # agent run. ``fetch_github_context.py`` filters comment content,
+        # but trust is a workflow-layer admission decision; evaluating it
+        # here avoids spending Oz API quota on untrusted mentions even if
+        # the surrounding workflow wiring regresses.
+        if not is_trusted_commenter(client, event, org=owner):
+            event_actor = event.get("comment") or {}
+            login = (event_actor.get("user") or {}).get("login") or "unknown"
+            association = event_actor.get("author_association") or "NONE"
+            notice(
+                f"Ignoring @oz-agent mention from @{login}; "
+                f"not an org member (association={association})."
+            )
+            return
         github = client.get_repo(repo_slug())
         issue = github.get_issue(issue_number)
         if issue.pull_request:
