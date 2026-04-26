@@ -4,6 +4,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 from triage_new_issues import (
     TRIAGE_DISCLAIMER,
     _container_companion_path,
@@ -47,6 +48,13 @@ from oz_workflows.triage import (
     load_triage_config,
     select_recent_untriaged_issues,
 )
+
+
+def _write_repo_config(repo_root: Path, text: str) -> Path:
+    path = repo_root / ".github" / "oz" / "config.yml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
 
 
 class LoadTriageConfigTest(unittest.TestCase):
@@ -1188,6 +1196,51 @@ class SummaryCasingInStage3Test(unittest.TestCase):
         summary = _lowercase_first(str("triage completed").strip())
         sentence = f"The triage concluded that {summary}."
         self.assertEqual(sentence, "The triage concluded that triage completed.")
+
+
+class TriageWorkflowCommentTemplateOverrideTest(unittest.TestCase):
+    def test_reporter_facing_sections_use_configured_overrides(self) -> None:
+        with TemporaryDirectory() as tempdir:
+            workspace_root = Path(tempdir)
+            _write_repo_config(
+                workspace_root,
+                (
+                    "version: 1\n"
+                    "workflow_comments:\n"
+                    "  triage-new-issues:\n"
+                    "    statements_with_reporter: |-\n"
+                    "      ${reporter_mention} custom triage summary:\n"
+                    "      ${statements_markdown}\n"
+                    "    follow_up_without_reporter: |-\n"
+                    "      Need more data:\n"
+                    "      ${questions_markdown}\n"
+                    "    duplicate_with_reporter: |-\n"
+                    "      ${reporter_mention} possible duplicates:\n"
+                    "      ${duplicate_list_markdown}\n"
+                ),
+            )
+            issue_with_reporter = {"user": {"login": "alice"}}
+            issue_without_reporter = {"user": {}}
+
+            with patch("triage_new_issues.workspace", return_value=str(workspace_root)):
+                self.assertEqual(
+                    build_statements_section(issue_with_reporter, "- Check logs"),
+                    "@alice custom triage summary:\n- Check logs",
+                )
+                self.assertEqual(
+                    build_follow_up_section(
+                        issue_without_reporter,
+                        [{"question": "What version?", "reasoning": ""}],
+                    ),
+                    "Need more data:\n1. What version?",
+                )
+                self.assertEqual(
+                    build_duplicate_section(
+                        issue_with_reporter,
+                        [{"issue_number": 10, "title": "Original report"}],
+                    ),
+                    "@alice possible duplicates:\n- #10 — Original report",
+                )
 
 
 class TriageHeuristicsPromptTest(unittest.TestCase):

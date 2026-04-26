@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -9,6 +12,13 @@ from enforce_pr_issue_state import (
     build_issue_association_prompt,
     main,
 )
+
+
+def _write_config(repo_root: Path, text: str) -> Path:
+    path = repo_root / ".github" / "oz" / "config.yml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
 
 
 class IsPrAuthorOrgMemberTest(unittest.TestCase):
@@ -220,6 +230,62 @@ class MainTest(unittest.TestCase):
         pr.edit.assert_called_once_with(state="closed")
         mock_set_output.assert_called_once_with("allow_review", "false")
 
+    def test_associated_unready_issue_uses_configured_close_template(self) -> None:
+        with TemporaryDirectory() as tempdir:
+            _write_config(
+                Path(tempdir),
+                (
+                    "version: 1\n"
+                    "workflow_comments:\n"
+                    "  enforce-pr-issue-state:\n"
+                    "    close_explicit_issue_not_ready: |-\n"
+                    "      Custom close for ${issue_refs} requiring ${required_label}.\n"
+                ),
+            )
+
+            client = MagicMock()
+            client.close = MagicMock()
+            github = MagicMock()
+            client.get_repo.return_value = github
+
+            pr = self._build_basic_pr(filename="src/app.py", body="Closes #42")
+            github.get_pull.return_value = pr
+            github.get_issue.return_value = SimpleNamespace(
+                pull_request=None,
+                number=42,
+                title="Not ready",
+                body="",
+                html_url="https://github.com/owner/repo/issues/42",
+                labels=[SimpleNamespace(name="bug")],
+            )
+
+            progress_instance = MagicMock()
+
+            with (
+                patch.dict(os.environ, {"GITHUB_WORKSPACE": tempdir}, clear=False),
+                patch("enforce_pr_issue_state.require_env", side_effect=["7", "token"]),
+                patch("enforce_pr_issue_state.optional_env", return_value=None),
+                patch("enforce_pr_issue_state.repo_parts", return_value=("owner", "repo")),
+                patch("enforce_pr_issue_state.repo_slug", return_value="owner/repo"),
+                patch("enforce_pr_issue_state.workspace", return_value=tempdir),
+                patch("enforce_pr_issue_state.Auth.Token", return_value="token"),
+                patch("enforce_pr_issue_state.Github", return_value=client),
+                patch(
+                    "enforce_pr_issue_state.WorkflowProgressComment",
+                    return_value=progress_instance,
+                ),
+                patch(
+                    "enforce_pr_issue_state.resolve_pr_association",
+                    return_value={"same_repo_issue_numbers": [42]},
+                ),
+                patch("enforce_pr_issue_state.set_output"),
+            ):
+                main()
+
+            progress_instance.complete.assert_called_once_with(
+                "Custom close for #42 requiring ready-to-implement."
+            )
+
     def test_any_ready_associated_issue_allows_pr(self) -> None:
         client = MagicMock()
         client.close = MagicMock()
@@ -328,6 +394,78 @@ class MainTest(unittest.TestCase):
         progress_instance.cleanup.assert_called_once_with()
         progress_instance.complete.assert_not_called()
         mock_set_output.assert_called_once_with("allow_review", "true")
+
+    def test_agent_no_match_uses_configured_close_template(self) -> None:
+        with TemporaryDirectory() as tempdir:
+            _write_config(
+                Path(tempdir),
+                (
+                    "version: 1\n"
+                    "workflow_comments:\n"
+                    "  enforce-pr-issue-state:\n"
+                    "    close_no_matching_ready_issue: |-\n"
+                    "      No ready issue matched this ${change_kind} PR.\n"
+                    "      Why: ${association_rationale}\n"
+                ),
+            )
+
+            client = MagicMock()
+            client.close = MagicMock()
+            github = MagicMock()
+            client.get_repo.return_value = github
+
+            pr = self._build_basic_pr(filename="src/app.py")
+            github.get_pull.return_value = pr
+            github.get_issues.return_value = [
+                SimpleNamespace(
+                    pull_request=None,
+                    number=99,
+                    title="Ready impl issue",
+                    body="",
+                    html_url="https://github.com/owner/repo/issues/99",
+                    labels=[SimpleNamespace(name="ready-to-implement")],
+                )
+            ]
+
+            progress_instance = MagicMock()
+
+            with (
+                patch.dict(os.environ, {"GITHUB_WORKSPACE": tempdir}, clear=False),
+                patch("enforce_pr_issue_state.require_env", side_effect=["7", "token"]),
+                patch("enforce_pr_issue_state.optional_env", return_value=None),
+                patch("enforce_pr_issue_state.repo_parts", return_value=("owner", "repo")),
+                patch("enforce_pr_issue_state.repo_slug", return_value="owner/repo"),
+                patch("enforce_pr_issue_state.workspace", return_value=tempdir),
+                patch("enforce_pr_issue_state.Auth.Token", return_value="token"),
+                patch("enforce_pr_issue_state.Github", return_value=client),
+                patch(
+                    "enforce_pr_issue_state.WorkflowProgressComment",
+                    return_value=progress_instance,
+                ),
+                patch(
+                    "enforce_pr_issue_state.resolve_pr_association",
+                    return_value={"same_repo_issue_numbers": []},
+                ),
+                patch("enforce_pr_issue_state.build_agent_config", return_value=MagicMock()),
+                patch(
+                    "enforce_pr_issue_state.run_agent",
+                    return_value=SimpleNamespace(run_id="run-123"),
+                ),
+                patch(
+                    "enforce_pr_issue_state.poll_for_artifact",
+                    return_value={
+                        "matched": False,
+                        "issue_number": None,
+                        "rationale": "Changed files do not line up with any ready issue.",
+                    },
+                ),
+                patch("enforce_pr_issue_state.set_output"),
+            ):
+                main()
+
+            progress_instance.complete.assert_called_once_with(
+                "No ready issue matched this implementation PR.\nWhy: Changed files do not line up with any ready issue."
+            )
 
 
 class BuildIssueAssociationPromptTest(unittest.TestCase):

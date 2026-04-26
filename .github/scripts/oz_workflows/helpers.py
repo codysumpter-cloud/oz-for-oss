@@ -19,7 +19,8 @@ from oz_agent_sdk.types.agent import RunItem
 
 from . import actions
 from .artifacts import ResolvedReviewComment
-from .env import optional_env
+from .comment_templates import render_comment_template
+from .env import optional_env, workspace
 
 logger = logging.getLogger(__name__)
 
@@ -362,10 +363,7 @@ def build_comment_body(content: str, metadata: str) -> str:
         return f"{content}\n\n{metadata}"
     return content
 
-_PROGRESS_LINK_PREFIXES = (
-    "You can follow along in [the session on Warp]",
-    "You can view [the conversation on Warp]",
-)
+_PROGRESS_LINK_MARKERS = ("/session/", "/conversation/")
 
 
 # Labels that signal that a prior triage pass has already been performed on
@@ -399,42 +397,54 @@ def issue_has_prior_triage(labels: list[Any]) -> bool:
 
 def format_triage_start_line(*, is_retriage: bool) -> str:
     """State-aware opening line for the triage workflow."""
-    if is_retriage:
-        return (
-            "I'm re-triaging this issue based on new information."
-        )
-    return "I'm starting to work on triaging this issue."
+    return render_comment_template(
+        workspace(),
+        namespace="triage-new-issues",
+        key="start_retriage" if is_retriage else "start_new",
+    )
 
 
 def format_triage_session_line(
     *, is_retriage: bool, session_link_markdown: str
 ) -> str:
     """Mid-run status line used once the Oz session link is known."""
-    verb = "re-triaging" if is_retriage else "triaging"
-    return f"I'm {verb} this issue. You can follow {session_link_markdown}."
+    return render_comment_template(
+        workspace(),
+        namespace="triage-new-issues",
+        key="session",
+        context={
+            "session_link_markdown": session_link_markdown,
+            "triage_verb": "re-triaging" if is_retriage else "triaging",
+        },
+    )
 
 
 def format_respond_to_triaged_start_line() -> str:
     """State-aware opening line for the inline triaged-issue response workflow."""
-    return (
-        "I'm drafting an inline response to this comment. "
-        "This issue is already triaged, so I'll reply without changing labels, "
-        "the issue body, or assignees."
+    return render_comment_template(
+        workspace(),
+        namespace="respond-to-triaged-issue",
+        key="start",
     )
 
 
 def format_spec_start_line(*, is_update: bool) -> str:
     """State-aware opening line for the create-spec-from-issue workflow."""
-    if is_update:
-        return "I'm updating the existing spec PR for this issue."
-    return "I'm starting work on product and tech specs for this issue."
+    return render_comment_template(
+        workspace(),
+        namespace="create-spec-from-issue",
+        key="start_update" if is_update else "start_new",
+    )
 
 
 def format_spec_complete_line(*, is_update: bool, pr_url: str) -> str:
     """State-aware completion line for the create-spec-from-issue workflow."""
-    if is_update:
-        return f"I updated the existing [spec PR]({pr_url}) for this issue."
-    return f"I created a new [spec PR]({pr_url}) for this issue."
+    return render_comment_template(
+        workspace(),
+        namespace="create-spec-from-issue",
+        key="complete_updated" if is_update else "complete_created",
+        context={"pr_url": pr_url},
+    )
 
 
 def format_implementation_start_line(
@@ -456,29 +466,38 @@ def format_implementation_start_line(
     """
     if should_noop:
         numbers = ", ".join(f"#{n}" for n in (unapproved_spec_pr_numbers or []))
-        suffix = f" Linked spec PR(s): {numbers}." if numbers else ""
-        return (
-            "I'm not starting implementation because the linked spec PR(s) "
-            "have not been marked `plan-approved`."
-            + suffix
+        return render_comment_template(
+            workspace(),
+            namespace="create-implementation-from-issue",
+            key="start_blocked_unapproved_specs",
+            context={
+                "linked_spec_prs_suffix": (
+                    f". Linked spec PR(s): {numbers}" if numbers else ""
+                )
+            },
         )
-    updating = " (updating the existing draft PR)" if existing_implementation_pr else ""
     if spec_context_source == "approved-pr":
-        return (
-            "I'm implementing this issue on top of the approved spec PR's branch"
-            + updating
-            + "."
+        key = (
+            "start_from_approved_spec_update_pr"
+            if existing_implementation_pr
+            else "start_from_approved_spec_new_pr"
         )
-    if spec_context_source == "directory":
-        return (
-            "I'm implementing this issue using the repository's directory specs"
-            + updating
-            + "."
+    elif spec_context_source == "directory":
+        key = (
+            "start_from_directory_specs_update_pr"
+            if existing_implementation_pr
+            else "start_from_directory_specs_new_pr"
         )
-    return (
-        "I'm implementing this issue with no spec context"
-        + updating
-        + "."
+    else:
+        key = (
+            "start_without_spec_context_update_pr"
+            if existing_implementation_pr
+            else "start_without_spec_context_new_pr"
+        )
+    return render_comment_template(
+        workspace(),
+        namespace="create-implementation-from-issue",
+        key=key,
     )
 
 
@@ -490,29 +509,40 @@ def format_implementation_complete_line(
 ) -> str:
     """State-aware completion line for the implementation workflow."""
     if updated_spec_pr:
-        return (
-            f"I pushed implementation updates to the linked approved [spec PR]({pr_url})."
-        )
-    if existing_implementation_pr:
-        return (
-            f"I updated the existing draft [implementation PR]({pr_url}) for this issue."
-        )
-    return f"I created a new draft [implementation PR]({pr_url}) for this issue."
+        key = "complete_updated_spec_pr"
+    elif existing_implementation_pr:
+        key = "complete_updated_existing_draft_pr"
+    else:
+        key = "complete_created_new_draft_pr"
+    return render_comment_template(
+        workspace(),
+        namespace="create-implementation-from-issue",
+        key=key,
+        context={"pr_url": pr_url},
+    )
 
 
 def format_review_start_line(
     *, spec_only: bool, is_rereview: bool, focus: str = ""
 ) -> str:
     """State-aware opening line for the review-pull-request workflow."""
-    kind = "spec-only pull request" if spec_only else "pull request"
-    if is_rereview:
-        base = f"I'm re-reviewing this {kind} in response to a review request."
+    if spec_only and is_rereview:
+        key = "start_rereview_spec"
+    elif spec_only:
+        key = "start_first_review_spec"
+    elif is_rereview:
+        key = "start_rereview_code"
     else:
-        base = f"I'm starting a first review of this {kind}."
+        key = "start_first_review_code"
     focus_text = (focus or "").strip()
-    if focus_text:
-        return f"{base} Focus: {focus_text}"
-    return base
+    return render_comment_template(
+        workspace(),
+        namespace="review-pull-request",
+        key=key,
+        context={
+            "focus_suffix": f" Focus: {focus_text}" if focus_text else "",
+        },
+    )
 
 
 def format_pr_comment_start_line(
@@ -520,19 +550,27 @@ def format_pr_comment_start_line(
 ) -> str:
     """State-aware opening line for the respond-to-pr-comment workflow."""
     if is_review_reply:
-        source = "an inline review-thread comment"
+        key = (
+            "start_review_reply_with_spec_context"
+            if has_spec_context
+            else "start_review_reply_without_spec_context"
+        )
     elif is_review_body:
-        source = "a PR review body"
+        key = (
+            "start_review_body_with_spec_context"
+            if has_spec_context
+            else "start_review_body_without_spec_context"
+        )
     else:
-        source = "a PR conversation comment"
-    spec_clause = (
-        " Spec context was found and will be used to ground the change."
-        if has_spec_context
-        else ""
-    )
-    return (
-        f"I'm working on changes requested in this PR (responding to {source})."
-        + spec_clause
+        key = (
+            "start_conversation_comment_with_spec_context"
+            if has_spec_context
+            else "start_conversation_comment_without_spec_context"
+        )
+    return render_comment_template(
+        workspace(),
+        namespace="respond-to-pr-comment",
+        key=key,
     )
 
 
@@ -540,13 +578,11 @@ def format_enforce_start_line(
     *, explicit_issue: bool, change_kind: str
 ) -> str:
     """State-aware opening line for the enforce-pr-issue-state workflow."""
-    association = (
-        "an explicitly linked issue"
-        if explicit_issue
-        else "a likely matching ready issue"
-    )
-    return (
-        f"I'm checking this {change_kind} PR for association with {association}."
+    return render_comment_template(
+        workspace(),
+        namespace="enforce-pr-issue-state",
+        key="start_explicit_issue" if explicit_issue else "start_matching_ready_issue",
+        context={"change_kind": change_kind},
     )
 
 
@@ -563,8 +599,24 @@ def _workflow_run_url() -> str:
 def _format_progress_link_section(session_link: str) -> str:
     normalized_link = session_link.strip()
     if "/conversation/" in normalized_link:
-        return f"You can view [the conversation on Warp]({normalized_link})."
-    return f"You can follow along in [the session on Warp]({normalized_link})."
+        return render_comment_template(
+            workspace(),
+            namespace="shared",
+            key="progress_session_conversation",
+            context={
+                "session_link_markdown": (
+                    f"[the conversation on Warp]({normalized_link})"
+                )
+            },
+        )
+    return render_comment_template(
+        workspace(),
+        namespace="shared",
+        key="progress_session_session",
+        context={
+            "session_link_markdown": f"[the session on Warp]({normalized_link})"
+        },
+    )
 
 
 def _format_triage_session_link(session_link: str) -> str:
@@ -583,11 +635,14 @@ def append_comment_sections(existing_body: str, metadata: str, sections: list[st
     # re-add it as the last section after new sections are appended.
     updated_sections = [s for s in updated_sections if s != POWERED_BY_SUFFIX]
     for section in normalized_sections:
-        if section.startswith(_PROGRESS_LINK_PREFIXES):
+        if any(marker in section for marker in _PROGRESS_LINK_MARKERS):
             updated_sections = [
                 existing_section
                 for existing_section in updated_sections
-                if not existing_section.startswith(_PROGRESS_LINK_PREFIXES)
+                if not any(
+                    marker in existing_section
+                    for marker in _PROGRESS_LINK_MARKERS
+                )
             ]
             updated_sections.append(section)
             continue
@@ -773,12 +828,18 @@ class WorkflowProgressComment:
         """
         run_url = _workflow_run_url()
         if run_url:
-            message = (
-                "I ran into an unexpected error while working on this. "
-                f"You can view [the workflow run]({run_url}) for more details."
+            message = render_comment_template(
+                workspace(),
+                namespace="shared",
+                key="error_with_run_link",
+                context={"workflow_run_url": run_url},
             )
         else:
-            message = "I ran into an unexpected error while working on this."
+            message = render_comment_template(
+                workspace(),
+                namespace="shared",
+                key="error_without_run_link",
+            )
         sections: list[str] = []
         normalized_requester = self.requester_login.strip().removeprefix("@")
         if normalized_requester:
@@ -1156,10 +1217,16 @@ def build_spec_preview_section(owner: str, repo: str, branch_name: str, issue_nu
     tech_path = f"{spec_dir}/tech.md"
     product_url = f"https://github.com/{owner}/{repo}/blob/{branch_name}/{product_path}"
     tech_url = f"https://github.com/{owner}/{repo}/blob/{branch_name}/{tech_path}"
-    return (
-        f"Preview generated specs:\n"
-        f"- Product spec: [{product_path}]({product_url})\n"
-        f"- Tech spec: [{tech_path}]({tech_url})"
+    return render_comment_template(
+        workspace(),
+        namespace="shared",
+        key="spec_preview",
+        context={
+            "product_path": product_path,
+            "product_url": product_url,
+            "tech_path": tech_path,
+            "tech_url": tech_url,
+        },
     )
 
 
@@ -1224,7 +1291,16 @@ def build_next_steps_section(steps: list[str]) -> str:
     normalized_steps = [step.strip() for step in steps if step and step.strip()]
     if not normalized_steps:
         return ""
-    return "Next steps:\n" + "\n".join(f"- {step}" for step in normalized_steps)
+    return render_comment_template(
+        workspace(),
+        namespace="shared",
+        key="next_steps_section",
+        context={
+            "next_steps_markdown": "\n".join(
+                f"- {step}" for step in normalized_steps
+            )
+        },
+    )
 
 
 def branch_exists(github: Repository, owner: str, repo: str, branch: str) -> bool:

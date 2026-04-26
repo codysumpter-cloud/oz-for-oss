@@ -11,6 +11,7 @@ from github import Auth, Github
 from github.Repository import Repository
 
 from oz_workflows.actions import append_summary, warning
+from oz_workflows.comment_templates import render_comment_template
 from oz_workflows.docker_agent import (
     REPO_MOUNT,
     resolve_triage_image,
@@ -51,6 +52,20 @@ REPRO_LABEL_PREFIX = "repro:"
 AGENT_PROHIBITED_LABELS = {"ready-to-implement", "ready-to-spec"}
 OZ_AGENT_METADATA_PREFIX = "<!-- oz-agent-metadata:"
 TRIAGE_DISCLAIMER = "*This is my automated analysis and may be incorrect. A maintainer will verify the details.*"
+
+
+def _triage_template(key: str, **context: str) -> str:
+    return render_comment_template(
+        workspace(),
+        namespace=WORKFLOW_NAME,
+        key=key,
+        context=context,
+    )
+
+
+def _reporter_mention(issue: Any) -> str:
+    reporter_login = get_login(get_field(issue, "user")).strip()
+    return f"@{reporter_login}" if reporter_login else ""
 
 
 def _lowercase_first(text: str) -> str:
@@ -283,17 +298,27 @@ def process_issue(
             if session_link:
                 link_text = _format_triage_session_link(session_link)
                 parts.append(
-                    "I've finished triaging this issue. "
-                    "A maintainer will verify the details shortly. "
-                    f"You can view {link_text}."
+                    _triage_template(
+                        "complete_without_user_facing_content_with_session",
+                        session_link_markdown=link_text,
+                    )
                 )
             else:
-                parts.append("I've completed the triage of this issue.")
+                parts.append(
+                    _triage_template(
+                        "complete_without_user_facing_content_without_session"
+                    )
+                )
         elif session_link:
             # Follow-up questions or duplicates are present; show session link
             # on its own line before the user-facing content.
             link_text = _format_triage_session_link(session_link)
-            parts.append(f"You can view {link_text}.")
+            parts.append(
+                _triage_template(
+                    "session_link_only",
+                    session_link_markdown=link_text,
+                )
+            )
 
         # User-facing content above the fold: follow-up questions or duplicate info.
         # Follow-up questions and duplicates are mutually exclusive.
@@ -328,13 +353,13 @@ def process_issue(
 
         details_body = "\n\n".join(maintainer_parts)
         parts.append(
-            "<details>\n"
-            "<summary>Maintainer details</summary>\n\n"
-            f"{details_body}\n\n"
-            "</details>"
+            _triage_template(
+                "maintainer_details",
+                maintainer_details_markdown=details_body,
+            )
         )
 
-        parts.append(TRIAGE_DISCLAIMER)
+        parts.append(_triage_template("disclaimer"))
         progress.replace_body("\n\n".join(parts))
         append_summary(f"- Issue #{issue_number}: {summary} Labels: {labels_text}.\n")
     except Exception:
@@ -699,15 +724,17 @@ def build_question_reasoning_section(questions: list[dict[str, str]]) -> str:
 
 def build_statements_section(issue: Any, statements: str) -> str:
     """Build the reporter-facing statements section for the progress comment."""
-    reporter_login = get_login(get_field(issue, "user")).strip()
-    lines: list[str] = []
-    if reporter_login:
-        lines.append(f"@{reporter_login} — here's what I found while triaging this issue:")
-    else:
-        lines.append("Here's what I found while triaging this issue:")
-    lines.append("")
-    lines.append(statements)
-    return "\n".join(lines)
+    reporter_mention = _reporter_mention(issue)
+    if reporter_mention:
+        return _triage_template(
+            "statements_with_reporter",
+            reporter_mention=reporter_mention,
+            statements_markdown=statements,
+        )
+    return _triage_template(
+        "statements_without_reporter",
+        statements_markdown=statements,
+    )
 
 
 def build_follow_up_section(issue: Any, questions: list[dict[str, str]]) -> str:
@@ -717,32 +744,26 @@ def build_follow_up_section(issue: Any, questions: list[dict[str, str]]) -> str:
     Only the question text is rendered here; reasoning is handled
     separately by ``build_question_reasoning_section`` for the maintainer section.
     """
-    reporter_login = get_login(get_field(issue, "user")).strip()
-    lines: list[str] = []
-    if reporter_login:
-        lines.append(f"@{reporter_login} — I have a few follow-up questions before I can narrow this down:")
-    else:
-        lines.append("I have a few follow-up questions before I can narrow this down:")
-    lines.append("")
-    lines.extend(f"{i}. {q['question']}" for i, q in enumerate(questions, start=1))
-    lines.append("")
-    lines.append(
-        "Reply in-thread with those details and the triage workflow will "
-        "automatically re-evaluate the issue and update the diagnosis, "
-        "labels, and next steps."
+    reporter_mention = _reporter_mention(issue)
+    questions_markdown = "\n".join(
+        f"{i}. {q['question']}" for i, q in enumerate(questions, start=1)
     )
-    return "\n".join(lines)
+    if reporter_mention:
+        return _triage_template(
+            "follow_up_with_reporter",
+            reporter_mention=reporter_mention,
+            questions_markdown=questions_markdown,
+        )
+    return _triage_template(
+        "follow_up_without_reporter",
+        questions_markdown=questions_markdown,
+    )
 
 
 def build_duplicate_section(issue: Any, duplicates: list[dict[str, Any]]) -> str:
     """Build the duplicate detection section for embedding in the progress comment."""
-    reporter_login = get_login(get_field(issue, "user")).strip()
+    reporter_mention = _reporter_mention(issue)
     lines: list[str] = []
-    if reporter_login:
-        lines.append(f"@{reporter_login} — this issue appears to overlap with existing issues:")
-    else:
-        lines.append("This issue appears to overlap with existing issues:")
-    lines.append("")
     for dup in duplicates:
         num = dup["issue_number"]
         title = dup.get("title") or ""
@@ -750,13 +771,17 @@ def build_duplicate_section(issue: Any, duplicates: list[dict[str, Any]]) -> str
         if title:
             line += f" — {title}"
         lines.append(line)
-    lines.append("")
-    lines.append(
-        "If this report is meaningfully different, please comment with the "
-        "additional context or distinguishing behavior so a maintainer can "
-        "review it. Otherwise, a maintainer may close it as a duplicate after review."
+    duplicate_list_markdown = "\n".join(lines)
+    if reporter_mention:
+        return _triage_template(
+            "duplicate_with_reporter",
+            reporter_mention=reporter_mention,
+            duplicate_list_markdown=duplicate_list_markdown,
+        )
+    return _triage_template(
+        "duplicate_without_reporter",
+        duplicate_list_markdown=duplicate_list_markdown,
     )
-    return "\n".join(lines)
 
 
 def _triage_summary_comment_metadata(issue_number: int) -> str:

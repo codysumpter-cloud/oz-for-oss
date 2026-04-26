@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,12 @@ _GITHUB_HANDLE_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 class SelfImprovementConfig:
     reviewers: list[str] | None
     base_branch: str | None
+
+
+@dataclass(frozen=True)
+class WorkflowConfigDocument:
+    path: Path
+    data: dict[str, Any]
 
 
 def resolve_repo_config_path(workspace_root: Path) -> Path | None:
@@ -107,15 +114,8 @@ def _parse_env_base_branch(config_path: Path) -> str | None:
     )
 
 
-def load_self_improvement_config(workspace_root: Path) -> SelfImprovementConfig:
-    """Load and validate the resolved self-improvement workflow config."""
-    config_path = resolve_repo_config_path(workspace_root)
-    if config_path is None:
-        raise RuntimeError(
-            "Unable to locate .github/oz/config.yml in either the consuming "
-            "repository workspace or the checked-out workflow code."
-        )
-
+@lru_cache(maxsize=None)
+def _load_workflow_config_document_from_path(config_path: Path) -> WorkflowConfigDocument:
     try:
         raw_data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
@@ -131,6 +131,26 @@ def load_self_improvement_config(workspace_root: Path) -> SelfImprovementConfig:
     version = raw_data.get("version")
     if version != 1:
         raise _fail(config_path, "Unsupported config version; expected version: 1.")
+
+    return WorkflowConfigDocument(path=config_path, data=raw_data)
+
+
+def load_workflow_config_document(workspace_root: Path) -> WorkflowConfigDocument:
+    """Load and validate the resolved workflow config document once."""
+    config_path = resolve_repo_config_path(workspace_root)
+    if config_path is None:
+        raise RuntimeError(
+            "Unable to locate .github/oz/config.yml in either the consuming "
+            "repository workspace or the checked-out workflow code."
+        )
+    return _load_workflow_config_document_from_path(config_path)
+
+
+def load_self_improvement_config(workspace_root: Path) -> SelfImprovementConfig:
+    """Load and validate the resolved self-improvement workflow config."""
+    document = load_workflow_config_document(workspace_root)
+    config_path = document.path
+    raw_data = document.data
 
     self_improvement = raw_data.get("self_improvement")
     if self_improvement is None:

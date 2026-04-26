@@ -6,6 +6,7 @@ from textwrap import dedent
 from github import Auth, Github
 
 from oz_workflows.actions import set_output
+from oz_workflows.comment_templates import render_comment_template
 from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.helpers import (
     format_enforce_start_line,
@@ -60,8 +61,8 @@ def build_issue_association_prompt(
         Output requirements:
         - Decide whether there is a clear match.
         - Produce JSON with exactly this shape:
-          {{"matched": boolean, "issue_number": number | null, "rationale": string, "close_comment": string}}
-        - If there is no clear match, set `close_comment` to a concise PR comment explaining that this {change_kind} PR could not be matched to an issue marked `{required_label}` and include this contribution docs link: {contribution_docs_url}
+          {{"matched": boolean, "issue_number": number | null, "rationale": string}}
+        - When there is no clear match, explain why in `rationale` using concrete evidence from the PR and candidate issues.
         - Do not close the PR yourself.
         - Validate the JSON with `jq`.
         - After validating the JSON, upload it as an artifact via `oz artifact upload issue_association.json` (or `oz-preview artifact upload issue_association.json` if the `oz` CLI is not available). Either CLI is acceptable — use whichever one is installed in the environment. The subcommand is `artifact` (singular) on both CLIs; do not use `artifacts`.
@@ -138,12 +139,17 @@ def main() -> None:
             )
             issue_refs = ", ".join(f"#{n}" for n in associated_issue_numbers)
             association_noun = "issue" if len(associated_issue_numbers) == 1 else "issues"
-            close_comment = (
-                f"The PR that you've opened seems to contain {change_kind} changes and is associated with issue "
-                f"{issue_refs}, but none of those associated {association_noun} are marked as "
-                f"`{required_label}`. This PR will be "
-                f"automatically closed. Please see our [contribution docs]({contribution_docs_url}) for guidance "
-                "on when changes are accepted for issues."
+            close_comment = render_comment_template(
+                workspace(),
+                namespace="enforce-pr-issue-state",
+                key="close_explicit_issue_not_ready",
+                context={
+                    "change_kind": change_kind,
+                    "issue_refs": issue_refs,
+                    "associated_issue_noun": association_noun,
+                    "required_label": required_label,
+                    "contribution_docs_url": contribution_docs_url,
+                },
             )
             progress.complete(close_comment)
             pr.edit(state="closed")
@@ -204,9 +210,20 @@ def main() -> None:
             progress.cleanup()
             set_output("allow_review", "true")
             return
-        close_comment = str(result.get("close_comment") or "").strip()
-        if not close_comment:
-            raise RuntimeError("Oz returned no issue match without a close_comment")
+        association_rationale = str(result.get("rationale") or "").strip()
+        if not association_rationale:
+            raise RuntimeError("Oz returned no issue match without a rationale")
+        close_comment = render_comment_template(
+            workspace(),
+            namespace="enforce-pr-issue-state",
+            key="close_no_matching_ready_issue",
+            context={
+                "change_kind": change_kind,
+                "required_label": required_label,
+                "contribution_docs_url": contribution_docs_url,
+                "association_rationale": association_rationale,
+            },
+        )
         final_sections = [close_comment]
         if session_links:
             final_sections.append(f"Session: [view on Warp]({session_links[-1]})")

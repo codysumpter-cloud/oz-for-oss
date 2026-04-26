@@ -3,6 +3,7 @@ from contextlib import closing
 from typing import Any, Mapping
 
 from github import Auth, Github
+from oz_workflows.comment_templates import render_comment_template
 
 from oz_workflows.env import load_event, repo_parts, repo_slug, require_env
 from oz_workflows.helpers import WorkflowProgressComment
@@ -38,9 +39,17 @@ def main() -> None:
             workflow="comment-on-unready-assigned-issue",
             event_payload=event,
         )
-        progress.start("I'm checking whether this assignment is ready for work.")
+        progress.start(
+            render_comment_template(
+                namespace="comment-on-unready-assigned-issue",
+                key="start",
+            )
+        )
         progress.complete(
-            "This issue is assigned to me, but it is not labeled `ready-to-spec` or `ready-to-implement`, so there is no work to do yet.",
+            render_comment_template(
+                namespace="comment-on-unready-assigned-issue",
+                key="complete",
+            ),
         )
         issue.remove_from_assignees(assignee_login)
 
