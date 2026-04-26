@@ -259,6 +259,27 @@ def _strip_workflow_metadata(body: str, workflow_prefix: str) -> str:
     return (body[:start] + body[end:]).strip()
 
 
+def _parse_workflow_metadata(body: str, workflow_prefix: str) -> dict[str, Any] | None:
+    """Parse the workflow metadata marker from *body* when it matches *workflow_prefix*."""
+    if not body or not workflow_prefix:
+        return None
+    start = body.find(workflow_prefix)
+    if start == -1:
+        return None
+    end = body.find("-->", start)
+    if end == -1:
+        return None
+    marker = body[start:end].strip()
+    prefix = "<!-- oz-agent-metadata: "
+    if not marker.startswith(prefix):
+        return None
+    try:
+        parsed = json.loads(marker[len(prefix):])
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
 def split_comment_body(body: str, metadata: str) -> tuple[str, str]:
     if metadata and metadata in body:
         content, _, _ = body.partition(metadata)
@@ -813,7 +834,7 @@ class WorkflowProgressComment:
         existing_body = str(get_field(existing, "body") or "")
         # Strip any workflow metadata marker already in the body before
         # re-appending with our own marker. This matters when we adopt a
-        # concurrent or prior sibling run's comment, whose run-specific
+        # same-run sibling comment, whose run-specific
         # marker would otherwise be treated as a body section and
         # duplicated alongside ours.
         existing_body = _strip_workflow_metadata(existing_body, self._workflow_prefix)
@@ -821,8 +842,18 @@ class WorkflowProgressComment:
         self._update_comment(int(get_field(existing, "id")), updated_body)
         self.comment_id = int(get_field(existing, "id"))
 
+    def _comment_matches_current_run(self, comment: IssueComment | PullRequestComment) -> bool:
+        body = str(get_field(comment, "body") or "")
+        if self._workflow_prefix not in body:
+            return False
+        current_github_run_id = self.github_run_id.strip()
+        if not current_github_run_id:
+            return True
+        metadata = _parse_workflow_metadata(body, self._workflow_prefix) or {}
+        return str(metadata.get("github_run_id") or "").strip() == current_github_run_id
+
     def _dedupe_duplicate_created_comments(self, *, created_id: int) -> int:
-        """Consolidate progress comments for this workflow+issue.
+        """Consolidate progress comments for this workflow+issue and GitHub run.
 
         Two situations can leave duplicate progress comments behind:
 
@@ -830,21 +861,18 @@ class WorkflowProgressComment:
           responses. When GitHub returns a 5xx but actually processed the
           create-comment request server-side, those retries produce
           duplicates that all share this run's unique ``run_id`` marker.
-        - Two concurrent workflow runs (e.g. rapid ``issue_comment``
-          events or an ``issue_comment`` plus ``issues`` event) can both
-          list comments, see no existing match, and create their own
-          comment before either learns of the other. The resulting
-          comments share the stable workflow+issue prefix but have
-          different run-specific markers.
+        - Multiple ``WorkflowProgressComment`` instances created during
+          the same GitHub Actions run can both list comments, see no
+          existing same-run match, and create their own comment before
+          either learns of the other. The resulting comments share the
+          stable workflow+issue prefix and the same ``github_run_id``.
 
         In both cases, gather every progress comment for this
-        workflow+issue, keep the oldest (lowest-numbered) as the
-        canonical entry, and delete the rest. Return the id of the
-        canonical comment so the caller can adopt it as its own
-        ``comment_id``. This is deterministic across concurrent runs:
-        both runs pick the same canonical id even if their dedupe passes
-        interleave with the other's create. Best-effort: if listing the
-        comments fails, fall back to the just-created id.
+        workflow+issue that belongs to the current GitHub Actions run,
+        keep the oldest (lowest-numbered) as the canonical entry, and
+        delete the rest. Return the id of the canonical comment so the
+        caller can adopt it as its own ``comment_id``. Best-effort: if
+        listing the comments fails, fall back to the just-created id.
         """
         try:
             comments = self._list_comments()
@@ -854,7 +882,7 @@ class WorkflowProgressComment:
             int(get_field(comment, "id") or 0)
             for comment in comments
             if isinstance(get_field(comment, "body"), str)
-            and self._workflow_prefix in (get_field(comment, "body") or "")
+            and self._comment_matches_current_run(comment)
         )
         match_ids = [cid for cid in match_ids if cid > 0]
         if not match_ids:
@@ -889,22 +917,22 @@ class WorkflowProgressComment:
                 return self._get_comment(self.comment_id)
             except UnknownObjectException:
                 self.comment_id = None
-        # Scan by the stable workflow+issue prefix rather than this run's
-        # unique marker so concurrent runs of the same workflow converge
-        # on a single comment. If a sibling run has already created one,
-        # adopt it instead of creating a duplicate.
+        # Reuse only comments that belong to this workflow+issue and the
+        # current GitHub Actions run. A later run should create a fresh
+        # progress comment rather than appending onto an earlier run's
+        # history.
         comments = self._list_comments()
         matches = [
             comment
             for comment in comments
             if isinstance(get_field(comment, "body"), str)
-            and self._workflow_prefix in str(get_field(comment, "body") or "")
+            and self._comment_matches_current_run(comment)
         ]
         if not matches:
             return None
-        # If multiple matches already exist (e.g. a previous run left
-        # duplicates behind), adopt the oldest so every run picks the
-        # same canonical entry.
+        # If multiple same-run matches already exist, adopt the oldest
+        # so every instance created during this run picks the same
+        # canonical entry.
         matches.sort(key=lambda comment: int(get_field(comment, "id") or 0))
         canonical = matches[0]
         self.comment_id = int(get_field(canonical, "id"))
