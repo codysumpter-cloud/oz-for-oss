@@ -1,0 +1,21 @@
+name: Comment on Plan Approved (Local)
+on:
+  pull_request_target:
+    types: [labeled]
+concurrency:
+  group: comment-on-plan-approved-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+jobs:
+  post_comment:
+    if: >-
+      github.event.label.name == 'plan-approved' &&
+      github.event.pull_request.state == 'open'
+    name: Post plan-approved comment on linked issue
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    uses: ./.github/workflows/comment-on-plan-approved.yml
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+    secrets: inherit

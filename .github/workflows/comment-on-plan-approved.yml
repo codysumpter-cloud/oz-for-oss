@@ -1,0 +1,84 @@
+name: Comment on Plan Approved
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        description: Pull request number that was labeled plan-approved
+        required: true
+        type: string
+    secrets:
+      OZ_MGMT_GHA_APP_ID:
+        required: true
+      OZ_MGMT_GHA_PRIVATE_KEY:
+        required: true
+jobs:
+  post_comment:
+    name: Post plan-approved comment on linked issue
+    runs-on: ubuntu-slim
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Create GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.OZ_MGMT_GHA_APP_ID }}
+          owner: ${{ github.repository_owner }}
+          private-key: ${{ secrets.OZ_MGMT_GHA_PRIVATE_KEY }}
+      - name: Resolve linked issue and post comment
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+
+          PR_STATE=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.state // "unknown"')
+          if [ "$PR_STATE" != "open" ]; then
+            echo "::notice::PR #$PR_NUMBER is not open (state=$PR_STATE), skipping."
+            exit 0
+          fi
+
+          HEAD_REF=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.head.ref // ""')
+          PR_BODY=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.body // ""')
+
+          ISSUE_NUMBER=""
+
+          # Try branch name: spec-issue-N or implement-issue-N
+          ISSUE_NUMBER=$(printf '%s' "$HEAD_REF" \
+            | grep -oE '(spec|implement)-issue-[0-9]+' \
+            | grep -oE '[0-9]+$' | head -1 || true)
+
+          # Try spec file paths in PR changed files
+          if [ -z "$ISSUE_NUMBER" ]; then
+            ISSUE_NUMBER=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" \
+              --jq '.[].filename' \
+              | grep -oE '^specs/GH[0-9]+/' \
+              | grep -oE '[0-9]+' | head -1 || true)
+          fi
+
+          # Try closing keywords in PR body
+          if [ -z "$ISSUE_NUMBER" ]; then
+            ISSUE_NUMBER=$(printf '%s' "$PR_BODY" \
+              | grep -iE '(close[sd]?|fix(e[sd])?|resolve[sd]?|refs?|implement[s]?|issue)[[:space:]]*:?[[:space:]]*#[0-9]+' \
+              | grep -oE '#[0-9]+' | head -1 | tr -d '#' || true)
+          fi
+
+          if [ -z "$ISSUE_NUMBER" ]; then
+            echo "::notice::No linked issue found for PR #$PR_NUMBER, skipping."
+            exit 0
+          fi
+
+          # Verify the linked number is an issue and not a PR
+          IS_PR=$(gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER" \
+            --jq 'if .pull_request then "true" else "false" end' 2>/dev/null || echo "error")
+          if [ "$IS_PR" != "false" ]; then
+            echo "::notice::Item #$ISSUE_NUMBER is not an issue or does not exist, skipping."
+            exit 0
+          fi
+
+          PR_URL="https://github.com/$GITHUB_REPOSITORY/pull/$PR_NUMBER"
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "A spec for this issue has been approved in [PR #${PR_NUMBER}](${PR_URL}). Future implementations of this issue should use the approved spec as the basis for implementation."

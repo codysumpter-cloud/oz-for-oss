@@ -1,0 +1,17 @@
+name: Comment on Ready to Spec (Local)
+on:
+  issues:
+    types: [labeled]
+concurrency:
+  group: comment-on-ready-to-spec-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+jobs:
+  post_comment:
+    if: >-
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'ready-to-spec'
+    name: Post ready-to-spec comment on issue
+    permissions:
+      issues: write
+    uses: ./.github/workflows/comment-on-ready-to-spec.yml
+    secrets: inherit
