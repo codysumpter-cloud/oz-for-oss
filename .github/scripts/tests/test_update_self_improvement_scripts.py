@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import update_dedupe
@@ -11,16 +12,41 @@ import update_triage
 class UpdateScriptsTest(unittest.TestCase):
     def _assert_main_does_not_pass_hardcoded_reviewer(self, module: object) -> None:
         with patch.object(module, "build_agent_config", return_value={}), patch.object(
-            module, "run_agent"
+            module, "run_agent", return_value=SimpleNamespace(run_id="run-123")
         ), patch.object(module, "workspace", return_value="/tmp"), patch.object(
             module, "repo_parts", return_value=("warpdotdev", "oz-for-oss")
         ), patch.object(module, "optional_env", return_value=""), patch.object(
+            module, "branch_exists", return_value=False
+        ), patch.object(
             module, "maybe_push_update_branch"
         ) as mock_push:
             module.main()
         _args, kwargs = mock_push.call_args
         self.assertNotIn("reviewer", kwargs)
         self.assertNotIn("base_branch", kwargs)
+
+    def _assert_main_passes_pr_metadata(self, module: object) -> None:
+        metadata = {
+            "branch_name": getattr(module, "UPDATE_BRANCH"),
+            "pr_title": "chore: refresh companion skill guidance",
+            "pr_summary": "## Summary\nUpdated the companion skill from recent evidence.",
+        }
+        with patch.object(module, "build_agent_config", return_value={}), patch.object(
+            module, "run_agent", return_value=SimpleNamespace(run_id="run-123")
+        ), patch.object(module, "workspace", return_value="/tmp"), patch.object(
+            module, "repo_parts", return_value=("warpdotdev", "oz-for-oss")
+        ), patch.object(module, "optional_env", return_value=""), patch.object(
+            module, "branch_exists", return_value=True
+        ), patch.object(
+            module, "load_pr_metadata_artifact", return_value=metadata
+        ) as mock_load_metadata, patch.object(
+            module, "maybe_push_update_branch"
+        ) as mock_push:
+            module.main()
+        mock_load_metadata.assert_called_once_with("run-123")
+        _args, kwargs = mock_push.call_args
+        self.assertEqual(kwargs["pr_title"], metadata["pr_title"])
+        self.assertEqual(kwargs["pr_body"], metadata["pr_summary"])
 
     def test_update_pr_review_relies_on_shared_resolution(self) -> None:
         self._assert_main_does_not_pass_hardcoded_reviewer(update_pr_review)
@@ -30,6 +56,15 @@ class UpdateScriptsTest(unittest.TestCase):
 
     def test_update_dedupe_relies_on_shared_resolution(self) -> None:
         self._assert_main_does_not_pass_hardcoded_reviewer(update_dedupe)
+
+    def test_update_pr_review_uses_uploaded_pr_metadata(self) -> None:
+        self._assert_main_passes_pr_metadata(update_pr_review)
+
+    def test_update_triage_uses_uploaded_pr_metadata(self) -> None:
+        self._assert_main_passes_pr_metadata(update_triage)
+
+    def test_update_dedupe_uses_uploaded_pr_metadata(self) -> None:
+        self._assert_main_passes_pr_metadata(update_dedupe)
 
 
 if __name__ == "__main__":

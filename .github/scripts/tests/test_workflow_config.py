@@ -8,7 +8,9 @@ from unittest.mock import patch
 
 from oz_workflows.workflow_config import (
     SelfImprovementConfig,
+    TriageWorkflowConfig,
     load_self_improvement_config,
+    load_triage_workflow_config,
     resolve_repo_config_path,
 )
 
@@ -183,6 +185,55 @@ class LoadSelfImprovementConfigTest(unittest.TestCase):
             with self.assertRaises(RuntimeError) as ctx:
                 load_self_improvement_config(workspace_root)
             self.assertIn(".github/oz/config.yml", str(ctx.exception))
+
+
+class LoadTriageWorkflowConfigTest(unittest.TestCase):
+    def test_defaults_to_triaged_when_config_missing(self) -> None:
+        with TemporaryDirectory() as tempdir:
+            workspace_root = Path(tempdir)
+            config = load_triage_workflow_config(workspace_root)
+            self.assertEqual(
+                config,
+                TriageWorkflowConfig(prior_triage_labels=frozenset({"triaged"})),
+            )
+
+    def test_loads_configured_prior_triage_labels(self) -> None:
+        with TemporaryDirectory() as tempdir:
+            workspace_root = Path(tempdir)
+            _write_config(
+                workspace_root,
+                (
+                    "version: 1\n"
+                    "triage:\n"
+                    "  prior_triage_labels:\n"
+                    "    - triaged\n"
+                    "    - needs-info\n"
+                ),
+            )
+            config = load_triage_workflow_config(workspace_root)
+            self.assertEqual(
+                config,
+                TriageWorkflowConfig(
+                    prior_triage_labels=frozenset({"triaged", "needs-info"})
+                ),
+            )
+
+    def test_rejects_blank_prior_triage_labels(self) -> None:
+        with TemporaryDirectory() as tempdir:
+            workspace_root = Path(tempdir)
+            config_path = _write_config(
+                workspace_root,
+                (
+                    "version: 1\n"
+                    "triage:\n"
+                    "  prior_triage_labels:\n"
+                    "    - ''\n"
+                ),
+            )
+            with self.assertRaises(RuntimeError) as ctx:
+                load_triage_workflow_config(workspace_root)
+            self.assertIn(str(config_path), str(ctx.exception))
+            self.assertIn("must not be blank", str(ctx.exception))
 
 
 if __name__ == "__main__":
