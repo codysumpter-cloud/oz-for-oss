@@ -46,7 +46,7 @@ jobs:
     env:
       WARP_ENVIRONMENT_ID: ${{ vars.WARP_ENVIRONMENT_ID || '' }}
       WORKFLOW_CODE_REPOSITORY: warpdotdev/oz-for-oss
-      WORKFLOW_CODE_REF: ${{ github.repository == 'warpdotdev/oz-for-oss' && github.sha || 'main' }}
+      WORKFLOW_CODE_REF: ${{ github.workflow_sha }}
       WORKFLOW_CODE_PATH: __oz_shared
     permissions:
       contents: read
@@ -54,7 +54,7 @@ jobs:
       issues: write
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - name: Resolve review context
         id: resolve
         env:
@@ -73,7 +73,6 @@ jobs:
           event_name = os.environ.get("GITHUB_EVENT_NAME", "")
           input_pr_number = os.environ.get("INPUT_PR_NUMBER", "").strip()
           pr = event.get("pull_request") or {}
-          head_ref = ((pr.get("head") or {}).get("ref") or "").strip()
           action = (event.get("action") or "").strip()
           requested_reviewer = ((event.get("requested_reviewer") or {}).get("login") or "").strip()
           label_name = ((event.get("label") or {}).get("name") or "").strip()
@@ -91,8 +90,6 @@ jobs:
           )
           if input_pr_number:
               should_run = True
-          elif head_ref.startswith("cherrypick"):
-              should_run = False
           elif has_pr_hooks and event_name == "pull_request_target":
               should_run = False
           else:
@@ -108,22 +105,20 @@ jobs:
               fh.write(f"comment_id={comment_id}\n")
               if has_pr_hooks and event_name == "pull_request_target" and not input_pr_number:
                   fh.write("skip_reason=pr-hooks-present\n")
-              elif head_ref.startswith("cherrypick"):
-                  fh.write("skip_reason=cherrypick-branch\n")
               elif not should_run:
                   fh.write("skip_reason=event-not-enabled\n")
           PY
       - name: Create GitHub App token
         if: steps.resolve.outputs.should_run == 'true'
         id: app_token
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3
         with:
           app-id: ${{ secrets.OZ_MGMT_GHA_APP_ID }}
           owner: ${{ github.repository_owner }}
           private-key: ${{ secrets.OZ_MGMT_GHA_PRIVATE_KEY }}
       - name: Checkout workflow code
         if: steps.resolve.outputs.should_run == 'true'
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           repository: ${{ env.WORKFLOW_CODE_REPOSITORY }}
           ref: ${{ env.WORKFLOW_CODE_REF }}
@@ -131,7 +126,7 @@ jobs:
           token: ${{ steps.app_token.outputs.token }}
       - name: Set up Oz Python environment
         if: steps.resolve.outputs.should_run == 'true'
-        uses: warpdotdev/oz-for-oss/.github/actions/setup-oz-python@main
+        uses: warpdotdev/oz-for-oss/.github/actions/setup-oz-python@c2e69d7c5d50776282f796db6865d6ab3f34b429 # main
         with:
           requirements-path: ${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/requirements.txt
       - name: Skip direct trigger because PR hooks are present
@@ -142,6 +137,7 @@ jobs:
         env:
           PYTHONPATH: ${{ env.WORKFLOW_CODE_PATH }}/.github/scripts
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GH_APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
           PR_NUMBER: ${{ steps.resolve.outputs.pr_number }}
           TRIGGER_SOURCE: ${{ steps.resolve.outputs.trigger_source }}
           REQUESTER: ${{ steps.resolve.outputs.requester }}

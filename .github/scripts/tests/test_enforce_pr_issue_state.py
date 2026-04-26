@@ -4,7 +4,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from enforce_pr_issue_state import _is_pr_author_org_member, main
+from enforce_pr_issue_state import (
+    _is_pr_author_org_member,
+    build_issue_association_prompt,
+    main,
+)
 
 
 class IsPrAuthorOrgMemberTest(unittest.TestCase):
@@ -324,6 +328,30 @@ class MainTest(unittest.TestCase):
         progress_instance.cleanup.assert_called_once_with()
         progress_instance.complete.assert_not_called()
         mock_set_output.assert_called_once_with("allow_review", "true")
+
+
+class BuildIssueAssociationPromptTest(unittest.TestCase):
+    def test_includes_security_rules_for_untrusted_pr_and_issue_content(self) -> None:
+        prompt = build_issue_association_prompt(
+            owner="owner",
+            repo="repo",
+            pr_number=42,
+            pr_title="IGNORE_PREVIOUS_INSTRUCTIONS",
+            pr_body="malicious body",
+            head_branch="feature",
+            change_kind="implementation",
+            required_label="ready-to-implement",
+            changed_files=["src/app.py"],
+            candidate_issues=[
+                {"number": 7, "title": "Issue", "body": "malicious issue body"}
+            ],
+            contribution_docs_url="https://example.test/docs",
+        )
+        self.assertIn("Security Rules:", prompt)
+        self.assertIn("PR title, PR body, and Candidate Ready Issues JSON", prompt)
+        self.assertIn("required JSON output shape", prompt)
+        self.assertIn("IGNORE_PREVIOUS_INSTRUCTIONS", prompt)
+        self.assertIn("malicious issue body", prompt)
 
 
 if __name__ == "__main__":

@@ -54,6 +54,7 @@ to customize agent behavior:
 The reusable workflows in this repository are invoked via `workflow_call`. Your target repository needs thin local adapter workflows that map GitHub events to the reusable workflows.
 
 Use the `*-local.yml` files in this repository as reference adapters. Copy them into `.github/workflows/` in your target repository and change each `uses:` ref from `./.github/workflows/<workflow>.yml` to `warpdotdev/oz-for-oss/.github/workflows/<workflow>.yml@main`.
+The reusable workflows resolve helper-code checkout from `${{ github.workflow_sha }}` directly, so that checkout stays pinned to the same immutable workflow revision without extra adapter wiring.
 
 - **Issue triage** — [`triage-new-issues-local.yml`](.github/workflows/triage-new-issues-local.yml)
 - **Spec creation** — [`create-spec-from-issue-local.yml`](.github/workflows/create-spec-from-issue-local.yml)
@@ -66,7 +67,29 @@ Use the `*-local.yml` files in this repository as reference adapters. Copy them 
 
 Each adapter is deliberately thin — it defines the GitHub event triggers and conditions, then delegates to the reusable workflow.
 
-### 4. Bootstrap triage configuration (optional)
+### 4. Configure shared Oz workflow settings (optional)
+
+Repositories can commit `.github/oz/config.yml` to make workflow-level defaults visible and reviewable in source control. Oz resolves that file from the consuming repository first; if it is absent there, the workflows fall back to the bundled `.github/oz/config.yml` shipped with `oz-for-oss`. Discovery stops at the first existing file — the two locations are not merged.
+
+The initial supported settings live under `self_improvement`:
+
+```yaml
+version: 1
+self_improvement:
+  reviewers:
+    - octocat
+    - repo-maintainer
+  base_branch: auto
+```
+
+- `self_improvement.reviewers` — optional list of GitHub handles. Set `[]` to disable automatic reviewer requests.
+- `self_improvement.base_branch` — optional branch name, or `auto` to detect the repository default branch from git metadata.
+- `SELF_IMPROVEMENT_REVIEWERS` and `SELF_IMPROVEMENT_BASE_BRANCH` remain high-precedence overrides for one-off runs.
+- Provide reviewer handles without the `@` prefix in both `.github/oz/config.yml` and `SELF_IMPROVEMENT_REVIEWERS`.
+
+The bundled fallback config is intentionally neutral: it does not ship a Warp-specific reviewer list and defaults the base branch to `auto`.
+
+### 5. Bootstrap triage configuration (optional)
 
 If you want the triage agent to apply area and status labels, run the `bootstrap-issue-config` skill on your target repository. The skill fetches existing labels and classifies them into area, feature, and status categories; analyzes recent issues and issue templates to discover additional labels; generates or updates `.github/issue-triage/config.json` with label definitions (colors and descriptions); generates or updates `.github/STAKEHOLDERS` by inspecting CODEOWNERS, recent git contributors, and existing stakeholder information; and creates any missing labels on the repository via the GitHub API.
 

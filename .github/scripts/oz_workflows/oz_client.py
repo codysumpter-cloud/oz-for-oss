@@ -10,6 +10,7 @@ from oz_agent_sdk.types.agent import RunItem
 
 from .actions import notice, warning
 from .env import optional_env, parse_mcp_servers, repo_slug, require_env, workspace
+from .workflow_paths import workflow_code_root
 
 
 TERMINAL_STATES = {"SUCCEEDED", "FAILED", "ERROR", "CANCELLED"}
@@ -132,30 +133,8 @@ def _normalize_skill_path(skill_name: str) -> str:
 
 
 def _workflow_code_root() -> Path:
-    """Return the checked-out workflow code root when available.
-
-    When ``WORKFLOW_CODE_PATH`` is set, honor it. Otherwise, walk up from this
-    module looking for a ``.github`` sentinel directory and treat its parent as
-    the repository root. Raise loudly when no sentinel is found so silent
-    path-math regressions cannot sneak in if the module is relocated or
-    installed outside of a checked-out repository.
-    """
-    configured_path = optional_env("WORKFLOW_CODE_PATH")
-    if configured_path:
-        root = Path(configured_path)
-        if not root.is_absolute():
-            root = workspace() / root
-        return root
-
-    start = Path(__file__).resolve()
-    for candidate in start.parents:
-        if (candidate / ".github").is_dir():
-            return candidate
-    raise RuntimeError(
-        "Unable to locate the workflow code root: no '.github' sentinel "
-        f"directory found while walking up from {start}. Set "
-        "WORKFLOW_CODE_PATH to override."
-    )
+    """Return the checked-out workflow code root when available."""
+    return workflow_code_root(__file__)
 
 
 def _resolve_skill_location(skill_name: str) -> tuple[str, str, Path]:
