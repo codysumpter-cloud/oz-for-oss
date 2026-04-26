@@ -90,7 +90,8 @@ def build_create_spec_prompt(
           - `pr_summary`: the full markdown PR body (this replaces the former `pr_description.md` contents).
         - After writing `pr-metadata.json`, upload it as an artifact via `oz artifact upload pr-metadata.json` (or `oz-preview artifact upload pr-metadata.json` if the `oz` CLI is not available). Either CLI is acceptable — use whichever one is installed in the environment. The subcommand is `artifact` (singular) on both CLIs; do not use `artifacts`.
         - If you produce spec changes, commit only the spec changes to branch `{branch_name}` and push that branch to origin.
-        - Do not open or update the pull request yourself.
+        - After pushing, stop. Do not open or update the pull request yourself, and do not invoke `gh pr create`, `gh pr edit`, or equivalent commands.
+        - The outer workflow owns pull-request creation or refresh for this branch after your push and `pr-metadata.json` upload.
         - If there is no worthwhile spec diff, do not push the branch.
         {coauthor_directives}
         """
