@@ -5,9 +5,9 @@ import io
 import os
 import sys
 import unittest
+from base64 import b64encode
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 
 def _load_module():
@@ -38,18 +38,10 @@ class ResolveSpecContextScriptTest(unittest.TestCase):
         cls.module = _load_module()
 
     def test_prints_no_context_message_when_nothing_matches(self) -> None:
-        client = MagicMock()
-        client.close = MagicMock()
-        repo = MagicMock()
-        pr = MagicMock()
-        repo.get_pull.return_value = pr
-        client.get_repo.return_value = repo
         stdout = io.StringIO()
 
         with (
             patch.dict(os.environ, {"GH_TOKEN": "token"}, clear=False),
-            patch.object(self.module, "Github", return_value=client),
-            patch.object(self.module.Auth, "Token", return_value="token"),
             patch.object(
                 self.module,
                 "resolve_spec_context_for_pr",
@@ -69,25 +61,18 @@ class ResolveSpecContextScriptTest(unittest.TestCase):
             self.module.NO_SPEC_CONTEXT_MESSAGE,
         )
         resolve_mock.assert_called_once_with(
-            repo,
             "owner",
             "repo",
-            pr,
+            7,
             workspace=self.module.REPO_ROOT,
+            token="token",
         )
 
     def test_formats_approved_spec_pr_entries(self) -> None:
-        client = MagicMock()
-        client.close = MagicMock()
-        repo = MagicMock()
-        repo.get_pull.return_value = SimpleNamespace()
-        client.get_repo.return_value = repo
         stdout = io.StringIO()
 
         with (
             patch.dict(os.environ, {"GH_TOKEN": "token"}, clear=False),
-            patch.object(self.module, "Github", return_value=client),
-            patch.object(self.module.Auth, "Token", return_value="token"),
             patch.object(
                 self.module,
                 "resolve_spec_context_for_pr",
@@ -114,6 +99,92 @@ class ResolveSpecContextScriptTest(unittest.TestCase):
         self.assertIn("Product spec", rendered)
         self.assertIn("## specs/GH7/tech.md", rendered)
         self.assertIn("Tech spec", rendered)
+
+    def test_fetch_file_contents_decodes_base64_response(self) -> None:
+        encoded = b64encode(b"Spec body\n").decode("utf-8")
+        with patch.object(
+            self.module,
+            "_gh_json",
+            return_value=(
+                200,
+                {
+                    "encoding": "base64",
+                    "content": encoded,
+                },
+            ),
+        ) as gh_json:
+            content = self.module._fetch_file_contents(
+                "owner",
+                "repo",
+                "specs/GH7/product.md",
+                ref="feature-branch",
+                token="token",
+            )
+
+        self.assertEqual(content, "Spec body")
+        gh_json.assert_called_once_with(
+            "/repos/owner/repo/contents/specs/GH7/product.md",
+            token="token",
+            params={"ref": "feature-branch"},
+            allow_http_error=True,
+        )
+
+    def test_resolve_spec_context_for_pr_uses_http_fetch_helpers(self) -> None:
+        with (
+            patch.object(
+                self.module,
+                "_fetch_pull",
+                return_value={"head": {"ref": "oz-agent/implement-issue-7"}},
+            ) as fetch_pull,
+            patch.object(
+                self.module,
+                "_fetch_pull_files",
+                return_value=[{"filename": ".github/scripts/review_pr.py"}],
+            ) as fetch_pull_files,
+            patch.object(
+                self.module,
+                "resolve_issue_number_for_pr",
+                return_value=7,
+            ) as resolve_issue,
+            patch.object(
+                self.module,
+                "resolve_spec_context_for_issue",
+                return_value={
+                    "selected_spec_pr": None,
+                    "approved_spec_prs": [],
+                    "unapproved_spec_prs": [],
+                    "spec_context_source": "directory",
+                    "spec_entries": [{"path": "specs/GH7/product.md", "content": "Spec"}],
+                },
+            ) as resolve_context,
+        ):
+            result = self.module.resolve_spec_context_for_pr(
+                "owner",
+                "repo",
+                7,
+                workspace=Path("/tmp/workspace"),
+                token="token",
+            )
+
+        fetch_pull.assert_called_once_with("owner", "repo", 7, token="token")
+        fetch_pull_files.assert_called_once_with("owner", "repo", 7, token="token")
+        resolve_issue.assert_called_once_with(
+            "owner",
+            "repo",
+            7,
+            {"head": {"ref": "oz-agent/implement-issue-7"}},
+            [".github/scripts/review_pr.py"],
+            token="token",
+        )
+        resolve_context.assert_called_once_with(
+            "owner",
+            "repo",
+            7,
+            workspace=Path("/tmp/workspace"),
+            token="token",
+        )
+        self.assertEqual(result["issue_number"], 7)
+        self.assertEqual(result["changed_files"], [".github/scripts/review_pr.py"])
 
 
 if __name__ == "__main__":
