@@ -24,9 +24,9 @@ from oz_workflows.helpers import (
     format_triage_start_line,
     get_label_name,
     get_login,
-    format_issue_comments_for_prompt,
     is_automation_user,
     issue_has_prior_triage,
+    org_member_comments_text,
     triggering_comment_prompt_text,
     WorkflowProgressComment,
 )
@@ -49,7 +49,6 @@ WORKFLOW_NAME = "triage-new-issues"
 PRIMARY_TRIAGE_LABELS = {"bug", "duplicate", "enhancement", "documentation", "needs-info", "triaged"}
 REPRO_LABEL_PREFIX = "repro:"
 AGENT_PROHIBITED_LABELS = {"ready-to-implement", "ready-to-spec"}
-OZ_AGENT_METADATA_PREFIX = "<!-- oz-agent-metadata:"
 TRIAGE_DISCLAIMER = "*This is my automated analysis and may be incorrect. A maintainer will verify the details.*"
 
 
@@ -402,7 +401,7 @@ def build_triage_prompt(
         Original Issue Report:
         {original_report or "No original issue report provided."}
 
-        Issue Comments:
+        Issue Comments (from organization members only):
         {comments_text}
 
         Explicit Triggering Comment:
@@ -835,12 +834,11 @@ def format_issue_comments(
     *,
     exclude_comment_id: int | None = None,
 ) -> str:
-    """Format non-managed issue comments for the triage prompt."""
-    return format_issue_comments_for_prompt(
+    """Format org-member issue comments for the triage prompt."""
+    return org_member_comments_text(
         comments,
-        metadata_prefix=OZ_AGENT_METADATA_PREFIX,
         exclude_comment_id=exclude_comment_id,
-    )
+    ) or "- None"
 
 
 if __name__ == "__main__":

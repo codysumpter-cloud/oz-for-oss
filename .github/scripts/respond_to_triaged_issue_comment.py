@@ -15,10 +15,10 @@ from oz_workflows.docker_agent import (
 from oz_workflows.env import load_event, optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.helpers import (
     WorkflowProgressComment,
-    format_issue_comments_for_prompt,
     format_respond_to_triaged_start_line,
     is_automation_user,
     is_trusted_commenter,
+    org_member_comments_text,
     record_run_session_link,
     triggering_comment_prompt_text,
 )
@@ -26,7 +26,6 @@ from oz_workflows.triage import extract_original_issue_report
 
 
 WORKFLOW_NAME = "respond-to-triaged-issue-comment"
-OZ_AGENT_METADATA_PREFIX = "<!-- oz-agent-metadata:"
 
 
 def format_visible_issue_comments(
@@ -34,12 +33,11 @@ def format_visible_issue_comments(
     *,
     exclude_comment_id: int | None = None,
 ) -> str:
-    """Format visible issue comments while filtering Oz-managed metadata comments."""
-    return format_issue_comments_for_prompt(
+    """Format org-member issue comments, excluding non-org-member content."""
+    return org_member_comments_text(
         comments,
-        metadata_prefix=OZ_AGENT_METADATA_PREFIX,
         exclude_comment_id=exclude_comment_id,
-    )
+    ) or "- None"
 
 
 def extract_analysis_comment(result: dict[str, Any]) -> str:
@@ -95,7 +93,7 @@ def build_respond_prompt(
         Original Issue Report:
         {original_report or "No original issue report provided."}
 
-        Existing Issue Comments:
+        Existing Issue Comments (from organization members only):
         {comments_text}
 
         Explicit Triggering Comment:

@@ -31,17 +31,17 @@ class FormatVisibleIssueCommentsTest(unittest.TestCase):
             ],
             exclude_comment_id=2,
         )
-        self.assertEqual(rendered, "- @alice [MEMBER] (2026-03-24T00:00:00Z): Earlier context")
+        self.assertEqual(rendered, "- alice (2026-03-24T00:00:00Z): Earlier context")
 
-    def test_skips_managed_oz_comments(self) -> None:
+    def test_excludes_non_org_member_comments(self) -> None:
         rendered = format_visible_issue_comments(
             [
                 {
                     "id": 1,
                     "author_association": "NONE",
                     "created_at": "2026-03-24T00:00:00Z",
-                    "body": "Visible reporter comment",
-                    "user": {"login": "alice"},
+                    "body": "Reporter comment that should be excluded",
+                    "user": {"login": "external-user"},
                 },
                 {
                     "id": 2,
@@ -52,7 +52,28 @@ class FormatVisibleIssueCommentsTest(unittest.TestCase):
                 },
             ]
         )
-        self.assertEqual(rendered, "- @alice [NONE] (2026-03-24T00:00:00Z): Visible reporter comment")
+        self.assertEqual(rendered, "- None")
+
+    def test_includes_org_member_comments(self) -> None:
+        rendered = format_visible_issue_comments(
+            [
+                {
+                    "id": 1,
+                    "author_association": "NONE",
+                    "created_at": "2026-03-24T00:00:00Z",
+                    "body": "Reporter comment that should be excluded",
+                    "user": {"login": "external-user"},
+                },
+                {
+                    "id": 2,
+                    "author_association": "MEMBER",
+                    "created_at": "2026-03-24T01:00:00Z",
+                    "body": "Org member comment",
+                    "user": {"login": "maintainer"},
+                },
+            ]
+        )
+        self.assertEqual(rendered, "- maintainer (2026-03-24T01:00:00Z): Org member comment")
 
 
 class ExtractAnalysisCommentTest(unittest.TestCase):
