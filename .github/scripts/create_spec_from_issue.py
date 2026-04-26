@@ -13,6 +13,7 @@ from oz_workflows.env import (
     workspace,
     require_env,
 )
+from oz_workflows.comment_templates import render_comment_template
 from oz_workflows.helpers import (
     branch_updated_since,
     build_next_steps_section,
@@ -198,7 +199,7 @@ def main() -> None:
                 branch_name,
                 created_after=run.created_at - timedelta(minutes=1),
             ):
-                progress.complete("I analyzed this issue but did not produce a spec diff.")
+                progress.complete(render_comment_template(workspace(), namespace="create-spec-from-issue", key="complete_no_diff"))
                 return
             existing_prs = list(github.get_pulls(state="open", head=f"{owner}:{branch_name}"))
             metadata = load_pr_metadata_artifact(run.run_id)

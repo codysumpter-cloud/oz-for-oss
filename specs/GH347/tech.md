@@ -142,6 +142,7 @@ Proposed namespace and key coverage:
   - `start_update`
   - `complete_created`
   - `complete_updated`
+  - `complete_no_diff` — no-op completion when the agent produced no spec changes
 - `create-implementation-from-issue`
   - `start_blocked_unapproved_specs`
   - `start_from_approved_spec_new_pr`
@@ -153,11 +154,17 @@ Proposed namespace and key coverage:
   - `complete_updated_spec_pr`
   - `complete_updated_existing_draft_pr`
   - `complete_created_new_draft_pr`
+  - `complete_no_diff` — no-op completion when the agent produced no implementation changes
 - `review-pull-request`
   - `start_first_review_code`
   - `start_first_review_spec`
   - `start_rereview_code`
   - `start_rereview_spec`
+  - `complete_no_feedback` — no-op completion when the agent had no actionable feedback
+  - `complete_approved_with_reviewers` — completion when the PR was approved and reviewers were requested; uses `${reviewer_mentions}`
+  - `complete_approved_no_reviewers` — completion when the PR was approved but no stakeholders matched
+  - `complete_changes_requested` — completion when the agent requested changes
+  - `complete_commented` — completion when the agent posted feedback without a formal vote
 - `respond-to-pr-comment`
   - `start_review_reply_with_spec_context`
   - `start_review_reply_without_spec_context`
@@ -165,6 +172,7 @@ Proposed namespace and key coverage:
   - `start_review_body_without_spec_context`
   - `start_conversation_comment_with_spec_context`
   - `start_conversation_comment_without_spec_context`
+  - `complete_no_diff` — no-op completion when the agent produced no changes
 - `comment-on-unready-assigned-issue`
   - `start`
   - `complete`
@@ -174,7 +182,7 @@ Proposed namespace and key coverage:
   - `close_explicit_issue_not_ready`
   - `close_no_matching_ready_issue`
 
-The corresponding placeholder set should be called out alongside those definitions. Important examples include `${session_link_markdown}`, `${pr_url}`, `${reporter_mention}`, `${statements_markdown}`, `${questions_markdown}`, `${duplicate_list_markdown}`, `${maintainer_details_markdown}`, `${next_steps_markdown}`, `${required_label}`, `${change_kind}`, `${contribution_docs_url}`, and `${association_rationale}`.
+The corresponding placeholder set should be called out alongside those definitions. Important examples include `${session_link_markdown}`, `${pr_url}`, `${reporter_mention}`, `${statements_markdown}`, `${questions_markdown}`, `${duplicate_list_markdown}`, `${maintainer_details_markdown}`, `${next_steps_markdown}`, `${required_label}`, `${change_kind}`, `${contribution_docs_url}`, `${association_rationale}`, and `${reviewer_mentions}`.
 
 #### 3. Route helper-owned comment text through the registry
 

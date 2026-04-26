@@ -11,6 +11,7 @@ from github import Auth, Github
 from github.File import File
 from github.GithubException import GithubException
 
+from oz_workflows.comment_templates import render_comment_template
 from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.helpers import (
     format_review_start_line,
@@ -430,24 +431,35 @@ def _normalize_review_payload(
 
 
 def _format_review_completion_message(
+    workspace_root: str,
     event: str,
     recommended_reviewers: list[str],
 ) -> str:
-    """Build the progress-comment completion message for a posted review."""
     if event == "APPROVE":
         if recommended_reviewers:
             mentions = ", ".join(f"@{login}" for login in recommended_reviewers)
-            return (
-                "I approved this pull request and requested human review from: "
-                f"{mentions}."
+            return render_comment_template(
+                workspace_root,
+                namespace="review-pull-request",
+                key="complete_approved_with_reviewers",
+                context={"reviewer_mentions": mentions},
             )
-        return (
-            "I approved this pull request. No matching stakeholder was found "
-            "for the changed files, so no human reviewers were requested."
+        return render_comment_template(
+            workspace_root,
+            namespace="review-pull-request",
+            key="complete_approved_no_reviewers",
         )
     if event == "REQUEST_CHANGES":
-        return "I requested changes on this pull request and posted feedback."
-    return "I completed the review and posted feedback on this pull request."
+        return render_comment_template(
+            workspace_root,
+            namespace="review-pull-request",
+            key="complete_changes_requested",
+        )
+    return render_comment_template(
+        workspace_root,
+        namespace="review-pull-request",
+        key="complete_commented",
+    )
 
 def build_review_prompt(
     *,
@@ -735,7 +747,7 @@ def main() -> None:
                 # agent had nothing to say, skip posting an empty review.
                 # Non-member PRs always post so the verdict lands on the
                 # PR even when the agent has no inline comments.
-                progress.complete("I completed the review and did not identify any actionable feedback for this pull request.")
+                progress.complete(render_comment_template(workspace(), namespace="review-pull-request", key="complete_no_feedback"))
                 return
             review_body = f"{summary or 'Automated review'}\n\n{POWERED_BY_SUFFIX}"
             if comments:
@@ -757,7 +769,7 @@ def main() -> None:
                         owner,
                         repo,
                     )
-            progress.complete(_format_review_completion_message(event, recommended_reviewers))
+            progress.complete(_format_review_completion_message(workspace(), event, recommended_reviewers))
         except Exception:
             progress.report_error()
             raise

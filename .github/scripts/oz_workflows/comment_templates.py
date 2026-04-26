@@ -25,6 +25,7 @@ class TemplateDefinition:
 @dataclass(frozen=True)
 class WorkflowCommentTemplateConfig:
     overrides: dict[str, dict[str, str]]
+    config_path: Path
 
 
 def _definition(
@@ -209,6 +210,11 @@ _TEMPLATE_DEFINITIONS: tuple[TemplateDefinition, ...] = (
         allowed_placeholders=("pr_url",),
     ),
     _definition(
+        "create-spec-from-issue",
+        "complete_no_diff",
+        "I analyzed this issue but did not produce a spec diff.",
+    ),
+    _definition(
         "create-implementation-from-issue",
         "start_blocked_unapproved_specs",
         "I'm not starting implementation because the linked spec PR(s) "
@@ -264,6 +270,11 @@ _TEMPLATE_DEFINITIONS: tuple[TemplateDefinition, ...] = (
         allowed_placeholders=("pr_url",),
     ),
     _definition(
+        "create-implementation-from-issue",
+        "complete_no_diff",
+        "I analyzed this issue but did not produce an implementation diff.",
+    ),
+    _definition(
         "review-pull-request",
         "start_first_review_code",
         "I'm starting a first review of this pull request.${focus_suffix}",
@@ -286,6 +297,33 @@ _TEMPLATE_DEFINITIONS: tuple[TemplateDefinition, ...] = (
         "start_rereview_spec",
         "I'm re-reviewing this spec-only pull request in response to a review request.${focus_suffix}",
         allowed_placeholders=("focus_suffix",),
+    ),
+    _definition(
+        "review-pull-request",
+        "complete_no_feedback",
+        "I completed the review and did not identify any actionable feedback for this pull request.",
+    ),
+    _definition(
+        "review-pull-request",
+        "complete_approved_with_reviewers",
+        "I approved this pull request and requested human review from: ${reviewer_mentions}.",
+        allowed_placeholders=("reviewer_mentions",),
+    ),
+    _definition(
+        "review-pull-request",
+        "complete_approved_no_reviewers",
+        "I approved this pull request. No matching stakeholder was found "
+        "for the changed files, so no human reviewers were requested.",
+    ),
+    _definition(
+        "review-pull-request",
+        "complete_changes_requested",
+        "I requested changes on this pull request and posted feedback.",
+    ),
+    _definition(
+        "review-pull-request",
+        "complete_commented",
+        "I completed the review and posted feedback on this pull request.",
     ),
     _definition(
         "respond-to-pr-comment",
@@ -319,6 +357,11 @@ _TEMPLATE_DEFINITIONS: tuple[TemplateDefinition, ...] = (
         "respond-to-pr-comment",
         "start_conversation_comment_without_spec_context",
         "I'm working on changes requested in this PR (responding to a PR conversation comment).",
+    ),
+    _definition(
+        "respond-to-pr-comment",
+        "complete_no_diff",
+        "I analyzed the request but did not produce any changes.",
     ),
     _definition(
         "comment-on-unready-assigned-issue",
@@ -456,7 +499,7 @@ def _load_workflow_comment_template_config_cached(
     config_path = document.path
     raw_section = document.data.get("workflow_comments")
     if raw_section is None:
-        return WorkflowCommentTemplateConfig(overrides={})
+        return WorkflowCommentTemplateConfig(overrides={}, config_path=config_path)
     if not isinstance(raw_section, dict):
         raise _fail(config_path, "workflow_comments must be a YAML mapping.")
 
@@ -516,7 +559,7 @@ def _load_workflow_comment_template_config_cached(
                 )
             parsed_templates[key] = raw_template
         overrides[namespace] = parsed_templates
-    return WorkflowCommentTemplateConfig(overrides=overrides)
+    return WorkflowCommentTemplateConfig(overrides=overrides, config_path=config_path)
 
 
 def load_workflow_comment_template_config(
@@ -536,9 +579,8 @@ def render_comment_template(
 ) -> str:
     definition = get_template_definition(namespace, key)
     config = load_workflow_comment_template_config(workspace_root)
-    template_text = (
-        config.overrides.get(namespace, {}).get(key) or definition.default_template
-    )
+    override_text = config.overrides.get(namespace, {}).get(key)
+    template_text = override_text or definition.default_template
     placeholders = _extract_placeholders(
         template_text,
         namespace=namespace,
@@ -550,6 +592,12 @@ def render_comment_template(
     }
     missing = sorted(name for name in placeholders if name not in normalized_context)
     if missing:
+        if override_text:
+            raise _fail(
+                config.config_path,
+                f"Missing placeholder values for workflow comment template "
+                f"{namespace}.{key}: {', '.join(missing)}.",
+            )
         raise RuntimeError(
             f"Missing placeholder values for workflow comment template "
             f"{namespace}.{key}: {', '.join(missing)}."

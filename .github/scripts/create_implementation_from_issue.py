@@ -16,6 +16,7 @@ from oz_workflows.env import (
     workspace,
     require_env,
 )
+from oz_workflows.comment_templates import render_comment_template
 from oz_workflows.helpers import (
     branch_updated_since,
     build_next_steps_section,
@@ -242,7 +243,7 @@ def main() -> None:
                 target_branch,
                 created_after=run.created_at - timedelta(minutes=1),
             ):
-                progress.complete("I analyzed this issue but did not produce an implementation diff.")
+                progress.complete(render_comment_template(workspace(), namespace="create-implementation-from-issue", key="complete_no_diff"))
                 return
 
             if not pr_body:

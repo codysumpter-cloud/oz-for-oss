@@ -12,6 +12,7 @@ from oz_workflows.artifacts import (
     try_load_pr_metadata_artifact,
     try_load_resolved_review_comments_artifact,
 )
+from oz_workflows.comment_templates import render_comment_template
 from oz_workflows.env import load_event, optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.helpers import (
     branch_updated_since,
@@ -306,7 +307,7 @@ def _run_implementation(
             head_branch,
             created_after=run.created_at - timedelta(minutes=1),
         ):
-            progress.complete("I analyzed the request but did not produce any changes.")
+            progress.complete(render_comment_template(workspace(), namespace="respond-to-pr-comment", key="complete_no_diff"))
             return
 
         # Refresh the PR title/body when the agent's changes materially

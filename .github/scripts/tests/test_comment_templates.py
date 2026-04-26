@@ -206,6 +206,31 @@ class WorkflowCommentTemplateConfigTest(unittest.TestCase):
             self.assertIn("tech_path", str(ctx.exception))
             self.assertIn("tech_url", str(ctx.exception))
 
+    def test_render_includes_config_path_for_missing_override_placeholder(self) -> None:
+        with TemporaryDirectory() as tempdir:
+            workspace_root = Path(tempdir)
+            config_path = _write_config(
+                workspace_root,
+                (
+                    "version: 1\n"
+                    "workflow_comments:\n"
+                    "  shared:\n"
+                    "    spec_preview: \"Preview: ${product_path}\"\n"
+                ),
+            )
+
+            with self.assertRaises(RuntimeError) as ctx:
+                render_comment_template(
+                    workspace_root,
+                    namespace="shared",
+                    key="spec_preview",
+                    context={},
+                )
+
+            self.assertIn(str(config_path), str(ctx.exception))
+            self.assertIn("Missing placeholder values", str(ctx.exception))
+            self.assertIn("product_path", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
