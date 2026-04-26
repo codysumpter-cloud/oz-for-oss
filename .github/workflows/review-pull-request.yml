@@ -137,6 +137,7 @@ jobs:
         env:
           PYTHONPATH: ${{ env.WORKFLOW_CODE_PATH }}/.github/scripts
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GH_APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
           PR_NUMBER: ${{ steps.resolve.outputs.pr_number }}
           TRIGGER_SOURCE: ${{ steps.resolve.outputs.trigger_source }}
           REQUESTER: ${{ steps.resolve.outputs.requester }}
