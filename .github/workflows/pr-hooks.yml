@@ -17,9 +17,6 @@ on:
         required: false
         default: ""
         type: string
-concurrency:
-  group: pr-hooks-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number || github.run_id }}
-  cancel-in-progress: false
 jobs:
   resolve_review_context:
     if: >-
@@ -85,6 +82,11 @@ jobs:
       github.event.action != 'synchronize' &&
       github.event.pull_request.draft == false &&
       needs.enforce_issue_state.outputs.allow_review == 'true'
+    # Keep direct review runs serialized per PR without preventing the
+    # upstream enforcement gate from running on every webhook delivery.
+    concurrency:
+      group: pr-review-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
     uses: ./.github/workflows/review-pull-request.yml
     with:
       pr_number: ${{ github.event.pull_request.number }}
@@ -96,6 +98,11 @@ jobs:
     if: >-
       github.event_name != 'pull_request_target' &&
       needs.resolve_review_context.outputs.should_review == 'true'
+    # Allow every comment/review-comment delivery to resolve whether it
+    # requested a review, then serialize only the runs that actually do.
+    concurrency:
+      group: pr-review-${{ needs.resolve_review_context.outputs.pr_number }}
+      cancel-in-progress: false
     uses: ./.github/workflows/review-pull-request.yml
     with:
       pr_number: ${{ needs.resolve_review_context.outputs.pr_number }}

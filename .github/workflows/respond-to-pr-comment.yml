@@ -87,6 +87,13 @@ jobs:
     needs: check_trust
     if: needs.check_trust.outputs.trusted == 'true'
     name: Respond to PR comment
+    # Let every webhook delivery reach ``check_trust`` first, then
+    # serialize only the trusted agent runs for a given PR so review
+    # submissions with multiple inline comments cannot cancel the one
+    # delivery that actually carries the ``@oz-agent`` mention.
+    concurrency:
+      group: respond-to-pr-comment-${{ github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: false
     runs-on: ubuntu-slim
     env:
       WORKFLOW_CODE_REPOSITORY: warpdotdev/oz-for-oss
