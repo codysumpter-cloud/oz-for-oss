@@ -2,6 +2,7 @@ from __future__ import annotations
 from contextlib import closing
 
 from datetime import timedelta
+import re
 from textwrap import dedent
 from github import Auth, Github
 from oz_workflows.artifacts import load_pr_metadata_artifact
@@ -35,6 +36,11 @@ WRITE_PRODUCT_SPEC_SKILL = "write-product-spec"
 WRITE_TECH_SPEC_SKILL = "write-tech-spec"
 CREATE_PRODUCT_SPEC_SKILL = "create-product-spec"
 CREATE_TECH_SPEC_SKILL = "create-tech-spec"
+
+_RELATED_ISSUE_LINE = "Related issue: #{issue_number}"
+_CLOSING_ISSUE_PATTERN_TEMPLATE = (
+    r"^\s*(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#?{issue_number}\s*$"
+)
 
 def build_create_spec_prompt(
     *,
@@ -87,7 +93,7 @@ def build_create_spec_prompt(
         - If you produce spec changes, write `pr-metadata.json` at the repository root containing a JSON object with these required fields:
           - `branch_name`: the branch you pushed to (use `{branch_name}` exactly).
           - `pr_title`: a conventional-commit-style PR title for the spec changes (e.g. `spec: {issue_title}`).
-          - `pr_summary`: the full markdown PR body (this replaces the former `pr_description.md` contents).
+          - `pr_summary`: the full markdown PR body (this replaces the former `pr_description.md` contents). It must include a non-closing reference to the related issue, such as `Related issue: #{issue_number}`. Do not use closing keywords like `Closes` or `Fixes` in a spec-only PR summary.
         - After writing `pr-metadata.json`, upload it as an artifact via `oz artifact upload pr-metadata.json` (or `oz-preview artifact upload pr-metadata.json` if the `oz` CLI is not available). Either CLI is acceptable — use whichever one is installed in the environment. The subcommand is `artifact` (singular) on both CLIs; do not use `artifacts`.
         - If you produce spec changes, commit only the spec changes to branch `{branch_name}` and push that branch to origin.
         - After pushing, stop. Do not open or update the pull request yourself, and do not invoke `gh pr create`, `gh pr edit`, or equivalent commands.
@@ -96,6 +102,38 @@ def build_create_spec_prompt(
         {coauthor_directives}
         """
     ).strip()
+
+
+def ensure_spec_pr_issue_reference(pr_body: str, issue_number: int) -> str:
+    related_issue_line = _RELATED_ISSUE_LINE.format(issue_number=issue_number)
+    normalized_body = str(pr_body or "").strip()
+    if not normalized_body:
+        return related_issue_line
+
+    lines = normalized_body.splitlines()
+    related_issue_pattern = re.compile(
+        rf"^\s*related issue:\s*#?{issue_number}\s*$",
+        re.IGNORECASE,
+    )
+    if any(related_issue_pattern.match(line) for line in lines):
+        return normalized_body
+
+    closing_issue_pattern = re.compile(
+        _CLOSING_ISSUE_PATTERN_TEMPLATE.format(issue_number=issue_number),
+        re.IGNORECASE,
+    )
+    rewritten_lines: list[str] = []
+    replaced = False
+    for line in lines:
+        if not replaced and closing_issue_pattern.match(line):
+            rewritten_lines.append(related_issue_line)
+            replaced = True
+            continue
+        rewritten_lines.append(line)
+    if replaced:
+        return "\n".join(rewritten_lines).strip()
+
+    return f"{related_issue_line}\n\n{normalized_body}"
 
 
 def main() -> None:
@@ -203,7 +241,10 @@ def main() -> None:
             existing_prs = list(github.get_pulls(state="open", head=f"{owner}:{branch_name}"))
             metadata = load_pr_metadata_artifact(run.run_id)
             pr_title = metadata.get("pr_title") or f"spec: {issue_title}"
-            pr_body = metadata["pr_summary"]
+            pr_body = ensure_spec_pr_issue_reference(
+                metadata["pr_summary"],
+                issue_number,
+            )
             updated_existing = bool(existing_prs)
             if existing_prs:
                 pr = existing_prs[0]
