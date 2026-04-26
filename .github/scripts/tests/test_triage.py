@@ -267,7 +267,7 @@ class FormatIssueCommentsTest(unittest.TestCase):
         )
         self.assertEqual(rendered, "- @alice [MEMBER] (2026-03-24T00:00:00Z): Earlier context")
 
-    def test_skips_managed_oz_comments(self) -> None:
+    def test_skips_bot_comments_even_without_metadata(self) -> None:
         rendered = format_issue_comments(
             [
                 {
@@ -281,12 +281,27 @@ class FormatIssueCommentsTest(unittest.TestCase):
                     "id": 2,
                     "author_association": "NONE",
                     "created_at": "2026-03-24T01:00:00Z",
-                    "body": "Managed status\n\n<!-- oz-agent-metadata: {\"type\":\"issue-status\"} -->",
-                    "user": {"login": "oz-agent"},
+                    "body": "Bot status update without metadata",
+                    "user": {"login": "oz-agent[bot]", "type": "Bot"},
                 },
             ]
         )
         self.assertEqual(rendered, "- @alice [NONE] (2026-03-24T00:00:00Z): Visible reporter comment")
+
+    def test_keeps_human_comments_even_if_they_contain_metadata_prefix(self) -> None:
+        rendered = format_issue_comments(
+            [
+                {
+                    "id": 1,
+                    "author_association": "MEMBER",
+                    "created_at": "2026-03-24T00:00:00Z",
+                    "body": "Human context\n\n<!-- oz-agent-metadata: {\"type\":\"issue-status\"} -->",
+                    "user": {"login": "alice", "type": "User"},
+                },
+            ]
+        )
+        self.assertIn("Human context", rendered)
+        self.assertIn("oz-agent-metadata", rendered)
 
 
 class LoadRecentIssuesForDedupeTest(unittest.TestCase):
