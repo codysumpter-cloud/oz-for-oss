@@ -62,6 +62,7 @@ jobs:
         env:
           PYTHONPATH: ${{ env.WORKFLOW_CODE_PATH }}/.github/scripts
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GH_APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
           PR_NUMBER: ${{ inputs.pr_number }}
           REQUESTER: ${{ inputs.requester }}
           WARP_API_KEY: ${{ secrets.WARP_API_KEY }}

@@ -517,6 +517,119 @@ class ReviewReplyProgressCommentTest(unittest.TestCase):
         self.assertEqual(pr.edit_count, edits_after_first)
 
 
+    def test_bot_author_filter_ignores_comment_from_other_user(self) -> None:
+        # When GH_APP_SLUG is set, a progress comment authored by a different
+        # user (e.g. a human who happened to include the metadata marker) must
+        # NOT be adopted as the bot's own comment.
+        os.environ["GH_APP_SLUG"] = "oz-mgmt"
+        os.environ["GITHUB_RUN_ID"] = "777"
+        try:
+            github = FakeGitHubClient(bot_login="oz-mgmt[bot]")
+            from oz_workflows.helpers import comment_metadata, _workflow_metadata_prefix
+            # Pre-seed a comment that looks like a bot comment but is authored
+            # by a human — simulates a crafted comment or a different bot.
+            metadata = comment_metadata("triage-new-issues", 42, run_id="abc", github_run_id="777")
+            github.comments.append({
+                "id": 1,
+                "body": f"Sneaky comment.\n\n{metadata}",
+                "user": {"login": "malicious-user"},
+            })
+            progress = WorkflowProgressComment(
+                github,
+                "acme",
+                "widgets",
+                42,
+                workflow="triage-new-issues",
+                requester_login="alice",
+            )
+            progress.start("Legitimate bot start.")
+        finally:
+            os.environ.pop("GH_APP_SLUG", None)
+            os.environ.pop("GITHUB_RUN_ID", None)
+
+        # A new comment should be created rather than adopting the crafted one.
+        self.assertEqual(len(github.comments), 2)
+        bot_comments = [c for c in github.comments if (c.get("user") or {}).get("login") == "oz-mgmt[bot]"]
+        self.assertEqual(len(bot_comments), 1)
+        self.assertIn("Legitimate bot start.", str(bot_comments[0]["body"]))
+
+    def test_bot_author_filter_adopts_own_comment_across_instances(self) -> None:
+        # When GH_APP_SLUG is set, a second WorkflowProgressComment instance
+        # in the same run must adopt the first instance's comment (authored by
+        # the same bot) rather than creating a duplicate.
+        os.environ["GH_APP_SLUG"] = "oz-mgmt"
+        os.environ["GITHUB_RUN_ID"] = "888"
+        try:
+            github = FakeGitHubClient(bot_login="oz-mgmt[bot]")
+            run1 = WorkflowProgressComment(
+                github,
+                "acme",
+                "widgets",
+                42,
+                workflow="triage-new-issues",
+                requester_login="alice",
+            )
+            run1.start("First instance start.")
+            run2 = WorkflowProgressComment(
+                github,
+                "acme",
+                "widgets",
+                42,
+                workflow="triage-new-issues",
+                requester_login="alice",
+            )
+            run2.start("Second instance start.")
+        finally:
+            os.environ.pop("GH_APP_SLUG", None)
+            os.environ.pop("GITHUB_RUN_ID", None)
+
+        self.assertEqual(len(github.comments), 1)
+        body = str(github.comments[0]["body"])
+        self.assertIn("First instance start.", body)
+        self.assertIn("Second instance start.", body)
+
+    def test_bot_author_filter_for_review_replies(self) -> None:
+        # When GH_APP_SLUG is set, only review-comment replies authored by
+        # the bot are considered for adoption. A human-authored reply that
+        # contains the metadata marker must not be adopted.
+        os.environ["GH_APP_SLUG"] = "oz-mgmt"
+        os.environ["GITHUB_RUN_ID"] = "999"
+        try:
+            from oz_workflows.helpers import comment_metadata
+            github = FakeGitHubClient(bot_login="oz-mgmt[bot]")
+            pr = FakePullRequest(trigger_comment_id=100, bot_login="oz-mgmt[bot]")
+            # Pre-seed a reply authored by a human with the bot metadata marker.
+            metadata = comment_metadata("respond-to-pr-comment", 42, run_id="xyz", github_run_id="999")
+            pr.review_comments.append({
+                "id": 200,
+                "in_reply_to_id": 100,
+                "body": f"Human reply.\n\n{metadata}",
+                "user": {"login": "human-user"},
+            })
+            progress = WorkflowProgressComment(
+                github,
+                "acme",
+                "widgets",
+                42,
+                workflow="respond-to-pr-comment",
+                requester_login="alice",
+                review_reply_target=(pr, 100),
+            )
+            progress.start("Bot start.")
+        finally:
+            os.environ.pop("GH_APP_SLUG", None)
+            os.environ.pop("GITHUB_RUN_ID", None)
+
+        # A new reply from the bot should be created; the human reply is ignored.
+        bot_replies = [
+            c for c in pr.review_comments
+            if c.get("in_reply_to_id") == 100
+            and (c.get("user") or {}).get("login") == "oz-mgmt[bot]"
+        ]
+        self.assertEqual(len(bot_replies), 1)
+        self.assertIn("Bot start.", str(bot_replies[0]["body"]))
+
+
 class WorkflowRunUrlTest(unittest.TestCase):
     def test_workflow_run_url_variants(self) -> None:
         """``_workflow_run_url`` combines env vars or returns "" if any
@@ -781,6 +894,10 @@ class FakeIssueComment:
     def body(self) -> str:
         return str(self._data.get("body") or "")
 
+    @property
+    def user(self) -> object:
+        return self._data.get("user")
+
     def edit(self, body: str) -> None:
         self._data["body"] = body
 
@@ -801,7 +918,11 @@ class FakeIssue:
         return [FakeIssueComment(self._repo, c) for c in self._repo.comments]
 
     def create_comment(self, body: str) -> FakeIssueComment:
-        data: dict[str, object] = {"id": len(self._repo.comments) + 1, "body": body}
+        data: dict[str, object] = {
+            "id": len(self._repo.comments) + 1,
+            "body": body,
+            "user": {"login": self._repo.bot_login},
+        }
         self._repo.comments.append(data)
         return FakeIssueComment(self._repo, data)
 
@@ -818,8 +939,9 @@ class FakeIssue:
 class FakeGitHubClient:
     """A minimal stand-in for ``github.Repository.Repository``."""
 
-    def __init__(self) -> None:
+    def __init__(self, bot_login: str = "oz-agent[bot]") -> None:
         self.comments: list[dict[str, object]] = []
+        self.bot_login = bot_login
 
     def get_issue(self, issue_number: int) -> FakeIssue:
         return FakeIssue(self, issue_number)
@@ -921,7 +1043,9 @@ class FakePullRequest:
         *,
         trigger_comment_id: int = 100,
         duplicate_reply_count: int = 1,
+        bot_login: str = "oz-agent[bot]",
     ) -> None:
+        self.bot_login = bot_login
         self.review_comments: list[dict[str, object]] = [
             {
                 "id": trigger_comment_id,
@@ -961,7 +1085,7 @@ class FakePullRequest:
                 "id": new_id,
                 "in_reply_to_id": comment_id,
                 "body": body,
-                "user": {"login": "oz-agent"},
+                "user": {"login": self.bot_login},
             }
             self.review_comments.append(data)
             last = FakeReviewComment(self, data)

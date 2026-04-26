@@ -637,6 +637,8 @@ class WorkflowProgressComment:
             github_run_id=self.github_run_id,
         )
         self._workflow_prefix = _workflow_metadata_prefix(workflow, issue_number)
+        app_slug = optional_env("GH_APP_SLUG")
+        self._bot_login = f"{app_slug}[bot]" if app_slug else ""
         self.comment_id: int | None = None
         self.session_link: str = ""
         # When set, progress updates are posted/edited as review-comment replies
@@ -843,6 +845,8 @@ class WorkflowProgressComment:
         self.comment_id = int(get_field(existing, "id"))
 
     def _comment_matches_current_run(self, comment: IssueComment | PullRequestComment) -> bool:
+        if self._bot_login and get_login(get_field(comment, "user")).lower() != self._bot_login.lower():
+            return False
         body = str(get_field(comment, "body") or "")
         if self._workflow_prefix not in body:
             return False
@@ -907,6 +911,10 @@ class WorkflowProgressComment:
                 for comment in comments
                 if isinstance(get_field(comment, "body"), str)
                 and self._workflow_prefix in (get_field(comment, "body") or "")
+                and (
+                    not self._bot_login
+                    or get_login(get_field(comment, "user")).lower() == self._bot_login.lower()
+                )
             ),
             None,
         )
