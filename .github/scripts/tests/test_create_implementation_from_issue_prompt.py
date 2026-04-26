@@ -138,7 +138,7 @@ class CreateImplementationFromIssuePromptTest(unittest.TestCase):
         self.assertNotIn(ATTACKER_BODY, prompt)
         # The agent must be directed at the fetch script with the right repo/number.
         self.assertIn(
-            ".agents/skills/implement-specs/scripts/fetch_github_context.py issue --repo owner/repo --number 123",
+            ".agents/skills/implement-specs/scripts/fetch_github_context.py --repo owner/repo issue --number 123",
             prompt,
         )
         # The prompt must not offer an --include-untrusted escape hatch:
@@ -147,6 +147,15 @@ class CreateImplementationFromIssuePromptTest(unittest.TestCase):
         # The trust-boundary framing must be present so the agent treats the
         # script as the only supported way to read issue content.
         self.assertIn("only supported way", prompt)
+        # The prompt must make the PR ownership boundary explicit: the
+        # agent pushes the branch and hands back metadata, while the
+        # outer workflow owns PR creation or refresh.
+        self.assertIn("After pushing, stop.", prompt)
+        self.assertIn("gh pr create", prompt)
+        self.assertIn(
+            "The outer workflow owns any pull-request creation or pull-request title/body refresh",
+            prompt,
+        )
 
 
 if __name__ == "__main__":

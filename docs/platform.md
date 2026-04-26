@@ -64,7 +64,7 @@ The main workflow wrapper is [`create-spec-from-issue.yml`](../.github/workflows
 
 These agents are doing something very specific: they translate issue discussion into durable repository artifacts under [`../specs/`](../specs/). The output is not just generated prose in a chat transcript. The output is committed planning state that other humans and agents can review, approve, and build against.
 
-That is why the spec-writing role matters as its own abstraction. The workflow itself mostly handles assignment, branch creation, and PR creation. The actual planning behavior — what belongs in a product spec, what belongs in a tech spec, how much to ground in existing code, how to distinguish user-facing behavior from implementation detail — comes from the skills.
+That is why the spec-writing role matters as its own abstraction. The workflow itself mostly handles assignment, branch creation, and PR creation after the agent has finished pushing the branch and handing back any PR metadata the workflow needs. The actual planning behavior — what belongs in a product spec, what belongs in a tech spec, how much to ground in existing code, how to distinguish user-facing behavior from implementation detail — comes from the skills.
 
 ## The implementation agent
 
@@ -78,7 +78,7 @@ The main reusable workflow wrapper is [`create-implementation-from-issue.yml`](.
 
 This agent is not meant to freewheel off an issue description alone when stronger design context exists. The surrounding prompt assembly is explicit about using approved spec context when available, and about refusing to continue when spec PRs exist but are not yet approved. That constraint is not just workflow policy. It is part of the implementation agent’s contract with the rest of the system.
 
-So the implementation role is best understood as: take approved intent, the current branch state, and repository validation expectations, then produce branch changes in the right place. The workflow handles branch and PR mechanics. The agent handles the reasoning that turns issue and spec context into code.
+So the implementation role is best understood as: take approved intent, the current branch state, and repository validation expectations, then produce branch changes in the right place. The agent's job stops at the branch push plus any requested handoff artifacts; the workflow handles PR creation or refresh separately. The agent handles the reasoning that turns issue and spec context into code.
 
 ## The review agent
 
