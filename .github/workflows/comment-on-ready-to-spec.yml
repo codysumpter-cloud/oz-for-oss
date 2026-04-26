@@ -1,13 +1,15 @@
 name: Comment on Ready to Spec
 on:
-  workflow_call:
-    secrets:
-      OZ_MGMT_GHA_APP_ID:
-        required: true
-      OZ_MGMT_GHA_PRIVATE_KEY:
-        required: true
+  issues:
+    types: [labeled]
+concurrency:
+  group: comment-on-ready-to-spec-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
 jobs:
   post_comment:
+    if: >-
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'ready-to-spec'
     name: Post ready-to-spec comment on issue
     runs-on: ubuntu-slim
     permissions:
@@ -23,9 +25,8 @@ jobs:
       - name: Post ready-to-spec comment
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
-          set -euo pipefail
-          ISSUE_NUMBER=$(cat "$GITHUB_EVENT_PATH" | jq -r '.issue.number')
           gh issue comment "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
             --body "This issue has been labeled \`ready-to-spec\`. Contributions including product and tech specs for this issue are welcome."

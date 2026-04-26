@@ -1,18 +1,15 @@
 name: Comment on Plan Approved
 on:
-  workflow_call:
-    inputs:
-      pr_number:
-        description: Pull request number that was labeled plan-approved
-        required: true
-        type: string
-    secrets:
-      OZ_MGMT_GHA_APP_ID:
-        required: true
-      OZ_MGMT_GHA_PRIVATE_KEY:
-        required: true
+  pull_request_target:
+    types: [labeled]
+concurrency:
+  group: comment-on-plan-approved-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
 jobs:
   post_comment:
+    if: >-
+      github.event.label.name == 'plan-approved' &&
+      github.event.pull_request.state == 'open'
     name: Post plan-approved comment on linked issue
     runs-on: ubuntu-slim
     permissions:
@@ -30,15 +27,9 @@ jobs:
       - name: Resolve linked issue and post comment
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
-          PR_NUMBER: ${{ inputs.pr_number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-
-          PR_STATE=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.state // "unknown"')
-          if [ "$PR_STATE" != "open" ]; then
-            echo "::notice::PR #$PR_NUMBER is not open (state=$PR_STATE), skipping."
-            exit 0
-          fi
 
           HEAD_REF=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.head.ref // ""')
           PR_BODY=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.body // ""')
