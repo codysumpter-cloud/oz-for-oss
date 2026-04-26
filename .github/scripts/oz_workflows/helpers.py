@@ -133,12 +133,20 @@ def format_issue_comments_for_prompt(
     metadata_prefix: str,
     exclude_comment_id: int | None = None,
 ) -> str:
-    """Format human-visible issue comments for prompt context."""
+    """Format human-authored issue comments for prompt context.
+
+    ``metadata_prefix`` is kept in the signature for backwards compatibility
+    with older callers, but the filtering decision no longer depends on
+    scanning comment bodies for Oz metadata markers. Instead, we drop all
+    automation-authored comments so bot messages are excluded even when they
+    do not carry a metadata footer, and human-authored comments remain visible
+    even if they happen to contain the metadata prefix text.
+    """
     selected = [
         comment
         for comment in comments
         if int(get_field(comment, "id") or 0) != exclude_comment_id
-        and metadata_prefix not in str(get_field(comment, "body") or "")
+        and not is_automation_user(get_field(comment, "user"))
     ]
     if not selected:
         return "- None"
