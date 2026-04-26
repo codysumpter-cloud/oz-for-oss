@@ -13,8 +13,10 @@ from triage_new_issues import (
     build_duplicate_section,
     build_follow_up_section,
     build_question_reasoning_section,
+    build_statements_section,
     extract_duplicate_of,
     extract_follow_up_questions,
+    extract_statements,
     _follow_up_comment_metadata,
     _duplicate_comment_metadata,
     extract_requested_labels,
@@ -411,6 +413,29 @@ class ExtractFollowUpQuestionsTest(unittest.TestCase):
                 self.assertEqual(extract_follow_up_questions(payload), expected)
 
 
+class ExtractStatementsTest(unittest.TestCase):
+    def test_extraction_table(self) -> None:
+        cases = [
+            (
+                "returns_trimmed_string",
+                {"statements": "  This may already be fixed in newer releases.  "},
+                "This may already be fixed in newer releases.",
+            ),
+            (
+                "preserves_multiline_markdown",
+                {"statements": "- Check the `feature.flag` setting.\n- This looks limited to SSH sessions."},
+                "- Check the `feature.flag` setting.\n- This looks limited to SSH sessions.",
+            ),
+            ("returns_empty_for_missing_key", {}, ""),
+            ("returns_empty_for_none", {"statements": None}, ""),
+            ("returns_empty_for_non_string", {"statements": ["not", "a", "string"]}, ""),
+            ("returns_empty_for_whitespace_only", {"statements": "   \n\t  "}, ""),
+        ]
+        for label, payload, expected in cases:
+            with self.subTest(label=label):
+                self.assertEqual(extract_statements(payload), expected)
+
+
 class ApplyTriageResultTest(unittest.TestCase):
     def test_replaces_primary_and_repro_labels(self) -> None:
         github = FakeTriageGitHubClient()
@@ -680,6 +705,29 @@ class BuildFollowUpSectionTest(unittest.TestCase):
         self.assertIn("1. What OS?", section)
 
 
+class BuildStatementsSectionTest(unittest.TestCase):
+    def test_includes_reporter_mention_and_preserves_markdown(self) -> None:
+        issue = {"number": 42, "user": {"login": "alice"}}
+        statements = (
+            "This may already be fixed in newer Warp releases.\n\n"
+            "- Check whether the `feature.flag` setting is enabled.\n"
+            "- The current code suggests this is limited to SSH-backed sessions."
+        )
+        section = build_statements_section(issue, statements)
+        self.assertIn("@alice", section)
+        self.assertIn("here's what I found while triaging this issue", section)
+        self.assertIn("This may already be fixed in newer Warp releases.", section)
+        self.assertIn("`feature.flag`", section)
+        self.assertIn("SSH-backed sessions", section)
+
+    def test_omits_reporter_when_missing(self) -> None:
+        issue = {"number": 42, "user": {"login": ""}}
+        section = build_statements_section(issue, "Check the `feature.flag` setting.")
+        self.assertNotIn("@", section)
+        self.assertIn("Here's what I found while triaging this issue:", section)
+        self.assertIn("Check the `feature.flag` setting.", section)
+
+
 class BuildDuplicateSectionTest(unittest.TestCase):
     def test_includes_issue_links(self) -> None:
         issue = {"number": 42, "user": {"login": "alice"}}
@@ -874,13 +922,17 @@ class MutualExclusivityTest(unittest.TestCase):
         from triage_new_issues import _lowercase_first
         summary = _lowercase_first(str(result.get("summary") or "triage completed").strip())
         issue_body = str(result.get("issue_body") or "").strip()
+        statements = extract_statements(result)
         follow_up_questions = extract_follow_up_questions(result)
         duplicates = extract_duplicate_of(result, current_issue_number=int(issue["number"]))
+        show_statements = bool(statements and not duplicates)
 
         parts: list[str] = []
-        if not follow_up_questions and not duplicates:
+        if not show_statements and not follow_up_questions and not duplicates:
             parts.append("I've completed the triage of this issue.")
-        elif duplicates:
+        if show_statements:
+            parts.append(build_statements_section(issue, statements))
+        if duplicates:
             parts.append(build_duplicate_section(issue, duplicates))
         elif follow_up_questions:
             parts.append(build_follow_up_section(issue, follow_up_questions))
@@ -976,6 +1028,88 @@ class MutualExclusivityTest(unittest.TestCase):
         self.assertIn("**What OS?**", body)
         self.assertIn("Platform-sensitive", body)
 
+    def test_statements_render_before_follow_up_questions(self) -> None:
+        issue = {"number": 42, "user": {"login": "alice"}}
+        result = {
+            "summary": "needs more info",
+            "issue_body": "## Triage summary",
+            "statements": (
+                "This may already be fixed in newer Warp releases.\n\n"
+                "- Check whether the `feature.flag` setting is enabled."
+            ),
+            "follow_up_questions": [{"question": "What version?", "reasoning": ""}],
+            "duplicate_of": [],
+        }
+        body = self._build_comment_parts(result, issue)
+
+        self.assertIn("here's what I found while triaging this issue", body)
+        self.assertIn("follow-up questions", body)
+        self.assertIn("This may already be fixed in newer Warp releases.", body)
+        self.assertLess(
+            body.index("here's what I found while triaging this issue"),
+            body.index("follow-up questions"),
+        )
+        self.assertNotIn("I've completed the triage of this issue.", body)
+    def test_statements_render_without_follow_up_questions(self) -> None:
+        issue = {"number": 42, "user": {"login": "alice"}}
+        result = {
+            "summary": "shared immediate guidance",
+            "issue_body": "## Triage summary",
+            "statements": (
+                "This may already be fixed in newer Warp releases.\n\n"
+                "- Check whether the `feature.flag` setting is enabled."
+            ),
+            "follow_up_questions": [],
+            "duplicate_of": [],
+        }
+        body = self._build_comment_parts(result, issue)
+
+        self.assertIn("here's what I found while triaging this issue", body)
+        self.assertIn("This may already be fixed in newer Warp releases.", body)
+        self.assertNotIn("follow-up questions", body)
+        self.assertNotIn("overlap with existing issues", body)
+        self.assertIn("## Triage summary", body)
+        self.assertIn("<details>", body)
+        self.assertEqual(body.count(TRIAGE_DISCLAIMER), 1)
+        self.assertNotIn("I've completed the triage of this issue.", body)
+
+    def test_duplicates_suppress_statements_and_follow_up_questions(self) -> None:
+        issue = {"number": 42, "user": {"login": "alice"}}
+        result = {
+            "summary": "looks like a dupe",
+            "issue_body": "## Triage summary",
+            "statements": "This may already be fixed in newer Warp releases.",
+            "follow_up_questions": [{"question": "What OS?", "reasoning": ""}],
+            "duplicate_of": [
+                {"issue_number": 10, "title": "Original", "similarity_reason": "Same"},
+            ],
+        }
+        body = self._build_comment_parts(result, issue)
+
+        self.assertIn("overlap with existing issues", body)
+        self.assertNotIn("here's what I found while triaging this issue", body)
+        self.assertNotIn("This may already be fixed in newer Warp releases.", body)
+        self.assertNotIn("follow-up questions", body)
+
+    def test_statements_do_not_change_maintainer_details(self) -> None:
+        issue = {"number": 42, "user": {"login": "alice"}}
+        base_result = {
+            "summary": "needs more info",
+            "issue_body": "## Triage summary",
+            "follow_up_questions": [{"question": "What OS?", "reasoning": "Platform-sensitive"}],
+            "duplicate_of": [],
+        }
+        with_statements = {
+            **base_result,
+            "statements": "Check whether the `feature.flag` setting is enabled.",
+        }
+        base_body = self._build_comment_parts(base_result, issue)
+        statements_body = self._build_comment_parts(with_statements, issue)
+
+        base_details = base_body.split("<details>", 1)[1].split("</details>", 1)[0]
+        statements_details = statements_body.split("<details>", 1)[1].split("</details>", 1)[0]
+        self.assertEqual(statements_details, base_details)
+
     def test_neither_section_when_both_empty(self) -> None:
         issue = {"number": 42, "user": {"login": "alice"}}
         result = {
@@ -988,6 +1122,7 @@ class MutualExclusivityTest(unittest.TestCase):
 
         self.assertNotIn("follow-up questions", body)
         self.assertNotIn("overlap with existing issues", body)
+        self.assertNotIn("here's what I found while triaging this issue", body)
         # issue_body should be in the maintainer details
         self.assertIn("## Triage summary", body)
         self.assertIn("<details>", body)
