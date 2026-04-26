@@ -8,9 +8,9 @@ from github import Auth, Github
 from oz_workflows.actions import set_output
 from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.helpers import (
-    extract_issue_numbers_from_text,
     format_enforce_start_line,
     ORG_MEMBER_ASSOCIATIONS,
+    resolve_pr_association,
     WorkflowProgressComment,
 )
 from oz_workflows.artifacts import poll_for_artifact
@@ -104,12 +104,8 @@ def main() -> None:
         required_label = "ready-to-implement"
         contribution_docs_url = f"https://github.com/{owner}/{repo}/blob/main/CONTRIBUTING.md"
 
-        explicit_issue = None
-        for issue_number in extract_issue_numbers_from_text(owner, repo, pr.body or ""):
-            issue = github.get_issue(issue_number)
-            if not issue.pull_request:
-                explicit_issue = issue
-                break
+        association = resolve_pr_association(github, owner, repo, pr, changed_files)
+        associated_issue_numbers = association.get("same_repo_issue_numbers") or []
 
         # Only post the state-aware start line on paths that will
         # actually reach ``progress.complete(...)``. Posting a start
@@ -121,9 +117,16 @@ def main() -> None:
         # ``cleanup()`` is still called on the allow paths so that any
         # orphan progress comments left behind by a previous run on
         # the same PR are removed.
-        if explicit_issue:
-            labels = [label.name for label in explicit_issue.labels]
-            if required_label in labels:
+        if associated_issue_numbers:
+            ready_issue = next(
+                (
+                    issue
+                    for issue in (github.get_issue(n) for n in associated_issue_numbers)
+                    if required_label in [label.name for label in issue.labels]
+                ),
+                None,
+            )
+            if ready_issue is not None:
                 progress.cleanup()
                 set_output("allow_review", "true")
                 return
@@ -133,9 +136,12 @@ def main() -> None:
                     change_kind=change_kind,
                 )
             )
+            issue_refs = ", ".join(f"#{n}" for n in associated_issue_numbers)
+            association_noun = "issue" if len(associated_issue_numbers) == 1 else "issues"
             close_comment = (
                 f"The PR that you've opened seems to contain {change_kind} changes and is associated with issue "
-                f"#{explicit_issue.number}, which is not marked as `{required_label}`. This PR will be "
+                f"{issue_refs}, but none of those associated {association_noun} are marked as "
+                f"`{required_label}`. This PR will be "
                 f"automatically closed. Please see our [contribution docs]({contribution_docs_url}) for guidance "
                 "on when changes are accepted for issues."
             )
