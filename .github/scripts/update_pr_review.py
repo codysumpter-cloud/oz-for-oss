@@ -7,7 +7,6 @@ from oz_workflows.env import optional_env, repo_parts, workspace
 from oz_workflows.oz_client import build_agent_config, run_agent
 from oz_workflows.repo_local import (
     WriteSurfaceViolation,
-    branch_exists,
     maybe_push_update_branch,
 )
 
@@ -72,11 +71,6 @@ def main() -> None:
         "`.agents/skills/review-spec-local/SKILL.md` based on recent "
         "human PR review feedback."
     )
-    if branch_exists(workspace(), UPDATE_BRANCH):
-        metadata = load_pr_metadata_artifact(run.run_id)
-        pr_title = metadata["pr_title"]
-        pr_body = metadata["pr_summary"]
-
     maybe_push_update_branch(
         workspace(),
         UPDATE_BRANCH,
@@ -84,6 +78,7 @@ def main() -> None:
         loop_name="update-pr-review",
         pr_title=pr_title,
         pr_body=pr_body,
+        metadata_supplier=lambda: load_pr_metadata_artifact(run.run_id),
     )
 
 

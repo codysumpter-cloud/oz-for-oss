@@ -16,8 +16,6 @@ class UpdateScriptsTest(unittest.TestCase):
         ), patch.object(module, "workspace", return_value="/tmp"), patch.object(
             module, "repo_parts", return_value=("warpdotdev", "oz-for-oss")
         ), patch.object(module, "optional_env", return_value=""), patch.object(
-            module, "branch_exists", return_value=False
-        ), patch.object(
             module, "maybe_push_update_branch"
         ) as mock_push:
             module.main()
@@ -36,17 +34,22 @@ class UpdateScriptsTest(unittest.TestCase):
         ), patch.object(module, "workspace", return_value="/tmp"), patch.object(
             module, "repo_parts", return_value=("warpdotdev", "oz-for-oss")
         ), patch.object(module, "optional_env", return_value=""), patch.object(
-            module, "branch_exists", return_value=True
-        ), patch.object(
             module, "load_pr_metadata_artifact", return_value=metadata
         ) as mock_load_metadata, patch.object(
             module, "maybe_push_update_branch"
         ) as mock_push:
             module.main()
-        mock_load_metadata.assert_called_once_with("run-123")
-        _args, kwargs = mock_push.call_args
-        self.assertEqual(kwargs["pr_title"], metadata["pr_title"])
-        self.assertEqual(kwargs["pr_body"], metadata["pr_summary"])
+            # The metadata supplier must NOT be called eagerly; it is only invoked
+            # inside maybe_push_update_branch when there are actual changed files.
+            mock_load_metadata.assert_not_called()
+            _args, kwargs = mock_push.call_args
+            supplier = kwargs.get("metadata_supplier")
+            self.assertIsNotNone(supplier, "metadata_supplier kwarg must be passed")
+            self.assertTrue(callable(supplier))
+            # Calling the supplier should delegate to load_pr_metadata_artifact.
+            result = supplier()
+            mock_load_metadata.assert_called_once_with("run-123")
+            self.assertEqual(result, metadata)
 
     def test_update_pr_review_relies_on_shared_resolution(self) -> None:
         self._assert_main_does_not_pass_hardcoded_reviewer(update_pr_review)

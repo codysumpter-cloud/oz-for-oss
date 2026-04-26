@@ -13,7 +13,9 @@ from __future__ import annotations
 import fnmatch
 import re
 import subprocess
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 from .workflow_config import SelfImprovementConfig, load_self_improvement_config
 
@@ -353,8 +355,16 @@ def maybe_push_update_branch(
     loop_name: str,
     pr_title: str,
     pr_body: str,
+    metadata_supplier: Callable[[], dict[str, Any]] | None = None,
 ) -> None:
-    """Enforce the write surface, push *branch*, and open a PR if one is missing."""
+    """Enforce the write surface, push *branch*, and open a PR if one is missing.
+
+    *metadata_supplier* is an optional zero-argument callable that returns a
+    dict with at least ``pr_title`` and ``pr_summary`` keys. When provided it
+    is called only after confirming there are actual changed files to push, so
+    callers can defer expensive artifact fetches to the moment they are
+    genuinely needed.
+    """
     if not branch_exists(repo_root, branch):
         return
 
@@ -363,6 +373,10 @@ def maybe_push_update_branch(
     changed_files = changed_files_since_base_branch(repo_root, branch, base_branch)
     if not changed_files:
         return
+    if metadata_supplier is not None:
+        metadata = metadata_supplier()
+        pr_title = metadata.get("pr_title", pr_title)
+        pr_body = metadata.get("pr_summary", pr_body)
     assert_write_surface(
         changed_files,
         allowed_prefixes=allowed_prefixes,
