@@ -109,6 +109,73 @@ Design choices:
 - Treat template strings as pure substitution, not code. There is no expression language, no conditionals, and no evaluation beyond named placeholder replacement.
 - Store defaults in the registry using the exact current strings so repositories without overrides see no behavior change.
 
+#### 2a. Enumerate the first-release template registry
+
+The first release should explicitly register every deterministic user-visible string that is currently hardcoded in helpers or workflow entrypoints, rather than leaving implementers to rediscover them during coding. The initial namespace/key set should be documented in the new module and reflected in README examples.
+
+Proposed namespace and key coverage:
+
+- `shared`
+  - `progress_session_session`
+  - `progress_session_conversation`
+  - `spec_preview`
+  - `next_steps_section`
+- `triage-new-issues`
+  - `start_new`
+  - `start_retriage`
+  - `session`
+  - `complete_without_user_facing_content_with_session`
+  - `complete_without_user_facing_content_without_session`
+  - `session_link_only`
+  - `statements_with_reporter`
+  - `statements_without_reporter`
+  - `follow_up_with_reporter`
+  - `follow_up_without_reporter`
+  - `duplicate_with_reporter`
+  - `duplicate_without_reporter`
+  - `maintainer_details`
+  - `disclaimer`
+- `respond-to-triaged-issue`
+  - `start`
+- `create-spec-from-issue`
+  - `start_new`
+  - `start_update`
+  - `complete_created`
+  - `complete_updated`
+- `create-implementation-from-issue`
+  - `start_blocked_unapproved_specs`
+  - `start_from_approved_spec_new_pr`
+  - `start_from_approved_spec_update_pr`
+  - `start_from_directory_specs_new_pr`
+  - `start_from_directory_specs_update_pr`
+  - `start_without_spec_context_new_pr`
+  - `start_without_spec_context_update_pr`
+  - `complete_updated_spec_pr`
+  - `complete_updated_existing_draft_pr`
+  - `complete_created_new_draft_pr`
+- `review-pull-request`
+  - `start_first_review_code`
+  - `start_first_review_spec`
+  - `start_rereview_code`
+  - `start_rereview_spec`
+- `respond-to-pr-comment`
+  - `start_review_reply_with_spec_context`
+  - `start_review_reply_without_spec_context`
+  - `start_review_body_with_spec_context`
+  - `start_review_body_without_spec_context`
+  - `start_conversation_comment_with_spec_context`
+  - `start_conversation_comment_without_spec_context`
+- `comment-on-unready-assigned-issue`
+  - `start`
+  - `complete`
+- `enforce-pr-issue-state`
+  - `start_explicit_issue`
+  - `start_matching_ready_issue`
+  - `close_explicit_issue_not_ready`
+  - `close_no_matching_ready_issue`
+
+The corresponding placeholder set should be called out alongside those definitions. Important examples include `${session_link_markdown}`, `${pr_url}`, `${reporter_mention}`, `${statements_markdown}`, `${questions_markdown}`, `${duplicate_list_markdown}`, `${maintainer_details_markdown}`, `${next_steps_markdown}`, `${required_label}`, `${change_kind}`, `${contribution_docs_url}`, and `${association_rationale}`.
+
 #### 3. Route helper-owned comment text through the registry
 
 Update the formatting helpers in `.github/scripts/oz_workflows/helpers.py` so they no longer return hardcoded literals directly. Instead, each helper becomes a thin wrapper over `render_comment_template(...)`.
@@ -119,10 +186,10 @@ Examples:
 - `format_triage_session_line()` renders `...session` with `${session_link_markdown}`
 - `format_spec_start_line()` and `format_spec_complete_line()` map new-vs-update variants to separate template keys
 - implementation/review/respond/enforce start-line helpers map each current variant to a dedicated key instead of requiring conditional syntax inside templates
-- `build_next_steps_section()` renders a shared heading template plus the already-built bullet list
+- `build_next_steps_section()` renders a whole-section template such as `shared.next_steps_section`, with `${next_steps_markdown}` containing the rendered bullet list so the heading, surrounding copy, and list placement are all editable
 - `build_spec_preview_section()` renders its intro text via a shared template while keeping generated links in placeholders
 
-Move `POWERED_BY_SUFFIX` from a hardcoded constant to a `workflow_comments.shared.powered_by_suffix` template. The metadata marker itself must remain hardcoded and non-configurable.
+Leave `POWERED_BY_SUFFIX` as a hardcoded constant in `helpers.py` and `build_pr_body()`. The HTML metadata marker also remains hardcoded and non-configurable.
 
 #### 4. Convert workflow-specific inline comment builders
 
@@ -137,7 +204,8 @@ Target files:
 - `comment_on_unready_assigned_issue.py`
   - render the readiness-check start and completion comments through the template registry rather than inline literals
 - `enforce_pr_issue_state.py`
-  - render the explicit-associated-issue close comment and the unmatched-ready-issue close comment through templates while keeping issue matching and PR closing logic unchanged
+  - render the explicit-associated-issue close comment through the template registry
+  - stop asking the association agent to author the no-match close comment body; instead, keep the agent focused on structured match/no-match output plus rationale and let Python render the unmatched-ready-issue close comment through a template with placeholders like `${change_kind}`, `${required_label}`, `${contribution_docs_url}`, and `${association_rationale}`
 
 Any additional workflow-owned GitHub comment literals found during implementation should be moved onto the same registry rather than left as one-off strings.
 
@@ -150,6 +218,7 @@ Do not move agent-generated payloads such as:
 - `triage_result.json.follow_up_questions[*].question`
 - `issue_response.json.analysis_comment`
 - `review.json.summary`
+- `issue_association.json.rationale`
 
 Those values remain model-authored data that the workflow may wrap with configured template framing. This keeps the config surface deterministic and avoids coupling repository config to the shape or style of LLM-authored prose.
 
@@ -198,11 +267,11 @@ This preserves the current single-source config model from #338 while still allo
 - Extend `.github/scripts/tests/test_comment_updates.py` to cover:
   - default-rendered progress-comment strings
   - configured overrides for representative helper-owned templates
-  - shared suffix rendering if moved into the registry
+  - the hardcoded suffix continuing to remain unchanged outside the registry
 - Extend `.github/scripts/tests/test_triage.py` to cover overridden statements/follow-up/duplicate/disclaimer wrappers without changing the underlying model-authored content
 - Add or extend tests for:
   - `comment_on_unready_assigned_issue.py`
-  - `enforce_pr_issue_state.py`
+  - `enforce_pr_issue_state.py`, including the templated no-match close comment rendered from agent-supplied rationale
 - Run `env PYTHONPATH=.github/scripts python -m unittest discover -s .github/scripts/tests`.
 
 ### Follow-ups
