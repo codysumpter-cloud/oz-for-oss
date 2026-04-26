@@ -12,7 +12,6 @@ from oz_workflows.helpers import (
     build_pr_body,
     coauthor_prompt_lines,
     conventional_commit_prefix,
-    extract_issue_numbers_from_text,
     find_matching_spec_prs,
     is_automation_user,
     is_spec_only_pr,
@@ -20,17 +19,12 @@ from oz_workflows.helpers import (
     org_member_comments_text,
     POWERED_BY_SUFFIX,
     resolve_coauthor_line,
+    resolve_pr_association,
     resolve_issue_number_for_pr,
     resolve_progress_requester_login,
     review_thread_comments_text,
     triggering_comment_prompt_text,
 )
-
-
-class ExtractIssueNumbersTest(unittest.TestCase):
-    def test_extracts_hash_and_url_references(self) -> None:
-        text = "Fixes #12 and refs https://github.com/acme/widgets/issues/34"
-        self.assertEqual(extract_issue_numbers_from_text("acme", "widgets", text), [12, 34])
 
 
 class BuildSpecPreviewSectionTest(unittest.TestCase):
@@ -654,6 +648,61 @@ class _FakeComparison:
     def __init__(self, commits: list[dict[str, object]]) -> None:
         self.commits = commits
 
+class _FakeGraphQLRequester:
+    def __init__(
+        self,
+        *,
+        closing_pages: list[dict[str, object]] | None = None,
+        timeline_pages: list[dict[str, object]] | None = None,
+    ) -> None:
+        self._closing_pages = closing_pages or [
+            {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}}
+        ]
+        self._timeline_pages = timeline_pages or [
+            {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}}
+        ]
+        self._closing_index = 0
+        self._timeline_index = 0
+
+    def graphql_query(
+        self, query: str, variables: dict[str, object]
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        if "closingIssuesReferences" in query:
+            page = self._closing_pages[self._closing_index]
+            self._closing_index += 1
+            return (
+                {},
+                {"data": {"repository": {"pullRequest": {"closingIssuesReferences": page}}}},
+            )
+        if "timelineItems" in query:
+            page = self._timeline_pages[self._timeline_index]
+            self._timeline_index += 1
+            return (
+                {},
+                {"data": {"repository": {"pullRequest": {"timelineItems": page}}}},
+            )
+        raise AssertionError(f"Unexpected GraphQL query: {query}")
+
+
+class _FakeAssociationGithub:
+    def __init__(
+        self,
+        *,
+        issues: dict[int, SimpleNamespace] | None = None,
+        requester: object | None = None,
+    ) -> None:
+        self._issues = issues or {}
+        self.requester = requester
+        self.seen: list[int] = []
+
+    def get_issue(self, number: int) -> SimpleNamespace:
+        self.seen.append(number)
+        return self._issues[number]
+
+
+def _fake_issue(number: int, *, pull_request: object | None = None) -> SimpleNamespace:
+    return SimpleNamespace(pull_request=pull_request, number=number)
+
 
 class FakeGitHubClientWithCompare:
     """A minimal stand-in for ``github.Repository.Repository.compare``."""
@@ -666,16 +715,191 @@ class FakeGitHubClientWithCompare:
 
 
 class ResolveIssueNumberForPrTest(unittest.TestCase):
-    def test_uses_provided_issue_cache_to_avoid_duplicate_calls(self) -> None:
-        call_count = {"n": 0}
-
-        class FakeGitHub:
-            def get_issue(self, number: int) -> SimpleNamespace:
-                call_count["n"] += 1
-                return SimpleNamespace(pull_request=None, number=number)
-
-        github = FakeGitHub()
+    def test_prefers_single_deterministic_issue_over_linked_issue_data(self) -> None:
+        requester = _FakeGraphQLRequester(
+            closing_pages=[
+                {
+                    "nodes": [
+                        {
+                            "number": 99,
+                            "repository": {
+                                "owner": {"login": "acme"},
+                                "name": "widgets",
+                            },
+                        }
+                    ],
+                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                }
+            ]
+        )
+        github = _FakeAssociationGithub(
+            issues={42: _fake_issue(42)},
+            requester=requester,
+        )
         pr = SimpleNamespace(
+            number=7,
+            head=SimpleNamespace(ref="oz-agent/implement-issue-42"),
+            body="See #99",
+        )
+
+        association = resolve_pr_association(github, "acme", "widgets", pr, [])
+
+        self.assertEqual(association["deterministic_issue_numbers"], [42])
+        self.assertEqual(association["same_repo_issue_numbers"], [42, 99])
+        self.assertEqual(association["primary_issue_number"], 42)
+        self.assertFalse(association["ambiguous"])
+
+    def test_ignores_pr_body_text_without_authoritative_link_data(self) -> None:
+        github = _FakeAssociationGithub(requester=_FakeGraphQLRequester())
+        pr = SimpleNamespace(
+            number=7,
+            head=SimpleNamespace(ref="feature-branch"),
+            body="Addresses #42 and see #43",
+        )
+
+        association = resolve_pr_association(github, "acme", "widgets", pr, [])
+
+        self.assertEqual(association["same_repo_issue_numbers"], [])
+        self.assertIsNone(association["primary_issue_number"])
+        self.assertFalse(association["ambiguous"])
+        self.assertEqual(github.seen, [])
+
+    def test_uses_same_repo_github_links_when_no_deterministic_signal_exists(self) -> None:
+        requester = _FakeGraphQLRequester(
+            closing_pages=[
+                {
+                    "nodes": [
+                        {
+                            "number": 77,
+                            "repository": {
+                                "owner": {"login": "acme"},
+                                "name": "widgets",
+                            },
+                        },
+                        {
+                            "number": 88,
+                            "repository": {
+                                "owner": {"login": "other"},
+                                "name": "repo",
+                            },
+                        },
+                    ],
+                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                }
+            ]
+        )
+        github = _FakeAssociationGithub(requester=requester)
+        pr = SimpleNamespace(
+            number=7,
+            head=SimpleNamespace(ref="feature-branch"),
+            body="Closes #77",
+        )
+
+        association = resolve_pr_association(github, "acme", "widgets", pr, [])
+
+        self.assertEqual(association["same_repo_issue_numbers"], [77])
+        self.assertEqual(association["primary_issue_number"], 77)
+        self.assertEqual(
+            [issue["number"] for issue in association["github_linked_issues"]],
+            [77, 88],
+        )
+
+    def test_reconstructs_manual_links_after_disconnects(self) -> None:
+        requester = _FakeGraphQLRequester(
+            timeline_pages=[
+                {
+                    "nodes": [
+                        {
+                            "__typename": "ConnectedEvent",
+                            "subject": {
+                                "number": 10,
+                                "repository": {
+                                    "owner": {"login": "acme"},
+                                    "name": "widgets",
+                                },
+                            },
+                        },
+                        {
+                            "__typename": "ConnectedEvent",
+                            "subject": {
+                                "number": 11,
+                                "repository": {
+                                    "owner": {"login": "acme"},
+                                    "name": "widgets",
+                                },
+                            },
+                        },
+                        {
+                            "__typename": "DisconnectedEvent",
+                            "subject": {
+                                "number": 10,
+                                "repository": {
+                                    "owner": {"login": "acme"},
+                                    "name": "widgets",
+                                },
+                            },
+                        },
+                    ],
+                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                }
+            ]
+        )
+        github = _FakeAssociationGithub(requester=requester)
+        pr = SimpleNamespace(
+            number=7,
+            head=SimpleNamespace(ref="feature-branch"),
+            body="",
+        )
+
+        association = resolve_pr_association(github, "acme", "widgets", pr, [])
+
+        self.assertEqual(association["same_repo_issue_numbers"], [11])
+        self.assertEqual(association["primary_issue_number"], 11)
+        self.assertEqual(
+            [issue["source"] for issue in association["github_linked_issues"]],
+            ["manualLink"],
+        )
+
+    def test_returns_no_primary_when_same_repo_links_are_ambiguous(self) -> None:
+        requester = _FakeGraphQLRequester(
+            closing_pages=[
+                {
+                    "nodes": [
+                        {
+                            "number": 10,
+                            "repository": {
+                                "owner": {"login": "acme"},
+                                "name": "widgets",
+                            },
+                        },
+                        {
+                            "number": 11,
+                            "repository": {
+                                "owner": {"login": "acme"},
+                                "name": "widgets",
+                            },
+                        },
+                    ],
+                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                }
+            ]
+        )
+        github = _FakeAssociationGithub(requester=requester)
+        pr = SimpleNamespace(
+            number=7,
+            head=SimpleNamespace(ref="feature-branch"),
+            body="",
+        )
+
+        association = resolve_pr_association(github, "acme", "widgets", pr, [])
+
+        self.assertEqual(association["same_repo_issue_numbers"], [10, 11])
+        self.assertIsNone(association["primary_issue_number"])
+        self.assertTrue(association["ambiguous"])
+    def test_uses_provided_issue_cache_to_avoid_duplicate_calls(self) -> None:
+        github = _FakeAssociationGithub(issues={42: _fake_issue(42)})
+        pr = SimpleNamespace(
+            number=7,
             head=SimpleNamespace(ref="oz-agent/implement-issue-42"),
             body="",
         )
@@ -690,33 +914,24 @@ class ResolveIssueNumberForPrTest(unittest.TestCase):
         )
         self.assertEqual(first, 42)
         self.assertEqual(second, 42)
-        self.assertEqual(call_count["n"], 1)
+        self.assertEqual(github.seen, [42])
         self.assertIn(42, cache)
 
     def test_returns_none_when_no_candidates(self) -> None:
-        class FakeGitHub:
-            def get_issue(self, number: int) -> SimpleNamespace:
-                raise AssertionError("get_issue should not be called when there are no candidates")
-
-        pr = SimpleNamespace(head=SimpleNamespace(ref="main"), body="")
+        pr = SimpleNamespace(number=7, head=SimpleNamespace(ref="main"), body="")
         self.assertIsNone(
-            resolve_issue_number_for_pr(FakeGitHub(), "acme", "widgets", pr, [])
+            resolve_issue_number_for_pr(_FakeAssociationGithub(), "acme", "widgets", pr, [])
         )
 
     def test_skips_candidates_that_are_pull_requests(self) -> None:
-        class FakeGitHub:
-            def __init__(self) -> None:
-                self.seen: list[int] = []
-
-            def get_issue(self, number: int) -> SimpleNamespace:
-                self.seen.append(number)
-                # First candidate (from branch) looks like a PR, second
-                # (from spec files) is a real issue.
-                pull_request = object() if number == 100 else None
-                return SimpleNamespace(pull_request=pull_request, number=number)
-
-        github = FakeGitHub()
+        github = _FakeAssociationGithub(
+            issues={
+                100: _fake_issue(100, pull_request=object()),
+                42: _fake_issue(42),
+            }
+        )
         pr = SimpleNamespace(
+            number=7,
             head=SimpleNamespace(ref="oz-agent/spec-issue-100"),
             body="",
         )

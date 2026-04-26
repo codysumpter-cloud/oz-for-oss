@@ -27,7 +27,53 @@ logger = logging.getLogger(__name__)
 # Author associations that indicate organization membership.
 ORG_MEMBER_ASSOCIATIONS: set[str] = {"COLLABORATOR", "MEMBER", "OWNER"}
 
-ISSUE_PATTERN = re.compile(r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?|implements?|issue)\s*:?\s+#(\d+)", re.IGNORECASE)
+_CLOSING_ISSUES_QUERY = (
+    "query($owner: String!, $name: String!, $number: Int!, $after: String) {"
+    " repository(owner: $owner, name: $name) {"
+    " pullRequest(number: $number) {"
+    " closingIssuesReferences(first: 100, after: $after) {"
+    " pageInfo { hasNextPage endCursor }"
+    " nodes {"
+    " number"
+    " repository { owner { login } name }"
+    " }"
+    " }"
+    " }"
+    " }"
+    " }"
+)
+
+_MANUAL_LINKED_ISSUES_QUERY = (
+    "query($owner: String!, $name: String!, $number: Int!, $after: String) {"
+    " repository(owner: $owner, name: $name) {"
+    " pullRequest(number: $number) {"
+    " timelineItems(first: 100, after: $after, itemTypes: [CONNECTED_EVENT, DISCONNECTED_EVENT]) {"
+    " pageInfo { hasNextPage endCursor }"
+    " nodes {"
+    " __typename"
+    " ... on ConnectedEvent {"
+    " subject {"
+    " __typename"
+    " ... on Issue {"
+    " number"
+    " repository { owner { login } name }"
+    " }"
+    " }"
+    " }"
+    " ... on DisconnectedEvent {"
+    " subject {"
+    " __typename"
+    " ... on Issue {"
+    " number"
+    " repository { owner { login } name }"
+    " }"
+    " }"
+    " }"
+    " }"
+    " }"
+    " }"
+    " }"
+)
 
 
 def parse_datetime(value: str) -> datetime:
@@ -1465,14 +1511,317 @@ def post_resolved_review_comment_replies(
     return results
 
 
-def extract_issue_numbers_from_text(owner: str, repo: str, text: str) -> list[int]:
-    issue_numbers = {int(match.group(1)) for match in ISSUE_PATTERN.finditer(text or "")}
-    same_repo_url_pattern = re.compile(
-        rf"https://github\.com/{re.escape(owner)}/{re.escape(repo)}/issues/(\d+)",
-        re.IGNORECASE,
+def _dedupe_ints(values: list[int]) -> list[int]:
+    return list(dict.fromkeys(int(value) for value in values))
+
+
+def _pull_request_head_ref(pr: Any) -> str:
+    return str(get_field(get_field(pr, "head"), "ref") or "")
+
+
+def _deterministic_issue_candidates(pr: Any, changed_files: list[str]) -> list[int]:
+    head_ref = _pull_request_head_ref(pr)
+    branch_issue_matches = [
+        int(match.group(1))
+        for match in re.finditer(
+            r"(?:^|/)(?:spec|implement)-issue-(\d+)(?:$|[/-])",
+            head_ref,
+        )
+    ]
+    spec_file_issue_numbers = [
+        int(match.group(1))
+        for filename in changed_files
+        for match in [re.match(r"^specs/GH(\d+)/(?:product|tech)\.md$", filename)]
+        if match
+    ]
+    return _dedupe_ints(branch_issue_matches + spec_file_issue_numbers)
+
+
+def _get_issue_from_cache(
+    github: Repository,
+    number: int,
+    *,
+    issue_cache: dict[int, Any] | None = None,
+) -> Any:
+    if issue_cache is not None and number in issue_cache:
+        return issue_cache[number]
+    issue = github.get_issue(number)
+    if issue_cache is not None:
+        issue_cache[number] = issue
+    return issue
+
+
+def _resolve_deterministic_issue_numbers(
+    github: Repository,
+    pr: Any,
+    changed_files: list[str],
+    *,
+    issue_cache: dict[int, Any] | None = None,
+) -> list[int]:
+    resolved: list[int] = []
+    for candidate in _deterministic_issue_candidates(pr, changed_files):
+        try:
+            issue = _get_issue_from_cache(github, candidate, issue_cache=issue_cache)
+        except UnknownObjectException:
+            continue
+        if not issue.pull_request:
+            resolved.append(candidate)
+    return resolved
+
+
+def _graphql_requester(source: Any) -> Any | None:
+    return getattr(source, "requester", None) or getattr(source, "_requester", None)
+
+
+def _normalize_github_linked_issue(node: Any, *, source: str) -> dict[str, Any] | None:
+    if not isinstance(node, dict):
+        return None
+    number = node.get("number")
+    if not isinstance(number, int):
+        return None
+    repository = node.get("repository") or {}
+    owner = ((repository.get("owner") or {}).get("login") or "").strip()
+    repo = str(repository.get("name") or "").strip()
+    if not owner or not repo:
+        return None
+    return {
+        "owner": owner,
+        "repo": repo,
+        "number": number,
+        "source": source,
+    }
+
+
+def _graphql_pull_request_data(
+    requester: Any,
+    query: str,
+    variables: dict[str, Any],
+) -> dict[str, Any]:
+    _headers, data = requester.graphql_query(query, variables)
+    return (
+        ((data.get("data") or {}).get("repository") or {}).get("pullRequest")
+        or {}
     )
-    issue_numbers.update(int(match.group(1)) for match in same_repo_url_pattern.finditer(text or ""))
-    return sorted(issue_numbers)
+
+
+def _fetch_closing_issue_references(
+    requester: Any,
+    owner: str,
+    repo: str,
+    pr_number: int,
+) -> list[dict[str, Any]]:
+    linked: dict[tuple[str, str, int, str], dict[str, Any]] = {}
+    cursor: str | None = None
+    while True:
+        pr_data = _graphql_pull_request_data(
+            requester,
+            _CLOSING_ISSUES_QUERY,
+            {
+                "owner": owner,
+                "name": repo,
+                "number": int(pr_number),
+                "after": cursor,
+            },
+        )
+        closing_refs = pr_data.get("closingIssuesReferences") or {}
+        for node in closing_refs.get("nodes") or []:
+            issue_ref = _normalize_github_linked_issue(
+                node,
+                source="closingIssuesReferences",
+            )
+            if issue_ref is None:
+                continue
+            key = (
+                issue_ref["owner"].lower(),
+                issue_ref["repo"].lower(),
+                int(issue_ref["number"]),
+                str(issue_ref["source"]),
+            )
+            linked[key] = issue_ref
+        page_info = closing_refs.get("pageInfo") or {}
+        if not page_info.get("hasNextPage"):
+            break
+        cursor = page_info.get("endCursor")
+        if not cursor:
+            break
+    return sorted(
+        linked.values(),
+        key=lambda item: (
+            str(item["owner"]).lower(),
+            str(item["repo"]).lower(),
+            int(item["number"]),
+            str(item["source"]),
+        ),
+    )
+
+
+def _fetch_manual_linked_issue_references(
+    requester: Any,
+    owner: str,
+    repo: str,
+    pr_number: int,
+) -> list[dict[str, Any]]:
+    connected: dict[tuple[str, str, int], dict[str, Any]] = {}
+    cursor: str | None = None
+    while True:
+        pr_data = _graphql_pull_request_data(
+            requester,
+            _MANUAL_LINKED_ISSUES_QUERY,
+            {
+                "owner": owner,
+                "name": repo,
+                "number": int(pr_number),
+                "after": cursor,
+            },
+        )
+        timeline_items = pr_data.get("timelineItems") or {}
+        for node in timeline_items.get("nodes") or []:
+            if not isinstance(node, dict):
+                continue
+            issue_ref = _normalize_github_linked_issue(
+                node.get("subject"),
+                source="manualLink",
+            )
+            if issue_ref is None:
+                continue
+            key = (
+                issue_ref["owner"].lower(),
+                issue_ref["repo"].lower(),
+                int(issue_ref["number"]),
+            )
+            typename = str(node.get("__typename") or "")
+            if typename == "ConnectedEvent":
+                connected[key] = issue_ref
+            elif typename == "DisconnectedEvent":
+                connected.pop(key, None)
+        page_info = timeline_items.get("pageInfo") or {}
+        if not page_info.get("hasNextPage"):
+            break
+        cursor = page_info.get("endCursor")
+        if not cursor:
+            break
+    return sorted(
+        connected.values(),
+        key=lambda item: (
+            str(item["owner"]).lower(),
+            str(item["repo"]).lower(),
+            int(item["number"]),
+            str(item["source"]),
+        ),
+    )
+
+
+def _fetch_github_linked_issues_for_pr(
+    github: Repository,
+    owner: str,
+    repo: str,
+    pr: Any,
+) -> list[dict[str, Any]]:
+    requester = _graphql_requester(github)
+    pr_number = get_field(pr, "number")
+    if requester is None or not isinstance(pr_number, int):
+        return []
+    try:
+        merged: dict[tuple[str, str, int, str], dict[str, Any]] = {}
+        for issue_ref in _fetch_closing_issue_references(
+            requester, owner, repo, pr_number
+        ):
+            key = (
+                str(issue_ref["owner"]).lower(),
+                str(issue_ref["repo"]).lower(),
+                int(issue_ref["number"]),
+                str(issue_ref["source"]),
+            )
+            merged[key] = issue_ref
+        for issue_ref in _fetch_manual_linked_issue_references(
+            requester, owner, repo, pr_number
+        ):
+            key = (
+                str(issue_ref["owner"]).lower(),
+                str(issue_ref["repo"]).lower(),
+                int(issue_ref["number"]),
+                str(issue_ref["source"]),
+            )
+            merged[key] = issue_ref
+        return sorted(
+            merged.values(),
+            key=lambda item: (
+                str(item["owner"]).lower(),
+                str(item["repo"]).lower(),
+                int(item["number"]),
+                str(item["source"]),
+            ),
+        )
+    except Exception:
+        logger.exception(
+            "Failed to fetch linked issue data for PR #%s in %s/%s",
+            pr_number,
+            owner,
+            repo,
+        )
+        return []
+
+
+def _same_repo_issue_numbers(
+    owner: str,
+    repo: str,
+    issue_refs: list[dict[str, Any]],
+) -> list[int]:
+    normalized_owner = owner.lower()
+    normalized_repo = repo.lower()
+    return _dedupe_ints(
+        [
+            int(issue_ref["number"])
+            for issue_ref in issue_refs
+            if str(issue_ref.get("owner") or "").lower() == normalized_owner
+            and str(issue_ref.get("repo") or "").lower() == normalized_repo
+        ]
+    )
+
+
+def resolve_pr_association(
+    github: Repository,
+    owner: str,
+    repo: str,
+    pr: Any,
+    changed_files: list[str],
+    *,
+    issue_cache: dict[int, Any] | None = None,
+) -> dict[str, Any]:
+    deterministic_issue_numbers = _resolve_deterministic_issue_numbers(
+        github,
+        pr,
+        changed_files,
+        issue_cache=issue_cache,
+    )
+    github_linked_issues = _fetch_github_linked_issues_for_pr(github, owner, repo, pr)
+    same_repo_linked_numbers = _same_repo_issue_numbers(
+        owner,
+        repo,
+        github_linked_issues,
+    )
+    same_repo_issue_numbers = _dedupe_ints(
+        deterministic_issue_numbers + same_repo_linked_numbers
+    )
+
+    primary_issue_number: int | None = None
+    ambiguous = False
+    if len(deterministic_issue_numbers) == 1:
+        primary_issue_number = deterministic_issue_numbers[0]
+    elif len(deterministic_issue_numbers) > 1:
+        ambiguous = True
+    elif len(same_repo_linked_numbers) == 1:
+        primary_issue_number = same_repo_linked_numbers[0]
+    elif len(same_repo_linked_numbers) > 1:
+        ambiguous = True
+
+    return {
+        "deterministic_issue_numbers": deterministic_issue_numbers,
+        "github_linked_issues": github_linked_issues,
+        "same_repo_issue_numbers": same_repo_issue_numbers,
+        "primary_issue_number": primary_issue_number,
+        "ambiguous": ambiguous,
+    }
 
 
 def resolve_issue_number_for_pr(
@@ -1484,32 +1833,16 @@ def resolve_issue_number_for_pr(
     *,
     issue_cache: dict[int, Any] | None = None,
 ) -> int | None:
-    head_ref = str(get_field(get_field(pr, "head"), "ref") or "")
-    branch_issue_matches = [
-        int(match.group(1))
-        for match in re.finditer(r"(?:^|/)(?:spec|implement)-issue-(\d+)(?:$|[/-])", head_ref)
-    ]
-    spec_file_issue_numbers = [
-        int(match.group(1))
-        for filename in changed_files
-        for match in [re.match(r"^specs/GH(\d+)/(?:product|tech)\.md$", filename)]
-        if match
-    ]
-    explicit_issue_numbers = extract_issue_numbers_from_text(owner, repo, str(get_field(pr, "body") or ""))
-    candidates = list(dict.fromkeys(branch_issue_matches + spec_file_issue_numbers + explicit_issue_numbers))
-    for candidate in candidates:
-        # Reuse a caller-provided cache so repeated calls across multiple
-        # PRs in the same process do not re-issue ``GET /issues/{n}`` for
-        # candidate numbers we have already resolved.
-        if issue_cache is not None and candidate in issue_cache:
-            issue = issue_cache[candidate]
-        else:
-            issue = github.get_issue(candidate)
-            if issue_cache is not None:
-                issue_cache[candidate] = issue
-        if not issue.pull_request:
-            return candidate
-    return None
+    association = resolve_pr_association(
+        github,
+        owner,
+        repo,
+        pr,
+        changed_files,
+        issue_cache=issue_cache,
+    )
+    primary_issue_number = association.get("primary_issue_number")
+    return int(primary_issue_number) if isinstance(primary_issue_number, int) else None
 
 
 def is_spec_only_pr(changed_files: list[str]) -> bool:
