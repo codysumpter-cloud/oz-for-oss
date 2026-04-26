@@ -28,33 +28,16 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           set -euo pipefail
 
-          # Resolve issue number from branch name: spec-issue-N or implement-issue-N
-          ISSUE_NUMBER=$(printf '%s' "$HEAD_REF" \
-            | grep -oE '(spec|implement)-issue-[0-9]+' \
-            | grep -oE '[0-9]+$' | head -1 || true)
-
-          # Fall back to spec file paths in PR changed files
-          if [ -z "$ISSUE_NUMBER" ]; then
-            ISSUE_NUMBER=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" \
-              --jq '.[].filename' \
-              | grep -oE '^specs/GH[0-9]+/' \
-              | grep -oE '[0-9]+' | head -1 || true)
-          fi
+          ISSUE_NUMBER=$(gh pr view "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json closedIssueReferences \
+            --jq '.closedIssueReferences[0].number // empty')
 
           if [ -z "$ISSUE_NUMBER" ]; then
             echo "::notice::No linked issue found for PR #$PR_NUMBER, skipping."
-            exit 0
-          fi
-
-          # Verify the linked number is an issue and not a PR
-          IS_PR=$(gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER" \
-            --jq 'if .pull_request then "true" else "false" end' 2>/dev/null || echo "error")
-          if [ "$IS_PR" != "false" ]; then
-            echo "::notice::Item #$ISSUE_NUMBER is not an issue or does not exist, skipping."
             exit 0
           fi
 
