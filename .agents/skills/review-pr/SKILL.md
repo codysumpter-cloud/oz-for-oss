@@ -13,6 +13,7 @@ Review the current pull request and write the output to `review.json`.
 - The workflow usually provides an annotated diff in `pr_diff.txt`.
 - The workflow usually provides the PR description in `pr_description.txt`.
 - If `spec_context.md` exists, it contains spec context for implementation-vs-spec validation.
+- When the prompt references `.agents/skills/review-pr/scripts/resolve_spec_context.py`, use that script to materialize `spec_context.md` on demand instead of expecting spec content to be embedded in the prompt.
 - Focus on files and lines changed by this PR.
 - Default behavior: do not post comments or reviews to GitHub directly.
 
@@ -147,7 +148,7 @@ If the prompt says you are in a cloud-environment workflow and the expected loca
     ```
   This isolates only the changes introduced by the PR, not accumulated state from other branches.
 - Convert the raw diff into `pr_diff.txt` using the annotated format above before reviewing.
-- If the prompt includes spec context to materialize, write it to `spec_context.md` before running the review.
+- If the prompt provides a `resolve_spec_context.py` command, run it only when spec validation is needed and write any returned spec content to `spec_context.md` before running review.
 - Still produce `review.json` and validate it with `jq`.
 - After validation, upload the result via `oz artifact upload review.json` (or `oz-preview artifact upload review.json` if the `oz` CLI is not available). Either CLI is acceptable — use whichever one is installed in the environment.
 - IMPORTANT: the upload subcommand is `artifact` (singular) on both `oz` and `oz-preview`. Do not use `artifacts` (plural) — that is not a valid subcommand and will fail.
