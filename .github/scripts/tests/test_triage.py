@@ -1035,6 +1035,28 @@ class MutualExclusivityTest(unittest.TestCase):
             body.index("follow-up questions"),
         )
         self.assertNotIn("I've completed the triage of this issue.", body)
+    def test_statements_render_without_follow_up_questions(self) -> None:
+        issue = {"number": 42, "user": {"login": "alice"}}
+        result = {
+            "summary": "shared immediate guidance",
+            "issue_body": "## Triage summary",
+            "statements": (
+                "This may already be fixed in newer Warp releases.\n\n"
+                "- Check whether the `feature.flag` setting is enabled."
+            ),
+            "follow_up_questions": [],
+            "duplicate_of": [],
+        }
+        body = self._build_comment_parts(result, issue)
+
+        self.assertIn("here's what I found while triaging this issue", body)
+        self.assertIn("This may already be fixed in newer Warp releases.", body)
+        self.assertNotIn("follow-up questions", body)
+        self.assertNotIn("overlap with existing issues", body)
+        self.assertIn("## Triage summary", body)
+        self.assertIn("<details>", body)
+        self.assertEqual(body.count(TRIAGE_DISCLAIMER), 1)
+        self.assertNotIn("I've completed the triage of this issue.", body)
 
     def test_duplicates_suppress_statements_and_follow_up_questions(self) -> None:
         issue = {"number": 42, "user": {"login": "alice"}}
