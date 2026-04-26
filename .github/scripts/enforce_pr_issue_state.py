@@ -105,10 +105,7 @@ def main() -> None:
         contribution_docs_url = f"https://github.com/{owner}/{repo}/blob/main/CONTRIBUTING.md"
 
         association = resolve_pr_association(github, owner, repo, pr, changed_files)
-        associated_issues = [
-            github.get_issue(issue_number)
-            for issue_number in association.get("same_repo_issue_numbers") or []
-        ]
+        associated_issue_numbers = association.get("same_repo_issue_numbers") or []
 
         # Only post the state-aware start line on paths that will
         # actually reach ``progress.complete(...)``. Posting a start
@@ -120,11 +117,11 @@ def main() -> None:
         # ``cleanup()`` is still called on the allow paths so that any
         # orphan progress comments left behind by a previous run on
         # the same PR are removed.
-        if associated_issues:
+        if associated_issue_numbers:
             ready_issue = next(
                 (
                     issue
-                    for issue in associated_issues
+                    for issue in (github.get_issue(n) for n in associated_issue_numbers)
                     if required_label in [label.name for label in issue.labels]
                 ),
                 None,
@@ -139,8 +136,8 @@ def main() -> None:
                     change_kind=change_kind,
                 )
             )
-            issue_refs = ", ".join(f"#{issue.number}" for issue in associated_issues)
-            association_noun = "issue" if len(associated_issues) == 1 else "issues"
+            issue_refs = ", ".join(f"#{n}" for n in associated_issue_numbers)
+            association_noun = "issue" if len(associated_issue_numbers) == 1 else "issues"
             close_comment = (
                 f"The PR that you've opened seems to contain {change_kind} changes and is associated with issue "
                 f"{issue_refs}, but none of those associated {association_noun} are marked as "

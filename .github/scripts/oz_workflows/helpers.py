@@ -1614,7 +1614,8 @@ def _resolve_deterministic_issue_numbers(
 
 
 def _graphql_requester(source: Any) -> Any | None:
-    return getattr(source, "requester", None) or getattr(source, "_requester", None)
+    req = getattr(source, "requester", None)
+    return req if req is not None else getattr(source, "_requester", None)
 
 
 def _normalize_github_linked_issue(node: Any, *, source: str) -> dict[str, Any] | None:
@@ -1766,7 +1767,7 @@ def _fetch_github_linked_issues_for_pr(
     if requester is None or not isinstance(pr_number, int):
         return []
     try:
-        merged: dict[tuple[str, str, int, str], dict[str, Any]] = {}
+        merged: dict[tuple[str, str, int], dict[str, Any]] = {}
         for issue_ref in _fetch_closing_issue_references(
             requester, owner, repo, pr_number
         ):
@@ -1774,7 +1775,6 @@ def _fetch_github_linked_issues_for_pr(
                 str(issue_ref["owner"]).lower(),
                 str(issue_ref["repo"]).lower(),
                 int(issue_ref["number"]),
-                str(issue_ref["source"]),
             )
             merged[key] = issue_ref
         for issue_ref in _fetch_manual_linked_issue_references(
@@ -1784,16 +1784,15 @@ def _fetch_github_linked_issues_for_pr(
                 str(issue_ref["owner"]).lower(),
                 str(issue_ref["repo"]).lower(),
                 int(issue_ref["number"]),
-                str(issue_ref["source"]),
             )
-            merged[key] = issue_ref
+            if key not in merged:
+                merged[key] = issue_ref
         return sorted(
             merged.values(),
             key=lambda item: (
                 str(item["owner"]).lower(),
                 str(item["repo"]).lower(),
                 int(item["number"]),
-                str(item["source"]),
             ),
         )
     except Exception:

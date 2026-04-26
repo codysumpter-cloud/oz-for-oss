@@ -648,6 +648,7 @@ class _FakeComparison:
     def __init__(self, commits: list[dict[str, object]]) -> None:
         self.commits = commits
 
+
 class _FakeGraphQLRequester:
     def __init__(
         self,
@@ -896,6 +897,7 @@ class ResolveIssueNumberForPrTest(unittest.TestCase):
         self.assertEqual(association["same_repo_issue_numbers"], [10, 11])
         self.assertIsNone(association["primary_issue_number"])
         self.assertTrue(association["ambiguous"])
+
     def test_uses_provided_issue_cache_to_avoid_duplicate_calls(self) -> None:
         github = _FakeAssociationGithub(issues={42: _fake_issue(42)})
         pr = SimpleNamespace(
