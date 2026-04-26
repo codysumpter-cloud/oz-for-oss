@@ -40,4 +40,5 @@ jobs:
         env:
           PYTHONPATH: ${{ env.WORKFLOW_CODE_PATH }}/.github/scripts
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GH_APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
         run: python "${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/comment_on_unready_assigned_issue.py"
