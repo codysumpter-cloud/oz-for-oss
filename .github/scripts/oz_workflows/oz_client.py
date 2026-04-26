@@ -5,11 +5,11 @@ from pathlib import Path
 from typing import Any, Callable, cast
 
 from oz_agent_sdk import OzAPI
-from oz_agent_sdk.types import AgentRunParams, AmbientAgentConfigParam, McpServerConfigParam
+from oz_agent_sdk.types import AgentRunParams, AmbientAgentConfigParam
 from oz_agent_sdk.types.agent import RunItem
 
 from .actions import notice, warning
-from .env import optional_env, parse_mcp_servers, repo_slug, require_env, workspace
+from .env import optional_env, repo_slug, require_env, workspace
 from .workflow_paths import workflow_code_root
 
 
@@ -98,11 +98,6 @@ def build_agent_config(
     if model_id:
         config["model_id"] = model_id
 
-    mcp_raw = optional_env("WARP_AGENT_MCP")
-    if mcp_raw:
-        mcp_servers = parse_mcp_servers(mcp_raw, workspace)
-        if mcp_servers is not None:
-            config["mcp_servers"] = cast(dict[str, McpServerConfigParam], mcp_servers)
 
     profile = optional_env("WARP_AGENT_PROFILE")
     if profile:
@@ -192,7 +187,7 @@ def run_agent(
     title: str,
     config: AmbientAgentConfigParam,
     on_poll: Callable[[RunItem], None] | None = None,
-    poll_interval_seconds: int = 10,
+    poll_interval_seconds: int = 30,
     timeout_seconds: int = 60 * 60,
 ) -> RunItem:
     """Run an Oz agent and poll until it reaches a terminal state."""

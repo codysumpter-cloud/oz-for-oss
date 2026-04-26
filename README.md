@@ -47,7 +47,6 @@ to customize agent behavior:
 | Variable | Description |
 |---|---|
 | `WARP_AGENT_MODEL` | Override the default Oz model (e.g. a specific model identifier). |
-| `WARP_AGENT_MCP` | MCP configuration for the agent, if any. |
 
 ### 3. Add local adapter workflows
 
@@ -80,10 +79,14 @@ self_improvement:
     - octocat
     - repo-maintainer
   base_branch: auto
+triage:
+  prior_triage_labels:
+    - triaged
 ```
 
 - `self_improvement.reviewers` — optional list of GitHub handles. Set `[]` to disable automatic reviewer requests.
 - `self_improvement.base_branch` — optional branch name, or `auto` to detect the repository default branch from git metadata.
+- `triage.prior_triage_labels` — optional list of labels that should count as evidence that Oz has already triaged an issue. Defaults to `["triaged"]`.
 - `SELF_IMPROVEMENT_REVIEWERS` and `SELF_IMPROVEMENT_BASE_BRANCH` remain high-precedence overrides for one-off runs.
 - Provide reviewer handles without the `@` prefix in both `.github/oz/config.yml` and `SELF_IMPROVEMENT_REVIEWERS`.
 

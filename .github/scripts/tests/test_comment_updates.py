@@ -6,6 +6,11 @@ import logging
 import os
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
+
+import oz_workflows.helpers as helpers_module
 
 from oz_workflows.helpers import (
     _strip_workflow_metadata,
@@ -1329,6 +1334,29 @@ class StateAwareStartLineTest(unittest.TestCase):
         self.assertFalse(issue_has_prior_triage([{"name": "documentation"}]))
         self.assertFalse(issue_has_prior_triage(["needs-info"]))
         self.assertFalse(issue_has_prior_triage([{"name": "duplicate"}]))
+
+    def test_issue_has_prior_triage_uses_configured_prior_labels(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / ".github" / "oz" / "config.yml"
+            config_path.parent.mkdir(parents=True)
+            config_path.write_text(
+                (
+                    "version: 1\n"
+                    "triage:\n"
+                    "  prior_triage_labels:\n"
+                    "    - needs-info\n"
+                    "    - reviewed\n"
+                ),
+                encoding="utf-8",
+            )
+            helpers_module._configured_prior_triage_labels.cache_clear()
+            try:
+                with patch("oz_workflows.helpers.workspace", return_value=Path(temp_dir)):
+                    self.assertTrue(issue_has_prior_triage([{"name": "needs-info"}]))
+                    self.assertTrue(issue_has_prior_triage(["Reviewed"]))
+                    self.assertFalse(issue_has_prior_triage([{"name": "triaged"}]))
+            finally:
+                helpers_module._configured_prior_triage_labels.cache_clear()
 
     def test_respond_to_triaged_start_line_describes_analytical_path(self) -> None:
         line = format_respond_to_triaged_start_line()
