@@ -27,7 +27,9 @@ jobs:
     if: |
       (
         github.event_name != 'issue_comment' &&
-        !contains(github.event.issue.labels.*.name, 'triaged')
+        !contains(github.event.issue.labels.*.name, 'triaged') &&
+        !contains(github.event.issue.labels.*.name, 'ready-to-spec') &&
+        !contains(github.event.issue.labels.*.name, 'ready-to-implement')
       ) || (
         github.event_name == 'issue_comment' &&
         !github.event.issue.pull_request &&
