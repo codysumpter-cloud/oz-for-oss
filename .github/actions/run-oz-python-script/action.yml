@@ -1,10 +1,19 @@
 name: Run Oz Python workflow script
 description: >-
-  Install the shared Oz workflow Python dependencies and run a script from
-  .github/scripts without checking out this repository separately.
+  Check out warpdotdev/oz-for-oss at a pinned workflow ref, install the shared
+  Oz workflow Python dependencies, and run a script from .github/scripts so
+  that helper code stays tied to the same immutable revision as the calling
+  workflow.
 inputs:
   script-path:
     description: Path to the Python entrypoint relative to .github/scripts.
+    required: true
+  workflow-ref:
+    description: >-
+      Git ref (SHA) of warpdotdev/oz-for-oss from which to source scripts and
+      dependencies. Pass ${{ github.workflow_sha }} from the calling reusable
+      workflow so that helper code stays pinned to the same immutable revision
+      as the workflow file.
     required: true
 outputs:
   allow_review:
@@ -13,17 +22,24 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Checkout oz-for-oss at workflow ref
+      uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      with:
+        repository: warpdotdev/oz-for-oss
+        ref: ${{ inputs.workflow-ref }}
+        path: __oz_shared
     - name: Set up Oz Python environment
       uses: warpdotdev/oz-for-oss/.github/actions/setup-oz-python@main # main
       with:
-        requirements-path: ${{ github.action_path }}/../../scripts/requirements.txt
+        requirements-path: __oz_shared/.github/scripts/requirements.txt
     - name: Run Oz Python workflow script
       id: run-script
       shell: bash
       env:
         OZ_SCRIPT_PATH: ${{ inputs.script-path }}
+        WORKFLOW_CODE_REPOSITORY: warpdotdev/oz-for-oss
       run: |
         set -euo pipefail
-        script_root="${GITHUB_ACTION_PATH}/../../scripts"
+        script_root="${GITHUB_WORKSPACE}/__oz_shared/.github/scripts"
         export PYTHONPATH="${script_root}${PYTHONPATH:+:${PYTHONPATH}}"
         python "${script_root}/${OZ_SCRIPT_PATH}"

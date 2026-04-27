@@ -1,22 +1,36 @@
 name: Build Oz triage image
 description: >-
-  Build the Oz triage Docker image from this repository's checked-in Dockerfile
-  without checking out the workflow repository separately.
+  Check out warpdotdev/oz-for-oss at a pinned workflow ref and build the Oz
+  triage Docker image so that the image stays tied to the same immutable
+  revision as the calling workflow.
 inputs:
   image-name:
     description: Local Docker image name to build.
     required: false
     default: oz-for-oss-triage
+  workflow-ref:
+    description: >-
+      Git ref (SHA) of warpdotdev/oz-for-oss from which to source the
+      Dockerfile and build context. Pass ${{ github.workflow_sha }} from the
+      calling reusable workflow so that the image stays pinned to the same
+      immutable revision as the workflow file.
+    required: true
 runs:
   using: composite
   steps:
+    - name: Checkout oz-for-oss at workflow ref
+      uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      with:
+        repository: warpdotdev/oz-for-oss
+        ref: ${{ inputs.workflow-ref }}
+        path: __oz_shared
     - name: Build triage Docker image
       shell: bash
       env:
         TRIAGE_IMAGE_NAME: ${{ inputs.image-name }}
       run: |
         set -euo pipefail
-        repo_root="${GITHUB_ACTION_PATH}/../../.."
+        repo_root="${GITHUB_WORKSPACE}/__oz_shared"
         docker build \
           -f "${repo_root}/docker/triage/Dockerfile" \
           -t "${TRIAGE_IMAGE_NAME}" \

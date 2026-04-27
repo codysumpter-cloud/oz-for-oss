@@ -47,6 +47,7 @@ jobs:
         uses: warpdotdev/oz-for-oss/.github/actions/run-oz-python-script@main # main
         with:
           script-path: enforce_pr_issue_state.py
+          workflow-ref: ${{ github.workflow_sha }}
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           GH_APP_SLUG: ${{ steps.app_token.outputs.app-slug }}

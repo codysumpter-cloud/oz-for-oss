@@ -89,10 +89,12 @@ jobs:
         uses: warpdotdev/oz-for-oss/.github/actions/build-triage-image@main # main
         with:
           image-name: ${{ env.TRIAGE_IMAGE }}
+          workflow-ref: ${{ github.workflow_sha }}
       - name: Run inline issue response workflow
         uses: warpdotdev/oz-for-oss/.github/actions/run-oz-python-script@main # main
         with:
           script-path: respond_to_triaged_issue_comment.py
+          workflow-ref: ${{ github.workflow_sha }}
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           GH_APP_SLUG: ${{ steps.app_token.outputs.app-slug }}

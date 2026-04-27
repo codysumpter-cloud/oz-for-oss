@@ -32,6 +32,7 @@ jobs:
         uses: warpdotdev/oz-for-oss/.github/actions/run-oz-python-script@main # main
         with:
           script-path: trigger_implementation_on_plan_approved.py
+          workflow-ref: ${{ github.workflow_sha }}
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           WARP_API_KEY: ${{ secrets.WARP_API_KEY }}

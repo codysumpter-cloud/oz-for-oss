@@ -34,6 +34,7 @@ jobs:
         uses: warpdotdev/oz-for-oss/.github/actions/run-oz-python-script@main # main
         with:
           script-path: update_pr_review.py
+          workflow-ref: ${{ github.workflow_sha }}
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           LOOKBACK_DAYS: ${{ inputs.lookback_days || '7' }}

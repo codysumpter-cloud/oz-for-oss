@@ -118,6 +118,7 @@ jobs:
         uses: warpdotdev/oz-for-oss/.github/actions/run-oz-python-script@main # main
         with:
           script-path: create_spec_from_issue.py
+          workflow-ref: ${{ github.workflow_sha }}
         env:
           ISSUE_NUMBER: ${{ inputs.issue_number || '' }}
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
