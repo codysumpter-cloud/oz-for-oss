@@ -79,6 +79,27 @@ class DiscoverVerificationSkillsTest(unittest.TestCase):
 
             self.assertEqual([skill.name for skill in skills], ["verify-api"])
 
+    def test_ignores_top_level_verification_flag_without_metadata(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            self._write_skill(
+                repo_root,
+                "verify-ui",
+                (
+                    "---\n"
+                    "name: verify-ui\n"
+                    "description: UI verification\n"
+                    "verification: true\n"
+                    "---\n"
+                    "\n"
+                    "# verify-ui\n"
+                ),
+            )
+
+            skills = discover_verification_skills(repo_root)
+
+            self.assertEqual(skills, [])
+
     def test_ignores_invalid_frontmatter(self) -> None:
         with TemporaryDirectory() as temp_dir:
             repo_root = Path(temp_dir)
