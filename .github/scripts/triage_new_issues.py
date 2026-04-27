@@ -23,7 +23,6 @@ from oz_workflows.helpers import (
     format_triage_session_line,
     format_triage_start_line,
     get_label_name,
-    get_login,
     format_issue_comments_for_prompt,
     is_automation_user,
     issue_has_prior_triage,
@@ -448,6 +447,8 @@ def build_triage_prompt(
         - If the report is underspecified, say so directly and use `needs-info` plus `repro:unknown` when justified.
         - When ambiguity remains, include a `follow_up_questions` array with up to 5 short, issue-specific questions for the original reporter. Before including any question, first attempt to answer it yourself through code inspection, documentation lookup, or web search. Only ask questions that you genuinely cannot resolve and that only the reporter would know — subjective intent, environment details personal to the reporter, or decisions requiring human judgment. Do not ask about externally verifiable technical facts. Do not ask for information that is already present, and do not use generic placeholders.
         - When the triage surfaces concise, reporter-facing findings worth sharing immediately — for example that the behavior appears fixed in a newer release, that a specific setting or workaround may help, or that the issue looks limited to a particular environment based on the current code — include them in the `statements` string. Keep it to 1-3 short sentences or markdown bullet items, and leave it empty when there are no high-confidence findings worth surfacing above the fold.
+        - Keep `statements` understandable to the reporter. Do not include repository file paths, internal code references, stack traces, or other maintainer-facing implementation details there; put that material in `issue_body` instead.
+        - When `statements` references another issue, use plain `#NNN` text so GitHub auto-links it. Do not wrap issue references in backticks.
         - Use `statements` for agent conclusions that inform the reporter. Use `follow_up_questions` only for information the reporter alone can provide. Do not duplicate the same content across both.
         - If `duplicate_of` is non-empty, leave `statements` empty so the duplicate section remains the only above-the-fold guidance.
         - `statements` does not replace `issue_body`. Continue using `issue_body` for the full maintainer-facing markdown summary.
@@ -699,12 +700,8 @@ def build_question_reasoning_section(questions: list[dict[str, str]]) -> str:
 
 def build_statements_section(issue: Any, statements: str) -> str:
     """Build the reporter-facing statements section for the progress comment."""
-    reporter_login = get_login(get_field(issue, "user")).strip()
     lines: list[str] = []
-    if reporter_login:
-        lines.append(f"@{reporter_login} — here's what I found while triaging this issue:")
-    else:
-        lines.append("Here's what I found while triaging this issue:")
+    lines.append("Here's what I found while triaging this issue:")
     lines.append("")
     lines.append(statements)
     return "\n".join(lines)
@@ -717,12 +714,8 @@ def build_follow_up_section(issue: Any, questions: list[dict[str, str]]) -> str:
     Only the question text is rendered here; reasoning is handled
     separately by ``build_question_reasoning_section`` for the maintainer section.
     """
-    reporter_login = get_login(get_field(issue, "user")).strip()
     lines: list[str] = []
-    if reporter_login:
-        lines.append(f"@{reporter_login} — I have a few follow-up questions before I can narrow this down:")
-    else:
-        lines.append("I have a few follow-up questions before I can narrow this down:")
+    lines.append("I have a few follow-up questions before I can narrow this down:")
     lines.append("")
     lines.extend(f"{i}. {q['question']}" for i, q in enumerate(questions, start=1))
     lines.append("")
@@ -736,12 +729,8 @@ def build_follow_up_section(issue: Any, questions: list[dict[str, str]]) -> str:
 
 def build_duplicate_section(issue: Any, duplicates: list[dict[str, Any]]) -> str:
     """Build the duplicate detection section for embedding in the progress comment."""
-    reporter_login = get_login(get_field(issue, "user")).strip()
     lines: list[str] = []
-    if reporter_login:
-        lines.append(f"@{reporter_login} — this issue appears to overlap with existing issues:")
-    else:
-        lines.append("This issue appears to overlap with existing issues:")
+    lines.append("This issue appears to overlap with existing issues:")
     lines.append("")
     for dup in duplicates:
         num = dup["issue_number"]

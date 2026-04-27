@@ -10,6 +10,7 @@ from triage_new_issues import (
     _lowercase_first,
     _record_triage_session_link,
     apply_triage_result,
+    build_triage_prompt,
     build_duplicate_section,
     build_follow_up_section,
     build_question_reasoning_section,
@@ -682,21 +683,20 @@ class FormatTriageSessionLinkTest(unittest.TestCase):
 
 
 class BuildFollowUpSectionTest(unittest.TestCase):
-    def test_includes_reporter_mention_and_questions(self) -> None:
+    def test_includes_questions_without_reporter_mention(self) -> None:
         issue = {"number": 42, "user": {"login": "alice"}}
         questions = [
             {"question": "What OS?", "reasoning": "Platform-sensitive"},
             {"question": "What version?", "reasoning": ""},
         ]
         section = build_follow_up_section(issue, questions)
-        self.assertIn("@alice", section)
+        self.assertNotIn("@alice", section)
         self.assertIn("1. What OS?", section)
         self.assertIn("2. What version?", section)
         self.assertIn("follow-up questions", section)
         self.assertIn("Reply in-thread", section)
         # Reasoning should NOT be in the above-the-fold section
         self.assertNotIn("Platform-sensitive", section)
-
     def test_omits_reporter_when_missing(self) -> None:
         issue = {"number": 42, "user": {"login": ""}}
         questions = [{"question": "What OS?", "reasoning": ""}]
@@ -706,7 +706,7 @@ class BuildFollowUpSectionTest(unittest.TestCase):
 
 
 class BuildStatementsSectionTest(unittest.TestCase):
-    def test_includes_reporter_mention_and_preserves_markdown(self) -> None:
+    def test_preserves_markdown_without_reporter_mention(self) -> None:
         issue = {"number": 42, "user": {"login": "alice"}}
         statements = (
             "This may already be fixed in newer Warp releases.\n\n"
@@ -714,12 +714,11 @@ class BuildStatementsSectionTest(unittest.TestCase):
             "- The current code suggests this is limited to SSH-backed sessions."
         )
         section = build_statements_section(issue, statements)
-        self.assertIn("@alice", section)
-        self.assertIn("here's what I found while triaging this issue", section)
+        self.assertNotIn("@alice", section)
+        self.assertIn("Here's what I found while triaging this issue", section)
         self.assertIn("This may already be fixed in newer Warp releases.", section)
         self.assertIn("`feature.flag`", section)
         self.assertIn("SSH-backed sessions", section)
-
     def test_omits_reporter_when_missing(self) -> None:
         issue = {"number": 42, "user": {"login": ""}}
         section = build_statements_section(issue, "Check the `feature.flag` setting.")
@@ -729,14 +728,14 @@ class BuildStatementsSectionTest(unittest.TestCase):
 
 
 class BuildDuplicateSectionTest(unittest.TestCase):
-    def test_includes_issue_links(self) -> None:
+    def test_includes_issue_links_without_reporter_mention(self) -> None:
         issue = {"number": 42, "user": {"login": "alice"}}
         duplicates = [
             {"issue_number": 10, "title": "Original bug", "similarity_reason": "Same error"},
             {"issue_number": 20, "title": "Another", "similarity_reason": ""},
         ]
         section = build_duplicate_section(issue, duplicates)
-        self.assertIn("@alice", section)
+        self.assertNotIn("@alice", section)
         self.assertIn("#10", section)
         self.assertIn("Original bug", section)
         self.assertIn("#20", section)
@@ -753,6 +752,37 @@ class BuildDuplicateSectionTest(unittest.TestCase):
         section = build_duplicate_section(issue, duplicates)
         self.assertNotIn("@", section)
         self.assertIn("#5", section)
+
+
+class BuildTriagePromptTest(unittest.TestCase):
+    def test_statements_prompt_forbids_maintainer_details_and_code_ticked_issue_refs(self) -> None:
+        prompt = build_triage_prompt(
+            owner="warpdotdev",
+            repo="oz-for-oss",
+            issue_number=378,
+            issue_title="Formatting issue",
+            issue_labels=["bug"],
+            issue_assignees=["oz-agent"],
+            issue_created_at="2026-04-27T00:00:00Z",
+            current_body="Body",
+            original_report="Original report",
+            comments_text="- none",
+            triggering_comment_text="- none",
+            triage_config={"labels": {}},
+            stakeholders_text="No stakeholders configured.",
+            template_context={},
+            recent_issues_text="No recent issues.",
+            host_workspace=Path("/workspace/oz-for-oss"),
+        )
+
+        self.assertIn(
+            "Do not include repository file paths, internal code references, stack traces, or other maintainer-facing implementation details there; put that material in `issue_body` instead.",
+            prompt,
+        )
+        self.assertIn(
+            "When `statements` references another issue, use plain `#NNN` text so GitHub auto-links it. Do not wrap issue references in backticks.",
+            prompt,
+        )
 
 
 class CleanupLegacyTriageCommentsTest(unittest.TestCase):
@@ -1042,11 +1072,11 @@ class MutualExclusivityTest(unittest.TestCase):
         }
         body = self._build_comment_parts(result, issue)
 
-        self.assertIn("here's what I found while triaging this issue", body)
+        self.assertIn("Here's what I found while triaging this issue", body)
         self.assertIn("follow-up questions", body)
         self.assertIn("This may already be fixed in newer Warp releases.", body)
         self.assertLess(
-            body.index("here's what I found while triaging this issue"),
+            body.index("Here's what I found while triaging this issue"),
             body.index("follow-up questions"),
         )
         self.assertNotIn("I've completed the triage of this issue.", body)
@@ -1064,7 +1094,7 @@ class MutualExclusivityTest(unittest.TestCase):
         }
         body = self._build_comment_parts(result, issue)
 
-        self.assertIn("here's what I found while triaging this issue", body)
+        self.assertIn("Here's what I found while triaging this issue", body)
         self.assertIn("This may already be fixed in newer Warp releases.", body)
         self.assertNotIn("follow-up questions", body)
         self.assertNotIn("overlap with existing issues", body)
@@ -1087,7 +1117,7 @@ class MutualExclusivityTest(unittest.TestCase):
         body = self._build_comment_parts(result, issue)
 
         self.assertIn("overlap with existing issues", body)
-        self.assertNotIn("here's what I found while triaging this issue", body)
+        self.assertNotIn("Here's what I found while triaging this issue", body)
         self.assertNotIn("This may already be fixed in newer Warp releases.", body)
         self.assertNotIn("follow-up questions", body)
 
