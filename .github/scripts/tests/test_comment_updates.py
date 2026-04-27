@@ -789,7 +789,7 @@ class ReportErrorTest(unittest.TestCase):
                     self._clear_workflow_env()
 
     def test_report_error_uses_cached_requester_without_api_lookup(self) -> None:
-        # Simulate the bug's trigger: no requester_login provided at
+        # Regression test for issue #375: no requester_login provided at
         # construction (so resolve_progress_requester_login would normally
         # fall back to resolve_oz_assigner_login/_list_issue_events) and
         # the underlying GitHub API refuses issue-events lookups. The
