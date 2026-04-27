@@ -2,10 +2,11 @@
 #
 # The review workflow keeps GitHub mutations in the host-side Python driver but
 # runs the Oz reviewer itself inside a locally-built container for dependency
-# isolation and reproducibility. Unlike triage, the reviewer needs a writable
-# repository mount so it can check out the PR head, generate `pr_diff.txt`,
-# materialize `spec_context.md`, and write transient review artifacts before
-# copying the final `review.json` to `/mnt/output`.
+# isolation and reproducibility. GitHub-backed context gathering stays on the
+# host: the workflow checks out the PR head, prepares `pr_description.txt`,
+# `pr_diff.txt`, and optional `spec_context.md`, then mounts the repository
+# read-only so the container can review source plus repo-local companion
+# skills without receiving `GH_TOKEN`.
 
 FROM warpdotdev/warp-agent:latest
 
