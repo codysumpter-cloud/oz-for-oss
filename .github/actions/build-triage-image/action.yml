@@ -1,0 +1,23 @@
+name: Build Oz triage image
+description: >-
+  Build the Oz triage Docker image from this repository's checked-in Dockerfile
+  without checking out the workflow repository separately.
+inputs:
+  image-name:
+    description: Local Docker image name to build.
+    required: false
+    default: oz-for-oss-triage
+runs:
+  using: composite
+  steps:
+    - name: Build triage Docker image
+      shell: bash
+      env:
+        TRIAGE_IMAGE_NAME: ${{ inputs.image-name }}
+      run: |
+        set -euo pipefail
+        repo_root="${GITHUB_ACTION_PATH}/../../.."
+        docker build \
+          -f "${repo_root}/docker/triage/Dockerfile" \
+          -t "${TRIAGE_IMAGE_NAME}" \
+          "${repo_root}"

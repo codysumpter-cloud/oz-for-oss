@@ -1,0 +1,29 @@
+name: Run Oz Python workflow script
+description: >-
+  Install the shared Oz workflow Python dependencies and run a script from
+  .github/scripts without checking out this repository separately.
+inputs:
+  script-path:
+    description: Path to the Python entrypoint relative to .github/scripts.
+    required: true
+outputs:
+  allow_review:
+    description: Optional pass-through output for scripts that set allow_review.
+    value: ${{ steps.run-script.outputs.allow_review }}
+runs:
+  using: composite
+  steps:
+    - name: Set up Oz Python environment
+      uses: warpdotdev/oz-for-oss/.github/actions/setup-oz-python@main # main
+      with:
+        requirements-path: ${{ github.action_path }}/../../scripts/requirements.txt
+    - name: Run Oz Python workflow script
+      id: run-script
+      shell: bash
+      env:
+        OZ_SCRIPT_PATH: ${{ inputs.script-path }}
+      run: |
+        set -euo pipefail
+        script_root="${GITHUB_ACTION_PATH}/../../scripts"
+        export PYTHONPATH="${script_root}${PYTHONPATH:+:${PYTHONPATH}}"
+        python "${script_root}/${OZ_SCRIPT_PATH}"
