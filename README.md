@@ -71,7 +71,7 @@ Each adapter is deliberately thin — it defines the GitHub event triggers and c
 
 Repositories can commit `.github/oz/config.yml` to make workflow-level defaults visible and reviewable in source control. Oz resolves that file from the consuming repository first; if it is absent there, the workflows fall back to the bundled `.github/oz/config.yml` shipped with `oz-for-oss`. Discovery stops at the first existing file — the two locations are not merged.
 
-Supported settings currently live under `self_improvement` and `workflow_comments`:
+Supported settings currently live under `self_improvement`, `triage`, and `workflow_comments`:
 
 ```yaml
 version: 1
@@ -80,6 +80,9 @@ self_improvement:
     - octocat
     - repo-maintainer
   base_branch: auto
+triage:
+  prior_triage_labels:
+    - triaged
 workflow_comments:
   shared:
     next_steps_section: |
@@ -91,6 +94,7 @@ workflow_comments:
 
 - `self_improvement.reviewers` — optional list of GitHub handles. Set `[]` to disable automatic reviewer requests.
 - `self_improvement.base_branch` — optional branch name, or `auto` to detect the repository default branch from git metadata.
+- `triage.prior_triage_labels` — optional list of labels that should count as evidence that Oz has already triaged an issue. Defaults to `["triaged"]`.
 - `SELF_IMPROVEMENT_REVIEWERS` and `SELF_IMPROVEMENT_BASE_BRANCH` remain high-precedence overrides for one-off runs.
 - Provide reviewer handles without the `@` prefix in both `.github/oz/config.yml` and `SELF_IMPROVEMENT_REVIEWERS`.
 - `workflow_comments` — optional mapping of deterministic workflow-owned comment text. Templates are keyed by workflow namespace (for example `shared`, `triage-new-issues`, or `enforce-pr-issue-state`) and then by a supported template key within that namespace.

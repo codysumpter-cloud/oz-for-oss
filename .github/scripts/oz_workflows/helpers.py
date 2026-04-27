@@ -6,6 +6,7 @@ import re
 import urllib.parse
 import uuid
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ from . import actions
 from .artifacts import ResolvedReviewComment
 from .comment_templates import render_comment_template
 from .env import optional_env, workspace
+from .workflow_config import load_triage_workflow_config
 
 logger = logging.getLogger(__name__)
 
@@ -366,16 +368,11 @@ def build_comment_body(content: str, metadata: str) -> str:
 _PROGRESS_LINK_MARKERS = ("/session/", "/conversation/")
 
 
-# Labels that signal that a prior triage pass has already been performed on
-# this issue. The triage flow attaches ``triaged`` at the end of every
-# completed pass, so its presence is the authoritative signal that Oz has
-# already triaged this issue and the next run is a re-triage (for example
-# because the reporter replied to follow-up questions, the issue body was
-# edited, or a maintainer manually re-triggered triage). Other labels such
-# as ``bug``/``enhancement``/``documentation`` are routinely applied by
-# reporters or maintainers before any triage pass and therefore cannot be
-# treated as prior-triage evidence.
-_PRIOR_TRIAGE_LABELS: frozenset[str] = frozenset({"triaged"})
+@lru_cache(maxsize=None)
+def _configured_prior_triage_labels(workspace_root: str) -> frozenset[str]:
+    return load_triage_workflow_config(
+        Path(workspace_root)
+    ).prior_triage_labels
 
 
 def issue_has_prior_triage(labels: list[Any]) -> bool:
@@ -389,8 +386,9 @@ def issue_has_prior_triage(labels: list[Any]) -> bool:
     are commonly applied before any triage run and would otherwise cause
     the first triage pass to be misreported as a re-triage.
     """
+    configured_labels = _configured_prior_triage_labels(str(workspace().resolve()))
     for label in labels or []:
-        if get_label_name(label).lower() in _PRIOR_TRIAGE_LABELS:
+        if get_label_name(label).lower() in configured_labels:
             return True
     return False
 

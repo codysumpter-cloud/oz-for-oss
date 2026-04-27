@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import unittest
 
-from create_spec_from_issue import build_create_spec_prompt
+from create_spec_from_issue import (
+    build_create_spec_prompt,
+    ensure_spec_pr_issue_reference,
+)
 
 
 class BuildCreateSpecPromptTest(unittest.TestCase):
@@ -58,3 +61,62 @@ class BuildCreateSpecPromptTest(unittest.TestCase):
             "The outer workflow owns pull-request creation or refresh",
             prompt,
         )
+
+    def test_requires_non_closing_issue_reference_in_pr_summary(self) -> None:
+        prompt = build_create_spec_prompt(
+            owner="owner",
+            repo="repo",
+            issue_number=362,
+            issue_title="Link spec PRs back to the issue",
+            issue_labels=["enhancement", "ready-to-spec"],
+            issue_assignees=["oz-agent"],
+            issue_body="describe the desired behavior",
+            comments_text="- maintainer: include the issue reference",
+            triggering_comment_text="- None",
+            default_branch="main",
+            branch_name="oz-agent/spec-issue-362",
+            spec_driven_implementation_skill_path=".agents/skills/spec-driven-implementation/SKILL.md",
+            write_product_spec_skill_path=".agents/skills/write-product-spec/SKILL.md",
+            create_product_spec_skill_path=".agents/skills/create-product-spec/SKILL.md",
+            write_tech_spec_skill_path=".agents/skills/write-tech-spec/SKILL.md",
+            create_tech_spec_skill_path=".agents/skills/create-tech-spec/SKILL.md",
+            coauthor_directives="",
+        )
+        self.assertIn("Related issue: #362", prompt)
+        self.assertIn(
+            "Do not use closing keywords like `Closes` or `Fixes`",
+            prompt,
+        )
+
+
+class EnsureSpecPrIssueReferenceTest(unittest.TestCase):
+    def test_prepends_related_issue_line_when_missing(self) -> None:
+        self.assertEqual(
+            ensure_spec_pr_issue_reference(
+                "## Summary\n- Added product and tech specs",
+                362,
+            ),
+            "Related issue: #362\n\n## Summary\n- Added product and tech specs",
+        )
+
+    def test_preserves_existing_related_issue_line(self) -> None:
+        self.assertEqual(
+            ensure_spec_pr_issue_reference(
+                "Related issue: #362\n\n## Summary\n- Added specs",
+                362,
+            ),
+            "Related issue: #362\n\n## Summary\n- Added specs",
+        )
+
+    def test_rewrites_closing_keyword_for_same_issue(self) -> None:
+        self.assertEqual(
+            ensure_spec_pr_issue_reference(
+                "Closes #362\n\n## Summary\n- Added specs",
+                362,
+            ),
+            "Related issue: #362\n\n## Summary\n- Added specs",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

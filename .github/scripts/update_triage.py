@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from textwrap import dedent
+from oz_workflows.artifacts import load_pr_metadata_artifact
 
 from oz_workflows.env import optional_env, repo_parts, workspace
 from oz_workflows.oz_client import build_agent_config, run_agent
@@ -35,6 +36,11 @@ def main() -> None:
         - Do NOT edit the core skill at `.agents/skills/triage-issue/SKILL.md`. It is the cross-repo contract and is read-only from this loop.
         - Do NOT edit any file under `.github/scripts/`. The prompt-construction layer is also read-only from this loop.
         - The allowed write surface is strictly `.agents/skills/triage-issue-local/` and `.github/issue-triage/`.
+        - If you produce changes, write `pr-metadata.json` at the repository root containing a JSON object with these required fields:
+          - `branch_name`: the branch you committed to (use `{UPDATE_BRANCH}` exactly).
+          - `pr_title`: a conventional-commit-style PR title derived from the actual updates.
+          - `pr_summary`: the full markdown PR body summarizing the evidence-backed companion/config changes.
+        - After writing `pr-metadata.json`, upload it as an artifact via `oz artifact upload pr-metadata.json` (or `oz-preview artifact upload pr-metadata.json` if the `oz` CLI is not available). The subcommand is `artifact` (singular) on both CLIs; do not use `artifacts`.
         - If you produce changes, commit them to a local branch named `{UPDATE_BRANCH}` but do NOT push the branch yourself. The Python entrypoint will run a write-surface guard and push only when the guard passes.
         - If no companion update is warranted based on the feedback, do not create a commit. Leave the working tree clean.
         """
@@ -44,26 +50,29 @@ def main() -> None:
         config_name="update-triage",
         workspace=workspace(),
     )
-    run_agent(
+    run = run_agent(
         prompt=prompt,
         skill_name="update-triage",
         title="Update triage companion skill from maintainer feedback",
         config=config,
     )
 
+    pr_title = "chore: update triage companion skill from maintainer feedback"
+    pr_body = (
+        "Automated update from the `update-triage` self-improvement loop.\n\n"
+        "This PR proposes evidence-backed edits to "
+        "`.agents/skills/triage-issue-local/SKILL.md` "
+        "(and, when warranted, `.github/issue-triage/config.json`) "
+        "based on recent maintainer signals on triaged issues."
+    )
     maybe_push_update_branch(
         workspace(),
         UPDATE_BRANCH,
         allowed_prefixes=list(ALLOWED_PREFIXES),
         loop_name="update-triage",
-        pr_title="chore: update triage companion skill from maintainer feedback",
-        pr_body=(
-            "Automated update from the `update-triage` self-improvement loop.\n\n"
-            "This PR proposes evidence-backed edits to "
-            "`.agents/skills/triage-issue-local/SKILL.md` "
-            "(and, when warranted, `.github/issue-triage/config.json`) "
-            "based on recent maintainer signals on triaged issues."
-        ),
+        pr_title=pr_title,
+        pr_body=pr_body,
+        metadata_supplier=lambda: load_pr_metadata_artifact(run.run_id),
     )
 
 
