@@ -36,6 +36,11 @@ class ResolveSpecContextScriptTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.module = _load_module()
+    def test_manual_linked_issues_query_has_balanced_braces(self) -> None:
+        self.assertEqual(
+            self.module._MANUAL_LINKED_ISSUES_QUERY.count("{"),
+            self.module._MANUAL_LINKED_ISSUES_QUERY.count("}"),
+        )
 
     def test_prints_no_context_message_when_nothing_matches(self) -> None:
         stdout = io.StringIO()

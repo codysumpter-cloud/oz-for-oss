@@ -5,6 +5,7 @@ import unittest
 from types import SimpleNamespace
 
 from oz_workflows.helpers import (
+    _MANUAL_LINKED_ISSUES_QUERY,
     _summarize_commits,
     all_review_comments_text,
     build_next_steps_section,
@@ -33,6 +34,13 @@ class BuildSpecPreviewSectionTest(unittest.TestCase):
         self.assertIn("Preview generated specs:", result)
         self.assertIn("[specs/GH20/product.md](https://github.com/warpdotdev/oz-oss-testbed/blob/oz-agent/spec-issue-20/specs/GH20/product.md)", result)
         self.assertIn("[specs/GH20/tech.md](https://github.com/warpdotdev/oz-oss-testbed/blob/oz-agent/spec-issue-20/specs/GH20/tech.md)", result)
+
+class GraphQLQueryShapeTest(unittest.TestCase):
+    def test_manual_linked_issues_query_has_balanced_braces(self) -> None:
+        self.assertEqual(
+            _MANUAL_LINKED_ISSUES_QUERY.count("{"),
+            _MANUAL_LINKED_ISSUES_QUERY.count("}"),
+        )
 
 
 class BuildNextStepsSectionTest(unittest.TestCase):
