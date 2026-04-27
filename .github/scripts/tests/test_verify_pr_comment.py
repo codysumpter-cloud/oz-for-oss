@@ -13,7 +13,6 @@ class BuildVerificationPromptTest(unittest.TestCase):
             owner="acme",
             repo="widgets",
             pr_number=42,
-            pr_title="feat: add verification",
             base_branch="main",
             head_branch="feature/verify",
             trigger_comment_id=1001,
@@ -21,6 +20,8 @@ class BuildVerificationPromptTest(unittest.TestCase):
             verification_skills_text="- `verify-ui` at `.agents/skills/verify-ui/SKILL.md`",
         )
         self.assertIn("Run pull request verification for pull request #42", prompt)
+        self.assertNotIn("feat: add verification", prompt)
+        self.assertNotIn("- Title:", prompt)
         self.assertIn("`verify-ui` at `.agents/skills/verify-ui/SKILL.md`", prompt)
         self.assertIn('"overall_status": "passed" | "failed" | "mixed"', prompt)
         self.assertIn("verification_report.json", prompt)

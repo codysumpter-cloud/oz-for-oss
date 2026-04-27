@@ -118,7 +118,12 @@ def format_verification_skills_for_prompt(
 
 
 def _artifact_field(value: Any, name: str, default: str = "") -> str:
-    result = getattr(value, name, default)
+    if value is None:
+        return default
+    if isinstance(value, dict):
+        result = value.get(name, default)
+    else:
+        result = getattr(value, name, default)
     if result is None:
         return default
     return str(result)
@@ -129,7 +134,7 @@ def list_downloadable_verification_artifacts(
     *,
     exclude_filenames: set[str] | None = None,
 ) -> list[VerificationArtifact]:
-    client = build_oz_client()
+    client = None
     excluded = {name for name in (exclude_filenames or set()) if name}
     collected: list[VerificationArtifact] = []
     seen: set[tuple[str, str, str]] = set()
@@ -138,19 +143,26 @@ def list_downloadable_verification_artifacts(
         if artifact_type in {"PLAN", "PULL_REQUEST"}:
             continue
         data = getattr(artifact, "data", None)
-        filename = _artifact_field(data, "filename")
+        filename = _artifact_field(data, "filename").strip()
         if filename and filename in excluded:
             continue
-        artifact_uid = _artifact_field(data, "artifact_uid")
-        if not artifact_uid:
-            continue
-        response = client.agent.get_artifact(artifact_uid)
-        response_type = _artifact_field(response, "artifact_type", artifact_type).upper()
-        response_data = getattr(response, "data", None)
-        download_url = _artifact_field(response_data, "download_url")
+        artifact_uid = _artifact_field(data, "artifact_uid").strip()
+        response_type = artifact_type
+        response_data = data
+        download_url = _artifact_field(response_data, "download_url").strip()
+        if artifact_uid and not download_url:
+            if client is None:
+                client = build_oz_client()
+            try:
+                response = client.agent.get_artifact(artifact_uid)
+            except Exception:
+                continue
+            response_type = _artifact_field(response, "artifact_type", artifact_type).upper()
+            response_data = getattr(response, "data", None)
+            download_url = _artifact_field(response_data, "download_url").strip()
         if not download_url:
             continue
-        content_type = _artifact_field(response_data, "content_type")
+        content_type = _artifact_field(response_data, "content_type").strip()
         description = _artifact_field(response_data, "description").strip()
         response_filename = _artifact_field(response_data, "filename").strip()
         title = response_filename or filename or description or artifact_type.title()

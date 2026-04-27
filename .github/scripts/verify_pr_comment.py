@@ -33,7 +33,6 @@ def build_verification_prompt(
     owner: str,
     repo: str,
     pr_number: int,
-    pr_title: str,
     base_branch: str,
     head_branch: str,
     trigger_comment_id: int,
@@ -45,7 +44,6 @@ def build_verification_prompt(
         Run pull request verification for pull request #{pr_number} in repository {owner}/{repo}.
 
         Pull Request Metadata:
-        - Title: {pr_title}
         - Base branch: {base_branch}
         - Head branch: {head_branch}
         - Triggered by: PR conversation comment id={trigger_comment_id} from @{requester or 'unknown'}
@@ -140,7 +138,6 @@ def main() -> None:
             owner=owner,
             repo=repo,
             pr_number=pr_number,
-            pr_title=str(pr.title or ""),
             base_branch=str(pr.base.ref),
             head_branch=str(pr.head.ref),
             trigger_comment_id=trigger_comment_id,

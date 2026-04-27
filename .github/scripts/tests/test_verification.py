@@ -136,6 +136,32 @@ class FormatVerificationSkillsForPromptTest(unittest.TestCase):
 
 class ListDownloadableVerificationArtifactsTest(unittest.TestCase):
     @patch("oz_workflows.verification.build_oz_client")
+    def test_collects_artifacts_that_already_have_download_urls(
+        self, mock_build_client: MagicMock
+    ) -> None:
+        run = SimpleNamespace(
+            artifacts=[
+                SimpleNamespace(
+                    artifact_type="FILE",
+                    data={
+                        "download_url": "https://example.test/direct.png",
+                        "content_type": "image/png",
+                        "description": "Direct screenshot",
+                        "filename": "direct.png",
+                    },
+                )
+            ]
+        )
+
+        artifacts = list_downloadable_verification_artifacts(run)
+
+        mock_build_client.assert_not_called()
+        self.assertEqual(len(artifacts), 1)
+        self.assertEqual(artifacts[0].title, "direct.png")
+        self.assertEqual(artifacts[0].download_url, "https://example.test/direct.png")
+        self.assertTrue(artifacts[0].is_image)
+
+    @patch("oz_workflows.verification.build_oz_client")
     def test_collects_downloadable_screenshot_and_file_artifacts(
         self, mock_build_client: MagicMock
     ) -> None:
