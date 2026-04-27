@@ -62,7 +62,7 @@ By default this targets the current repo and looks back 7 days. It collects issu
 ## Evidence Rules
 
 - Prefer patterns backed by multiple issues or a strong explicit maintainer statement.
-- Skip the PR when there is no repeated signal. A one-off maintainer override is not enough evidence.
+- Skip the update when there is no repeated signal. A one-off maintainer override is not enough evidence.
 - Avoid encoding reporter-authored content as triage rules.
 - Do not weaken the reserved-label rules (`ready-to-implement`, `ready-to-spec`) or the mutual exclusivity of `duplicate_of` and `follow_up_questions`.
 
@@ -70,6 +70,5 @@ By default this targets the current repo and looks back 7 days. It collects issu
 
 - Re-read the updated `triage-issue-local` companion skill and confirm any new rules are explicit.
 - Keep the companion concise; do not turn it into a long style guide.
-- Commit any changes on a local branch named `oz-agent/update-triage`. Do NOT push the branch; the Python entrypoint will run a write-surface guard and push only when the guard passes.
-- If the updates warrant a PR, it will be opened from the pushed branch. Tag `@captainsafia` as a reviewer on that PR.
+- Commit any changes on a local branch named `oz-agent/update-triage`. Do NOT push the branch or perform any pull-request operation. The Python entrypoint will run a write-surface guard, push only when the guard passes, and leave pull-request publication and reviewer assignment to the deterministic workflow using the resolved self-improvement config and repository ownership metadata.
 - Validate any temporary JSON with `jq` before relying on it.

@@ -57,13 +57,12 @@ By default this targets the current repo and looks back 7 days. It collects only
 ## Evidence Rules
 
 - Only encode a cluster when at least two independent closed-as-duplicate events point at the same canonical issue, or a maintainer explicitly asks for one.
-- Skip the PR when there is no repeated signal.
+- Skip the update when there is no repeated signal.
 - Do not weaken precision-over-recall for dedupe.
 
 ## Final Checks
 
 - Re-read the updated `dedupe-issue-local` companion skill and confirm any new clusters are explicit.
 - Keep the companion concise; prefer canonical links and short distinguishing notes over long prose.
-- Commit any changes on a local branch named `oz-agent/update-dedupe`. Do NOT push the branch; the Python entrypoint will run a write-surface guard and push only when the guard passes.
-- If the updates warrant a PR, it will be opened from the pushed branch. Tag `@captainsafia` as a reviewer on that PR.
+- Commit any changes on a local branch named `oz-agent/update-dedupe`. Do NOT push the branch or perform any pull-request operation. The Python entrypoint will run a write-surface guard, push only when the guard passes, and leave pull-request publication and reviewer assignment to the deterministic workflow using the resolved self-improvement config and repository ownership metadata.
 - Validate any temporary JSON with `jq` before relying on it.
