@@ -127,12 +127,12 @@ def main() -> None:
             requester_login=requester,
         )
         progress.start(
-            "I'm running `/oz-verify` for this pull request using the repository's verification-tagged skills."
+            "I'm running `/oz-verify` for this pull request using the repository's verification-enabled skills."
         )
 
         if not verification_skills:
             progress.complete(
-                "I couldn't run `/oz-verify` because this repository does not currently expose any skills with `verification: true` under `.agents/skills/`."
+                "I couldn't run `/oz-verify` because this repository does not currently expose any skills with `metadata.verification: true` under `.agents/skills/`."
             )
             return
 

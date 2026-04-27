@@ -65,6 +65,18 @@ def _load_frontmatter(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _frontmatter_metadata_flag(frontmatter: dict[str, Any], flag_name: str) -> bool:
+    metadata = frontmatter.get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    value = metadata.get(flag_name)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() == "true"
+    return False
+
+
 def discover_verification_skills(workspace_root: Path) -> list[VerificationSkill]:
     skills_root = Path(workspace_root) / ".agents" / "skills"
     if not skills_root.is_dir():
@@ -72,7 +84,7 @@ def discover_verification_skills(workspace_root: Path) -> list[VerificationSkill
     discovered: list[VerificationSkill] = []
     for skill_path in sorted(skills_root.glob("*/SKILL.md")):
         frontmatter = _load_frontmatter(skill_path)
-        if frontmatter.get("verification") is not True:
+        if not _frontmatter_metadata_flag(frontmatter, "verification"):
             continue
         name = str(frontmatter.get("name") or skill_path.parent.name).strip()
         if not name:

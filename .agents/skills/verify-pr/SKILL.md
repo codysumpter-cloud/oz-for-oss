@@ -15,7 +15,7 @@ The workflow passes in:
 
 - the pull request metadata and branch names
 - the trusted fetch-script path to read PR body/comments/diff
-- a concrete list of discovered verification skills whose frontmatter declares `verification: true`
+- a concrete list of discovered verification skills whose `metadata` frontmatter field declares `verification: true`
 
 The goal is to:
 

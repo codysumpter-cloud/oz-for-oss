@@ -31,7 +31,8 @@ class DiscoverVerificationSkillsTest(unittest.TestCase):
                     "---\n"
                     "name: verify-ui\n"
                     "description: UI verification\n"
-                    "verification: true\n"
+                    "metadata:\n"
+                    "  verification: true\n"
                     "---\n"
                     "\n"
                     "# verify-ui\n"
@@ -55,6 +56,28 @@ class DiscoverVerificationSkillsTest(unittest.TestCase):
             self.assertEqual(len(skills), 1)
             self.assertEqual(skills[0].name, "verify-ui")
             self.assertEqual(skills[0].description, "UI verification")
+
+    def test_accepts_string_true_in_metadata(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            self._write_skill(
+                repo_root,
+                "verify-api",
+                (
+                    "---\n"
+                    "name: verify-api\n"
+                    "description: API verification\n"
+                    "metadata:\n"
+                    '  verification: "true"\n'
+                    "---\n"
+                    "\n"
+                    "# verify-api\n"
+                ),
+            )
+
+            skills = discover_verification_skills(repo_root)
+
+            self.assertEqual([skill.name for skill in skills], ["verify-api"])
 
     def test_ignores_invalid_frontmatter(self) -> None:
         with TemporaryDirectory() as temp_dir:
