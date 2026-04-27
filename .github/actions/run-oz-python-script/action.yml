@@ -28,10 +28,16 @@ runs:
         repository: warpdotdev/oz-for-oss
         ref: ${{ inputs.workflow-ref }}
         path: __oz_shared
-    - name: Set up Oz Python environment
-      uses: warpdotdev/oz-for-oss/.github/actions/setup-oz-python@main # main
+    - name: Install uv and activate virtual environment
+      uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       with:
-        requirements-path: __oz_shared/.github/scripts/requirements.txt
+        enable-cache: true
+        cache-dependency-glob: __oz_shared/.github/scripts/requirements.txt
+        activate-environment: true
+        python-version: "3.12"
+    - name: Install Python workflow dependencies
+      shell: bash
+      run: uv pip install -r "__oz_shared/.github/scripts/requirements.txt"
     - name: Run Oz Python workflow script
       id: run-script
       shell: bash
