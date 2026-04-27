@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from textwrap import dedent
 from oz_workflows.artifacts import load_pr_metadata_artifact
 
@@ -11,7 +12,7 @@ from oz_workflows.repo_local import (
 )
 
 
-UPDATE_BRANCH = "oz-agent/update-dedupe"
+UPDATE_BRANCH = f"oz-agent/update-dedupe-{datetime.now(UTC).date().isoformat()}"
 ALLOWED_PREFIXES: tuple[str, ...] = (
     ".agents/skills/dedupe-issue-local/",
 )

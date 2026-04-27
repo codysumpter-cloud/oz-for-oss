@@ -95,5 +95,5 @@ Use that temporary data as evidence when refining the skills, then remove it bef
 
 - Re-read the updated `review-pr-local` and/or `review-spec-local` companion skills and confirm any new rules are explicit.
 - Keep each companion concise; do not turn them into long style guides.
-- Commit any changes on a local branch named `oz-agent/update-pr-review`. Do NOT push the branch or perform any pull-request operation. The Python entrypoint will run a write-surface guard, push only when the guard passes, and leave pull-request publication and reviewer assignment to the deterministic workflow using the resolved self-improvement config and repository ownership metadata.
+- Commit any changes on a local branch named `oz-agent/update-pr-review-<YYYY-MM-DD>` using the current UTC date. Do NOT push the branch or perform any pull-request operation. The Python entrypoint will run a write-surface guard, push only when the guard passes, and leave pull-request publication and reviewer assignment to the deterministic workflow using the resolved self-improvement config and repository ownership metadata.
 - Validate any temporary JSON with `jq` before relying on it.

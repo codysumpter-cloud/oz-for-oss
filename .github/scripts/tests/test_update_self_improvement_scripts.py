@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -10,6 +11,12 @@ import update_triage
 
 
 class UpdateScriptsTest(unittest.TestCase):
+    def _assert_update_branch_has_date_suffix(
+        self, module: object, prefix: str
+    ) -> None:
+        branch = getattr(module, "UPDATE_BRANCH")
+        self.assertRegex(branch, rf"^{re.escape(prefix)}-\d{{4}}-\d{{2}}-\d{{2}}$")
+
     def _assert_main_does_not_pass_hardcoded_reviewer(self, module: object) -> None:
         with patch.object(module, "build_agent_config", return_value={}), patch.object(
             module, "run_agent", return_value=SimpleNamespace(run_id="run-123")
@@ -59,6 +66,21 @@ class UpdateScriptsTest(unittest.TestCase):
 
     def test_update_dedupe_relies_on_shared_resolution(self) -> None:
         self._assert_main_does_not_pass_hardcoded_reviewer(update_dedupe)
+
+    def test_update_pr_review_branch_includes_date_suffix(self) -> None:
+        self._assert_update_branch_has_date_suffix(
+            update_pr_review, "oz-agent/update-pr-review"
+        )
+
+    def test_update_triage_branch_includes_date_suffix(self) -> None:
+        self._assert_update_branch_has_date_suffix(
+            update_triage, "oz-agent/update-triage"
+        )
+
+    def test_update_dedupe_branch_includes_date_suffix(self) -> None:
+        self._assert_update_branch_has_date_suffix(
+            update_dedupe, "oz-agent/update-dedupe"
+        )
 
     def test_update_pr_review_uses_uploaded_pr_metadata(self) -> None:
         self._assert_main_passes_pr_metadata(update_pr_review)

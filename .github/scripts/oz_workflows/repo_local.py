@@ -129,11 +129,12 @@ def assert_write_surface(
 
 # Shared push/PR plumbing for the narrowed self-improvement loops.
 #
-# Each ``update-<agent>`` Python entrypoint invokes Oz, which leaves a
-# local commit on ``oz-agent/update-<agent>`` without pushing. The
-# entrypoint then calls :func:`maybe_push_update_branch` to run the
-# write-surface guard, push the branch to ``origin`` only when the guard
-# passes, and open a pull request so a human reviewer is notified.
+# Each ``update-<agent>`` Python entrypoint invokes Oz, which leaves a local
+# commit on a date-stamped ``oz-agent/update-<agent>-<YYYY-MM-DD>`` branch
+# without pushing. The entrypoint then calls
+# :func:`maybe_push_update_branch` to run the write-surface guard, push the
+# branch to ``origin`` only when the guard passes, and open a pull request so
+# a human reviewer is notified.
 
 
 def branch_exists(repo_root: Path, branch: str) -> bool:

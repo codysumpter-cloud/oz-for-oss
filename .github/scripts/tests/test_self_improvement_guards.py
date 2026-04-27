@@ -1,10 +1,11 @@
 """Tests for the write-surface guards on the narrowed self-improvement loops.
 
-Each ``update-<agent>`` entrypoint runs ``assert_write_surface`` against
-the changed files on ``oz-agent/update-<agent>`` before pushing. These
-tests exercise the prefix lists declared in each entrypoint to confirm
-that a simulated diff inside the allowed surface passes and a simulated
-diff that touches a core skill or ``.github/scripts/*`` aborts the run.
+Each ``update-<agent>`` entrypoint runs ``assert_write_surface`` against the
+changed files on a date-stamped ``oz-agent/update-<agent>-<YYYY-MM-DD>``
+branch before pushing. These tests exercise the prefix lists declared in each
+entrypoint to confirm that a simulated diff inside the allowed surface passes
+and a simulated diff that touches a core skill or ``.github/scripts/*`` aborts
+the run.
 """
 
 from __future__ import annotations
