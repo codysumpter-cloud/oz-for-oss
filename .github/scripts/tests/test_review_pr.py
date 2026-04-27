@@ -1,8 +1,10 @@
 from __future__ import annotations
+import sys
 
 import unittest
 from types import SimpleNamespace
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from review_pr import (
@@ -15,6 +17,7 @@ from review_pr import (
     _is_non_member_pr,
     _launch_review_agent,
     _line_content_for_patch,
+    _materialize_spec_context,
     _normalize_review_path,
     _normalize_review_payload,
     _normalize_reviewer_logins,
@@ -125,6 +128,58 @@ class LaunchReviewAgentTest(unittest.TestCase):
             ("WARP_API_KEY", "WARP_API_BASE_URL"),
         )
 
+
+class MaterializeSpecContextTest(unittest.TestCase):
+    def test_uses_bundled_script_with_workspace_repo_root(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            with patch("review_pr.subprocess.run") as run_mock:
+                run_mock.return_value = SimpleNamespace(
+                    stdout="Spec context\n",
+                    stderr="",
+                    returncode=0,
+                )
+
+                _materialize_spec_context(
+                    workspace_path=workspace,
+                    owner="owner",
+                    repo="repo",
+                    pr_number=7,
+                )
+                self.assertEqual(
+                    (workspace / "spec_context.md").read_text(encoding="utf-8"),
+                    "Spec context\n",
+                )
+                command = run_mock.call_args.args[0]
+                kwargs = run_mock.call_args.kwargs
+                self.assertEqual(command[0], sys.executable)
+                self.assertIn(
+                    ".agents/skills/review-pr/scripts/resolve_spec_context.py",
+                    str(command[1]),
+                )
+                self.assertEqual(kwargs["cwd"], str(workspace))
+                self.assertEqual(kwargs["env"]["OZ_REPO_ROOT"], str(workspace))
+                self.assertFalse(str(command[1]).startswith(str(workspace)))
+
+    def test_continues_without_spec_context_when_resolver_fails(self) -> None:
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / "spec_context.md").write_text("stale\n", encoding="utf-8")
+            with patch("review_pr.subprocess.run") as run_mock:
+                run_mock.return_value = SimpleNamespace(
+                    stdout="",
+                    stderr="can't open file",
+                    returncode=2,
+                )
+
+                _materialize_spec_context(
+                    workspace_path=workspace,
+                    owner="owner",
+                    repo="repo",
+                    pr_number=7,
+                )
+
+            self.assertFalse((workspace / "spec_context.md").exists())
 
 class CommentableLinesForPatchTest(unittest.TestCase):
     def test_commentable_lines_table(self) -> None:

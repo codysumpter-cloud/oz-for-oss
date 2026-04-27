@@ -75,6 +75,7 @@ _MANUAL_LINKED_ISSUES_QUERY = (
     " }"
     " }"
     " }"
+    " }"
 )
 
 

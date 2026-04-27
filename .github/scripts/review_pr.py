@@ -1,8 +1,10 @@
 from __future__ import annotations
 from contextlib import closing
 import logging
+import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from textwrap import dedent
 from typing import Any, TypedDict
@@ -48,6 +50,18 @@ _SPEC_CONTEXT_FILENAME = "spec_context.md"
 _NO_SPEC_CONTEXT_MESSAGE = (
     "No approved or repository spec context was found for this PR."
 )
+
+
+def _bundled_spec_context_script() -> Path:
+    """Return the spec-context resolver bundled with this action checkout."""
+    return (
+        Path(__file__).resolve().parents[2]
+        / ".agents"
+        / "skills"
+        / "review-pr"
+        / "scripts"
+        / "resolve_spec_context.py"
+    )
 
 
 class ReviewComment(TypedDict, total=False):
@@ -581,23 +595,56 @@ def _materialize_spec_context(
 ) -> None:
     """Write ``spec_context.md`` when approved or repository spec context exists."""
     spec_context_path = workspace_path / _SPEC_CONTEXT_FILENAME
-    spec_context_script = (
-        workspace_path / ".agents" / "skills" / "review-pr" / "scripts" / "resolve_spec_context.py"
-    )
-    result = subprocess.run(
-        [
-            "python",
-            str(spec_context_script),
-            "--repo",
-            f"{owner}/{repo}",
-            "--pr",
-            str(pr_number),
-        ],
-        cwd=str(workspace_path),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    spec_context_script = _bundled_spec_context_script()
+    if not spec_context_script.exists():
+        logger.warning(
+            "Spec-context resolver script not found at %s; continuing without %s.",
+            spec_context_script,
+            _SPEC_CONTEXT_FILENAME,
+        )
+        spec_context_path.unlink(missing_ok=True)
+        return
+    env = os.environ.copy()
+    env["OZ_REPO_ROOT"] = str(workspace_path)
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(spec_context_script),
+                "--repo",
+                f"{owner}/{repo}",
+                "--pr",
+                str(pr_number),
+            ],
+            cwd=str(workspace_path),
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+    except OSError:
+        logger.exception(
+            "Failed to start spec-context resolver for PR #%s in %s/%s; continuing without %s.",
+            pr_number,
+            owner,
+            repo,
+            _SPEC_CONTEXT_FILENAME,
+        )
+        spec_context_path.unlink(missing_ok=True)
+        return
+    if result.returncode != 0:
+        logger.warning(
+            "Spec-context resolver failed for PR #%s in %s/%s with exit code %s; continuing without %s.\nstdout: %s\nstderr: %s",
+            pr_number,
+            owner,
+            repo,
+            result.returncode,
+            _SPEC_CONTEXT_FILENAME,
+            result.stdout.strip(),
+            result.stderr.strip(),
+        )
+        spec_context_path.unlink(missing_ok=True)
+        return
     content = result.stdout.strip()
     if content and content != _NO_SPEC_CONTEXT_MESSAGE:
         _write_text_file(spec_context_path, content)
