@@ -122,6 +122,8 @@ def run_agent_in_docker(
     model: str | None = None,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     log_group: str | None = None,
+    repo_read_only: bool = True,
+    forward_env_names: Iterable[str] | None = None,
 ) -> DockerAgentRun:
     """Run ``oz agent run`` inside *image* and return the final run state.
 
@@ -151,7 +153,7 @@ def run_agent_in_docker(
             f"Docker agent repo directory does not exist: {repo_path}"
         )
 
-    output_dir = Path(tempfile.mkdtemp(prefix="oz-triage-output-"))
+    output_dir = Path(tempfile.mkdtemp(prefix="oz-agent-output-"))
 
     # We only log the group banner when the caller asked for one. The
     # GitHub Actions ``::group::`` annotation is idempotent - using it
@@ -170,8 +172,10 @@ def run_agent_in_docker(
             skill_name=skill_name,
             title=title,
             model=model,
+            repo_read_only=repo_read_only,
+            forward_env_names=forward_env_names,
         )
-        notice(f"Launching triage container: {_format_argv_for_log(argv)}")
+        notice(f"Launching agent container: {_format_argv_for_log(argv)}")
         _run_and_stream(
             argv,
             run=run,
@@ -203,6 +207,8 @@ def _build_docker_argv(
     skill_name: str,
     title: str,
     model: str | None,
+    repo_read_only: bool,
+    forward_env_names: Iterable[str] | None,
 ) -> list[str]:
     """Build the ``docker run`` argv for the triage container.
 
@@ -212,14 +218,19 @@ def _build_docker_argv(
     listings.
     """
     argv: list[str] = ["docker", "run", "--rm"]
-
-    for name in ("WARP_API_KEY", "WARP_API_BASE_URL"):
+    env_names = tuple(forward_env_names or ("WARP_API_KEY", "WARP_API_BASE_URL"))
+    for name in env_names:
         argv.extend(["-e", name])
+    repo_mount = (
+        f"{repo_dir}:{REPO_MOUNT}:ro"
+        if repo_read_only
+        else f"{repo_dir}:{REPO_MOUNT}"
+    )
 
     argv.extend(
         [
             "-v",
-            f"{repo_dir}:{REPO_MOUNT}:ro",
+            repo_mount,
             "-v",
             f"{output_dir}:{OUTPUT_MOUNT}",
             image,
@@ -423,6 +434,11 @@ def resolve_triage_image() -> str:
     return optional_env("TRIAGE_IMAGE") or "oz-for-oss-triage"
 
 
+def resolve_review_image() -> str:
+    """Return the image tag the PR review workflow uses."""
+    return optional_env("REVIEW_IMAGE") or "oz-for-oss-review"
+
+
 __all__ = [
     "DEFAULT_TIMEOUT_SECONDS",
     "DockerAgentError",
@@ -430,6 +446,7 @@ __all__ = [
     "DockerAgentTimeout",
     "OUTPUT_MOUNT",
     "REPO_MOUNT",
+    "resolve_review_image",
     "resolve_triage_image",
     "run_agent_in_docker",
 ]

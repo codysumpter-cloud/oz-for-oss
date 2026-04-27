@@ -42,9 +42,9 @@ on:
       - labeled
 jobs:
   review_pr:
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-latest
     env:
-      WARP_ENVIRONMENT_ID: ${{ vars.WARP_ENVIRONMENT_ID || '' }}
+      REVIEW_IMAGE: oz-for-oss-review
     permissions:
       contents: read
       pull-requests: write
@@ -52,6 +52,10 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Build review agent container
+        uses: warpdotdev/oz-for-oss/.github/actions/build-review-image@main # main
+        with:
+          image-name: ${{ env.REVIEW_IMAGE }}
       - name: Resolve review context
         id: resolve
         env:
@@ -129,6 +133,7 @@ jobs:
           REQUESTER: ${{ steps.resolve.outputs.requester }}
           REVIEW_FOCUS: ${{ steps.resolve.outputs.focus }}
           COMMENT_ID: ${{ steps.resolve.outputs.comment_id }}
+          REVIEW_IMAGE: ${{ env.REVIEW_IMAGE }}
           WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
           WARP_AGENT_MODEL: ${{ vars.WARP_AGENT_MODEL || '' }}
           WARP_API_BASE_URL: https://app.warp.dev/api/v1

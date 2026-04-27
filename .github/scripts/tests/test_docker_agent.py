@@ -18,6 +18,7 @@ from oz_workflows.docker_agent import (
     _format_argv_for_log,
     _ingest_stdout_line,
     _read_output_json,
+    resolve_review_image,
     resolve_triage_image,
     run_agent_in_docker,
 )
@@ -40,6 +41,8 @@ class BuildDockerArgvTest(unittest.TestCase):
             "skill_name": "triage-issue",
             "title": "Triage issue #1",
             "model": None,
+            "repo_read_only": True,
+            "forward_env_names": None,
         }
         defaults.update(overrides)
         return _build_docker_argv(**defaults)  # type: ignore[arg-type]
@@ -77,6 +80,17 @@ class BuildDockerArgvTest(unittest.TestCase):
                 idx = argv.index(flag)
                 self.assertEqual(argv[idx + 1], expected)
         self.assertIn("--share", argv)
+
+    def test_supports_writable_repo_mount_and_extra_envs(self) -> None:
+        argv = self._argv(
+            image="oz-for-oss-review",
+            skill_name="review-pr",
+            repo_read_only=False,
+            forward_env_names=("WARP_API_KEY", "WARP_API_BASE_URL", "GH_TOKEN"),
+        )
+        self.assertIn("/tmp/repo:/mnt/repo", argv)
+        self.assertNotIn("/tmp/repo:/mnt/repo:ro", argv)
+        self.assertIn("GH_TOKEN", argv)
 
     def test_model_flag_optional(self) -> None:
         """``--model`` appears only when the caller passes one."""
@@ -255,6 +269,20 @@ class ResolveTriageImageTest(unittest.TestCase):
                     if "TRIAGE_IMAGE" not in env_overrides:
                         os.environ.pop("TRIAGE_IMAGE", None)
                     self.assertEqual(resolve_triage_image(), expected)
+
+
+class ResolveReviewImageTest(unittest.TestCase):
+    def test_image_resolution_table(self) -> None:
+        cases = [
+            ("respects_env_override", {"REVIEW_IMAGE": "my-custom-review"}, "my-custom-review"),
+            ("defaults_when_env_unset", {}, "oz-for-oss-review"),
+        ]
+        for label, env_overrides, expected in cases:
+            with self.subTest(label=label):
+                with patch.dict(os.environ, env_overrides, clear=False):
+                    if "REVIEW_IMAGE" not in env_overrides:
+                        os.environ.pop("REVIEW_IMAGE", None)
+                    self.assertEqual(resolve_review_image(), expected)
 
 
 class _FakeProcess:

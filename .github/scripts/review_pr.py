@@ -10,6 +10,12 @@ from typing import Any, TypedDict
 from github import Auth, Github
 from github.File import File
 from github.GithubException import GithubException
+from oz_workflows.docker_agent import (
+    OUTPUT_MOUNT,
+    REPO_MOUNT,
+    resolve_review_image,
+    run_agent_in_docker,
+)
 
 from oz_workflows.env import optional_env, repo_parts, repo_slug, require_env, workspace
 from oz_workflows.helpers import (
@@ -22,8 +28,6 @@ from oz_workflows.helpers import (
     resolve_issue_number_for_pr,
     WorkflowProgressComment,
 )
-from oz_workflows.artifacts import poll_for_artifact
-from oz_workflows.oz_client import build_agent_config, run_agent
 from oz_workflows.repo_local import (
     format_repo_local_prompt_section,
     resolve_repo_local_skill_path,
@@ -38,7 +42,8 @@ _MAX_STAKEHOLDER_REVIEWERS = 3
 # ``verdict`` values the agent is allowed to emit for non-member PRs. These
 # map directly to GitHub's ``event`` parameter on the create-review endpoint.
 _ALLOWED_NON_MEMBER_VERDICTS = {"APPROVE", "REQUEST_CHANGES"}
-_SPEC_CONTEXT_SCRIPT = ".agents/skills/review-pr/scripts/resolve_spec_context.py"
+_REVIEW_OUTPUT_FILENAME = "review.json"
+_SPEC_CONTEXT_SCRIPT = "/root/.agents/skills/review-pr/scripts/resolve_spec_context.py"
 
 
 class ReviewComment(TypedDict, total=False):
@@ -494,10 +499,11 @@ def build_review_prompt(
         - When the script returns actual spec content, write that output verbatim to `spec_context.md` before reviewing so the repository's `check-impl-against-spec` skill can be used.
         - This script is the only supported way to resolve spec context during the review run. Do not fetch linked spec files or spec PR context through ad-hoc GitHub API calls or custom commands.
 
-        Cloud Workflow Requirements:
+        Docker Workflow Requirements:
         - Use the repository's local `{skill_name}` skill as the base workflow.
         - {supplemental_skill_line}
-        - You are running in a cloud environment rather than a local workflow checkout.
+        - You are running inside a Dockerized workflow container rather than a local workflow checkout.
+        - The repository checkout is mounted at `{REPO_MOUNT}` and the host workflow reads the final review result from `{OUTPUT_MOUNT}/{_REVIEW_OUTPUT_FILENAME}`.
         - You must check out the exact PR head branch before generating the diff. Run:
             ```
             git fetch origin {head_branch}
@@ -514,13 +520,14 @@ def build_review_prompt(
         - Only include comments for files and lines that exist in the generated PR diff. If feedback does not map to a diff file or commentable diff line, put it in `summary` instead of `comments`.
         - If you materialize spec context with the script above, write it to `spec_context.md` before reviewing so the repository's `check-impl-against-spec` skill can be used.
         - Do not post the final review directly.
-        - After you create and validate `review.json`, upload it as an artifact via `oz artifact upload review.json` (or `oz-preview artifact upload review.json` if the `oz` CLI is not available). Either CLI is acceptable — use whichever one is installed in the environment. The subcommand is `artifact` (singular) on both CLIs; do not use `artifacts`.
+        - After you create and validate `review.json`, write it to `{OUTPUT_MOUNT}/{_REVIEW_OUTPUT_FILENAME}` so the host workflow can read it after the container exits.
+        - Do not run `oz artifact upload` or `oz-preview artifact upload` in this Docker workflow; the host reads the mounted output file directly.
         """
     ).strip()
     if repo_local_section:
         prompt = prompt.replace(
-            "\n\nCloud Workflow Requirements:",
-            "\n\n" + repo_local_section.rstrip() + "\n\nCloud Workflow Requirements:",
+            "\n\nDocker Workflow Requirements:",
+            "\n\n" + repo_local_section.rstrip() + "\n\nDocker Workflow Requirements:",
             1,
         )
     if non_member_review_section:
@@ -682,19 +689,22 @@ def main() -> None:
             non_member_review_section=non_member_review_section,
         )
 
-        config = build_agent_config(
-            config_name="review-pull-request",
-            workspace=workspace(),
-        )
+        review_image = resolve_review_image()
+        model = optional_env("WARP_AGENT_MODEL") or None
         try:
-            run = run_agent(
+            run = run_agent_in_docker(
                 prompt=prompt,
                 skill_name=skill_name,
                 title=f"PR review #{pr_number}",
-                config=config,
-                on_poll=lambda current_run: record_run_session_link(progress, current_run),
+                image=review_image,
+                repo_dir=workspace(),
+                output_filename=_REVIEW_OUTPUT_FILENAME,
+                on_event=lambda current_run: record_run_session_link(progress, current_run),
+                model=model,
+                repo_read_only=False,
+                forward_env_names=("WARP_API_KEY", "WARP_API_BASE_URL", "GH_TOKEN"),
             )
-            review = poll_for_artifact(run.run_id, filename="review.json")
+            review = run.output
             diff_line_map, diff_content_map = _build_diff_maps(pr_files)
             summary, comments = _normalize_review_payload(
                 review, diff_line_map, diff_content_map

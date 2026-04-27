@@ -16,6 +16,7 @@ from review_pr import (
     _resolve_non_member_review_action,
     _stakeholder_logins,
     _validate_suggestion_blocks,
+    build_review_prompt,
 )
 
 
@@ -44,6 +45,27 @@ class NormalizeReviewPathTest(unittest.TestCase):
         for label, path, expected in cases:
             with self.subTest(label=label):
                 self.assertEqual(_normalize_review_path(path), expected)
+
+
+class BuildReviewPromptTest(unittest.TestCase):
+    def test_docker_prompt_includes_output_mount_handoff(self) -> None:
+        prompt = build_review_prompt(
+            owner="owner",
+            repo="repo",
+            pr_number=7,
+            pr_title="Title",
+            pr_body="Body",
+            base_branch="main",
+            head_branch="feature",
+            trigger_source="pull_request_target",
+            focus_line="Perform a general review of the pull request.",
+            issue_line="#42",
+            skill_name="review-pr",
+            supplemental_skill_line="Also apply security-review-pr.",
+        )
+        self.assertIn("Docker Workflow Requirements", prompt)
+        self.assertIn("/mnt/output/review.json", prompt)
+        self.assertIn("Do not run `oz artifact upload`", prompt)
 
 
 class CommentableLinesForPatchTest(unittest.TestCase):
