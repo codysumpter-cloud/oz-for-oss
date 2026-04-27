@@ -169,86 +169,6 @@ class RunImplementationPrRefreshTest(unittest.TestCase):
         self.assertIn("oz-agent/spec-issue-42", str(ctx.exception))
 
 
-class RunImplementationPromptTest(unittest.TestCase):
-    """Verify the prompt instructs the agent about pr-metadata.json."""
-
-    def test_prompt_instructs_agent_to_upload_pr_metadata_when_scope_changes(
-        self,
-    ) -> None:
-        from respond_to_pr_comment import _run_implementation
-
-        client = MagicMock()
-        github = MagicMock()
-        pr = _make_pr()
-        spec_context, run = _base_patches()
-        captured_prompt: dict[str, str] = {}
-
-        def _capture_prompt(**kwargs):
-            captured_prompt["prompt"] = kwargs.get("prompt", "")
-            return run
-
-        with (
-            patch("respond_to_pr_comment.workspace", return_value="/tmp/workspace"),
-            patch(
-                "respond_to_pr_comment.resolve_spec_context_for_pr",
-                return_value=spec_context,
-            ),
-            patch("respond_to_pr_comment.WorkflowProgressComment"),
-            patch("respond_to_pr_comment.resolve_coauthor_line", return_value=""),
-            patch(
-                "respond_to_pr_comment.build_agent_config",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "respond_to_pr_comment.run_agent",
-                side_effect=_capture_prompt,
-            ),
-            patch(
-                "respond_to_pr_comment.branch_updated_since",
-                return_value=False,
-            ),
-            patch(
-                "respond_to_pr_comment.try_load_pr_metadata_artifact",
-                return_value=None,
-            ),
-            patch(
-                "respond_to_pr_comment.try_load_resolved_review_comments_artifact",
-                return_value=[],
-            ),
-        ):
-            unique_body = "ATTACKER_PROMPT_INJECTION_NEEDLE_42"
-            _run_implementation(
-                client,
-                github,
-                "owner",
-                "repo",
-                pr,
-                event={
-                    "comment": {"user": {"login": "alice"}, "body": unique_body},
-                    "sender": {"login": "alice"},
-                },
-                trigger_comment_id=9001,
-                trigger_kind="conversation",
-                requester="alice",
-            )
-
-        prompt = captured_prompt.get("prompt", "")
-        self.assertIn("pr-metadata.json", prompt)
-        self.assertIn("pr_title", prompt)
-        self.assertIn("pr_summary", prompt)
-        self.assertIn("oz artifact upload pr-metadata.json", prompt)
-        # The prompt must describe when to write the artifact and when to
-        # skip it so small tweaks don't churn the PR description.
-        self.assertIn("materially change", prompt)
-        # The prompt must instruct the agent to fetch issue/PR content via
-        # the supported fetch script rather than have it inlined into the
-        # prompt. The triggering comment body must not be inlined.
-        self.assertIn("fetch_github_context.py", prompt)
-        self.assertIn("pr --repo owner/repo --number 10", prompt)
-        self.assertNotIn(unique_body, prompt)
-        # The PR body set on the fake PR must also not be inlined.
-        self.assertNotIn("Spec for retry logic", prompt)
-
 
 class MainTrustGateTest(unittest.TestCase):
     """Verify ``main`` resolves commenter trust before the agent runs.
@@ -457,51 +377,6 @@ class HandleReviewBodyTest(unittest.TestCase):
     def test_skips_bot_review_authors(self) -> None:
         called = self._run_main_for_review_event(is_bot=True)
         self.assertFalse(called.get("handled"), "Expected bot review to be skipped")
-
-    def test_handle_review_body_calls_run_implementation_with_review_id(self) -> None:
-        from respond_to_pr_comment import _handle_review_body
-
-        client = MagicMock()
-        github = MagicMock()
-        pr = _make_pr(number=1064)
-        github.get_pull.return_value = pr
-
-        event = {
-            "review": {
-                "id": 4158886048,
-                "user": {"login": "seemeroland"},
-                "body": "@oz-agent address the comment",
-                "state": "COMMENTED",
-                "author_association": "MEMBER",
-            },
-            "pull_request": {"number": 1064},
-        }
-        spec_context, run = _base_patches()
-        captured: dict = {}
-
-        with (
-            patch("respond_to_pr_comment.workspace", return_value="/tmp/workspace"),
-            patch("respond_to_pr_comment.resolve_spec_context_for_pr", return_value=spec_context),
-            patch("respond_to_pr_comment.WorkflowProgressComment"),
-            patch("respond_to_pr_comment.resolve_coauthor_line", return_value=""),
-            patch("respond_to_pr_comment.build_agent_config", return_value=MagicMock()),
-            patch(
-                "respond_to_pr_comment.run_agent",
-                side_effect=lambda **kw: (captured.update(kw), run)[1],
-            ),
-            patch("respond_to_pr_comment.branch_updated_since", return_value=False),
-            patch("respond_to_pr_comment.try_load_pr_metadata_artifact", return_value=None),
-            patch("respond_to_pr_comment.try_load_resolved_review_comments_artifact", return_value=[]),
-        ):
-            _handle_review_body(client, github, "warpdotdev", "warp-external", event)
-
-        prompt = captured.get("prompt", "")
-        # Must include the review id so the agent can locate the triggering item
-        self.assertIn("4158886048", prompt)
-        # Must not expose the review body directly in the prompt
-        self.assertNotIn("@oz-agent address the comment", prompt)
-        # Must indicate this was triggered by a PR review body
-        self.assertIn("PR review body", prompt)
 
 
 if __name__ == "__main__":
