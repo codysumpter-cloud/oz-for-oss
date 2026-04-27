@@ -35,6 +35,9 @@ logger = logging.getLogger(__name__)
 # Maximum number of human reviewers to request from STAKEHOLDERS so we don't
 # over-notify maintainers on a single non-member PR.
 _MAX_STAKEHOLDER_REVIEWERS = 3
+# Maximum number of human reviewers to request for spec-only PRs from
+# non-members. Spec PRs need human eyes but shouldn't over-notify.
+_MAX_SPEC_REVIEWERS = 2
 # ``verdict`` values the agent is allowed to emit for non-member PRs. These
 # map directly to GitHub's ``event`` parameter on the create-review endpoint.
 _ALLOWED_NON_MEMBER_VERDICTS = {"APPROVE", "REQUEST_CHANGES"}
@@ -192,6 +195,28 @@ def _resolve_non_member_review_action(
         else []
     )
     return verdict_raw, reviewers
+
+
+def _resolve_spec_reviewer_request(
+    review: dict[str, Any],
+    *,
+    pr_author_login: str,
+    allowed_logins: set[str] | None = None,
+) -> list[str]:
+    """Extract and normalize recommended reviewers for a spec-only non-member PR.
+
+    Unlike non-member implementation PRs, spec PRs are always posted as
+    COMMENT; this function only extracts the reviewer recommendations so
+    the workflow can request the right human reviewers for the spec.
+    Reviews are capped at ``_MAX_SPEC_REVIEWERS`` to avoid over-notifying
+    maintainers on a single spec change.
+    """
+    return _normalize_reviewer_logins(
+        review.get("recommended_reviewers"),
+        pr_author_login=pr_author_login,
+        allowed_logins=allowed_logins,
+        limit=_MAX_SPEC_REVIEWERS,
+    )
 
 
 def _commentable_lines_for_patch(patch: str | None) -> dict[str, set[int]]:
@@ -448,6 +473,10 @@ def _format_review_completion_message(
         )
     if event == "REQUEST_CHANGES":
         return "I requested changes on this pull request and posted feedback."
+    # COMMENT event with reviewers: spec PR from a non-member contributor.
+    if recommended_reviewers:
+        mentions = ", ".join(f"@{login}" for login in recommended_reviewers)
+        return f"I reviewed this spec and requested human review from: {mentions}."
     return "I completed the review and posted feedback on this pull request."
 
 def build_review_prompt(
@@ -610,16 +639,21 @@ def main() -> None:
         # a list of matching ``.github/STAKEHOLDERS`` logins to request as
         # human reviewers, and the workflow turns those into a real
         # pull-request review plus reviewer requests. Member/collaborator
-        # PRs keep the existing COMMENT-only behavior. Spec-only PRs are
-        # intentionally exempted from the gate so humans stay in the loop
-        # earlier for spec changes.
+        # PRs keep the existing COMMENT-only behavior.
+        #
+        # Spec-only PRs from non-members are handled separately: they keep
+        # the COMMENT event (no approval gate) but the agent is asked to
+        # recommend 1-2 human reviewers from STAKEHOLDERS based on the spec
+        # content, so the right people are always pinged for spec changes
+        # from external contributors.
         is_non_member = _is_non_member_pr(pr) and not spec_only
+        is_spec_non_member = spec_only and _is_non_member_pr(pr)
         pr_author_login = str(
             getattr(getattr(pr, "user", None), "login", "") or ""
         )
         non_member_review_section = ""
         stakeholder_logins: set[str] = set()
-        if is_non_member:
+        if is_non_member or is_spec_non_member:
             stakeholders_entries = load_stakeholders(
                 Path(workspace()) / ".github" / "STAKEHOLDERS"
             )
@@ -627,43 +661,70 @@ def main() -> None:
             stakeholders_block = format_stakeholders_for_prompt(
                 stakeholders_entries
             )
-            non_member_review_section = dedent(
-                f"""
-                Non-Member Review Action:
-                - The PR author (@{pr_author_login or 'unknown'}) is not a
-                  repository member or collaborator, so this review must
-                  commit to a verdict rather than just leaving comments.
-                - Choose exactly one ``verdict`` for the review, using the
-                  GitHub review event naming:
-                  - ``APPROVE`` when the PR looks ready for a human to
-                    take over.
-                  - ``REQUEST_CHANGES`` when the PR clearly needs rework
-                    before a human should spend time reviewing it.
-                  Never emit ``COMMENT`` for this PR.
-                - Identify up to {_MAX_STAKEHOLDER_REVIEWERS} ``recommended_reviewers`` from
-                  ``.github/STAKEHOLDERS`` (CODEOWNERS-style syntax; later
-                  rules override earlier ones, most specific pattern wins
-                  over catch-all rules) by matching the changed file paths
-                  against each rule. De-duplicate across files, prefer
-                  more specific rules over catch-all rules, and strip any
-                  leading ``@`` from each login. Exclude the PR author
-                  (@{pr_author_login or 'unknown'}) — GitHub rejects
-                  self-review requests.
-                - Only populate ``recommended_reviewers`` when the verdict
-                  is ``APPROVE``. Set it to an empty list on
-                  ``REQUEST_CHANGES``.
-                - Extend the ``review.json`` shape with these two fields
-                  alongside ``summary``/``comments``:
-                  {{"verdict": "APPROVE" | "REQUEST_CHANGES", "recommended_reviewers": [string, ...]}}
-                - Do not call GitHub yourself to post the review or to
-                  request reviewers — the workflow will use these fields
-                  to post the formal pull-request review and, on
-                  ``APPROVE``, request reviews from the listed logins.
+            if is_non_member:
+                non_member_review_section = dedent(
+                    f"""
+                    Non-Member Review Action:
+                    - The PR author (@{pr_author_login or 'unknown'}) is not a
+                      repository member or collaborator, so this review must
+                      commit to a verdict rather than just leaving comments.
+                    - Choose exactly one ``verdict`` for the review, using the
+                      GitHub review event naming:
+                      - ``APPROVE`` when the PR looks ready for a human to
+                        take over.
+                      - ``REQUEST_CHANGES`` when the PR clearly needs rework
+                        before a human should spend time reviewing it.
+                      Never emit ``COMMENT`` for this PR.
+                    - Identify up to {_MAX_STAKEHOLDER_REVIEWERS} ``recommended_reviewers`` from
+                      ``.github/STAKEHOLDERS`` (CODEOWNERS-style syntax; later
+                      rules override earlier ones, most specific pattern wins
+                      over catch-all rules) by matching the changed file paths
+                      against each rule. De-duplicate across files, prefer
+                      more specific rules over catch-all rules, and strip any
+                      leading ``@`` from each login. Exclude the PR author
+                      (@{pr_author_login or 'unknown'}) — GitHub rejects
+                      self-review requests.
+                    - Only populate ``recommended_reviewers`` when the verdict
+                      is ``APPROVE``. Set it to an empty list on
+                      ``REQUEST_CHANGES``.
+                    - Extend the ``review.json`` shape with these two fields
+                      alongside ``summary``/``comments``:
+                      {{"verdict": "APPROVE" | "REQUEST_CHANGES", "recommended_reviewers": [string, ...]}}
+                    - Do not call GitHub yourself to post the review or to
+                      request reviewers — the workflow will use these fields
+                      to post the formal pull-request review and, on
+                      ``APPROVE``, request reviews from the listed logins.
 
-                Stakeholders (from ``.github/STAKEHOLDERS``):
-                {stakeholders_block}
-                """
-            ).strip()
+                    Stakeholders (from ``.github/STAKEHOLDERS``):
+                    {stakeholders_block}
+                    """
+                ).strip()
+            else:  # is_spec_non_member
+                non_member_review_section = dedent(
+                    f"""
+                    Spec Reviewer Request:
+                    - The PR author (@{pr_author_login or 'unknown'}) is not a
+                      repository member or collaborator.
+                    - After reviewing the spec, identify 1-2 reviewers from
+                      ``.github/STAKEHOLDERS`` who are best suited to review
+                      this spec based on the spec content and path patterns.
+                      CODEOWNERS-style syntax applies: later rules override
+                      earlier ones, most specific pattern wins over catch-all
+                      rules. Exclude the PR author
+                      (@{pr_author_login or 'unknown'}) — GitHub rejects
+                      self-review requests.
+                    - Extend the ``review.json`` shape with this field
+                      alongside ``summary``/``comments``:
+                      {{"recommended_reviewers": [string, ...]}}
+                    - Set ``recommended_reviewers`` to an empty list if no
+                      suitable reviewer can be identified.
+                    - Do not call GitHub yourself to request reviewers —
+                      the workflow will handle that.
+
+                    Stakeholders (from ``.github/STAKEHOLDERS``):
+                    {stakeholders_block}
+                    """
+                ).strip()
 
         prompt = build_review_prompt(
             owner=owner,
@@ -720,14 +781,26 @@ def main() -> None:
                     )
                     event = "COMMENT"
                     recommended_reviewers = []
+            elif is_spec_non_member:
+                # Spec PRs from non-members always post as COMMENT but the
+                # agent is asked to recommend the best 1-2 reviewers from
+                # STAKEHOLDERS based on the spec content.
+                event = "COMMENT"
+                recommended_reviewers = _resolve_spec_reviewer_request(
+                    review,
+                    pr_author_login=pr_author_login,
+                    allowed_logins=stakeholder_logins,
+                )
             else:
                 event = "COMMENT"
                 recommended_reviewers = []
-            if not summary and not comments and event == "COMMENT":
+            if not summary and not comments and event == "COMMENT" and not recommended_reviewers:
                 # For member PRs the legacy short-circuit stands: if the
                 # agent had nothing to say, skip posting an empty review.
                 # Non-member PRs always post so the verdict lands on the
-                # PR even when the agent has no inline comments.
+                # PR even when the agent has no inline comments. Spec PRs
+                # from non-members always post when there are reviewers to
+                # request so the reviewer request has context.
                 progress.complete("I completed the review and did not identify any actionable feedback for this pull request.")
                 return
             review_body = f"{summary or 'Automated review'}\n\n{POWERED_BY_SUFFIX}"
@@ -735,7 +808,7 @@ def main() -> None:
                 pr.create_review(body=review_body, event=event, comments=comments)
             else:
                 pr.create_review(body=review_body, event=event)
-            if event == "APPROVE" and recommended_reviewers:
+            if recommended_reviewers:
                 try:
                     pr.create_review_request(reviewers=recommended_reviewers)
                 except GithubException:

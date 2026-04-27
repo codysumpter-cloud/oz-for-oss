@@ -14,6 +14,7 @@ from review_pr import (
     _normalize_review_payload,
     _normalize_reviewer_logins,
     _resolve_non_member_review_action,
+    _resolve_spec_reviewer_request,
     _stakeholder_logins,
     _validate_suggestion_blocks,
 )
@@ -831,6 +832,49 @@ class ResolveNonMemberReviewActionTest(unittest.TestCase):
         self.assertEqual(reviewers, [])
 
 
+class ResolveSpecReviewerRequestTest(unittest.TestCase):
+    def test_returns_normalized_reviewers_from_review(self) -> None:
+        reviewers = _resolve_spec_reviewer_request(
+            {"recommended_reviewers": ["@alice", "bob"]},
+            pr_author_login="contributor",
+        )
+        self.assertEqual(reviewers, ["alice", "bob"])
+
+    def test_caps_to_max_spec_reviewers(self) -> None:
+        """Spec PRs must not ping more than 2 reviewers."""
+        reviewers = _resolve_spec_reviewer_request(
+            {"recommended_reviewers": ["a", "b", "c"]},
+            pr_author_login="",
+        )
+        self.assertEqual(reviewers, ["a", "b"])
+
+    def test_excludes_pr_author(self) -> None:
+        reviewers = _resolve_spec_reviewer_request(
+            {"recommended_reviewers": ["author", "alice"]},
+            pr_author_login="author",
+        )
+        self.assertEqual(reviewers, ["alice"])
+
+    def test_filters_to_allowed_stakeholders(self) -> None:
+        reviewers = _resolve_spec_reviewer_request(
+            {"recommended_reviewers": ["alice", "stranger", "bob"]},
+            pr_author_login="",
+            allowed_logins={"alice", "bob"},
+        )
+        self.assertEqual(reviewers, ["alice", "bob"])
+
+    def test_missing_recommended_reviewers_returns_empty(self) -> None:
+        reviewers = _resolve_spec_reviewer_request({}, pr_author_login="")
+        self.assertEqual(reviewers, [])
+
+    def test_non_list_returns_empty(self) -> None:
+        reviewers = _resolve_spec_reviewer_request(
+            {"recommended_reviewers": "alice"},
+            pr_author_login="",
+        )
+        self.assertEqual(reviewers, [])
+
+
 class FormatReviewCompletionMessageTest(unittest.TestCase):
     def test_approve_with_reviewers_mentions_logins(self) -> None:
         message = _format_review_completion_message("APPROVE", ["alice", "bob"])
@@ -847,6 +891,12 @@ class FormatReviewCompletionMessageTest(unittest.TestCase):
             "requested changes",
             _format_review_completion_message("REQUEST_CHANGES", []),
         )
+
+    def test_comment_with_reviewers_mentions_logins(self) -> None:
+        """Spec PRs from non-members post COMMENT but still ping reviewers."""
+        message = _format_review_completion_message("COMMENT", ["alice", "bob"])
+        self.assertIn("spec", message.lower())
+        self.assertIn("@alice, @bob", message)
 
     def test_comment_default(self) -> None:
         self.assertIn(
