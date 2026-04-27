@@ -1,37 +1,29 @@
 name: Build Oz triage image
 description: >-
-  Check out warpdotdev/oz-for-oss at a pinned workflow ref and build the Oz
-  triage Docker image so that the image stays tied to the same immutable
-  revision as the calling workflow.
+  Build the Oz triage Docker image from the same warpdotdev/oz-for-oss revision
+  this composite action was loaded at. The repository is laid down on disk by
+  GitHub when the action is referenced via `uses:`, so no additional checkout
+  is needed.
 inputs:
   image-name:
     description: Local Docker image name to build.
     required: false
     default: oz-for-oss-triage
-  workflow-ref:
-    description: >-
-      Git ref (SHA) of warpdotdev/oz-for-oss from which to source the
-      Dockerfile and build context. Pass ${{ github.workflow_sha }} from the
-      calling reusable workflow so that the image stays pinned to the same
-      immutable revision as the workflow file.
-    required: true
 runs:
   using: composite
   steps:
-    - name: Checkout oz-for-oss at workflow ref
-      uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-      with:
-        repository: warpdotdev/oz-for-oss
-        ref: ${{ inputs.workflow-ref }}
-        path: __oz_shared
     - name: Build triage Docker image
       shell: bash
       env:
         TRIAGE_IMAGE_NAME: ${{ inputs.image-name }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
-        repo_root="${GITHUB_WORKSPACE}/__oz_shared"
+        # ACTION_PATH points at .github/actions/build-triage-image inside the
+        # oz-for-oss checkout GitHub created for this action; the repo root is
+        # three directories above it.
+        repo_root="$(cd "$ACTION_PATH/../../.." && pwd)"
         docker build \
-          -f "${repo_root}/docker/triage/Dockerfile" \
-          -t "${TRIAGE_IMAGE_NAME}" \
-          "${repo_root}"
+          -f "$repo_root/docker/triage/Dockerfile" \
+          -t "$TRIAGE_IMAGE_NAME" \
+          "$repo_root"

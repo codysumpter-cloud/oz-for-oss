@@ -25,7 +25,6 @@ jobs:
         uses: warpdotdev/oz-for-oss/.github/actions/run-oz-python-script@main # main
         with:
           script-path: comment_on_unready_assigned_issue.py
-          workflow-ref: ${{ github.workflow_sha }}
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           GH_APP_SLUG: ${{ steps.app_token.outputs.app-slug }}

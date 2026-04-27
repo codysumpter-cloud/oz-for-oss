@@ -1,19 +1,12 @@
 name: Run Oz Python workflow script
 description: >-
-  Check out warpdotdev/oz-for-oss at a pinned workflow ref, install the shared
-  Oz workflow Python dependencies, and run a script from .github/scripts so
-  that helper code stays tied to the same immutable revision as the calling
-  workflow.
+  Install the shared Oz workflow Python dependencies and run a script from
+  warpdotdev/oz-for-oss/.github/scripts at the same revision this composite
+  action was loaded at. The repository is laid down on disk by GitHub when the
+  action is referenced via `uses:`, so no additional checkout is needed.
 inputs:
   script-path:
     description: Path to the Python entrypoint relative to .github/scripts.
-    required: true
-  workflow-ref:
-    description: >-
-      Git ref (SHA) of warpdotdev/oz-for-oss from which to source scripts and
-      dependencies. Pass ${{ github.workflow_sha }} from the calling reusable
-      workflow so that helper code stays pinned to the same immutable revision
-      as the workflow file.
     required: true
 outputs:
   allow_review:
@@ -22,30 +15,29 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Checkout oz-for-oss at workflow ref
-      uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-      with:
-        repository: warpdotdev/oz-for-oss
-        ref: ${{ inputs.workflow-ref }}
-        path: __oz_shared
     - name: Install uv and activate virtual environment
       uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       with:
         enable-cache: true
-        cache-dependency-glob: __oz_shared/.github/scripts/requirements.txt
+        cache-dependency-glob: ${{ github.action_path }}/../../scripts/requirements.txt
         activate-environment: true
         python-version: "3.12"
     - name: Install Python workflow dependencies
       shell: bash
-      run: uv pip install -r "__oz_shared/.github/scripts/requirements.txt"
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        uv pip install -r "$ACTION_PATH/../../scripts/requirements.txt"
     - name: Run Oz Python workflow script
       id: run-script
       shell: bash
       env:
         OZ_SCRIPT_PATH: ${{ inputs.script-path }}
+        ACTION_PATH: ${{ github.action_path }}
         WORKFLOW_CODE_REPOSITORY: warpdotdev/oz-for-oss
       run: |
         set -euo pipefail
-        script_root="${GITHUB_WORKSPACE}/__oz_shared/.github/scripts"
+        script_root="$(cd "$ACTION_PATH/../../scripts" && pwd)"
         export PYTHONPATH="${script_root}${PYTHONPATH:+:${PYTHONPATH}}"
         python "${script_root}/${OZ_SCRIPT_PATH}"

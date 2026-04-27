@@ -48,12 +48,10 @@ jobs:
         uses: warpdotdev/oz-for-oss/.github/actions/build-triage-image@main # main
         with:
           image-name: ${{ env.TRIAGE_IMAGE }}
-          workflow-ref: ${{ github.workflow_sha }}
       - name: Run issue triage workflow
         uses: warpdotdev/oz-for-oss/.github/actions/run-oz-python-script@main # main
         with:
           script-path: triage_new_issues.py
-          workflow-ref: ${{ github.workflow_sha }}
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           GH_APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
