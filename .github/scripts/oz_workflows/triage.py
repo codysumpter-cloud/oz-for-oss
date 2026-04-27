@@ -85,6 +85,7 @@ def select_recent_untriaged_issues(
     *,
     cutoff: datetime,
     triaged_label: str = "triaged",
+    exempt_labels: tuple[str, ...] = ("ready-to-spec", "ready-to-implement"),
 ) -> list[Any]:
     selected = [
         issue
@@ -96,6 +97,7 @@ def select_recent_untriaged_issues(
             else parse_datetime(get_field(issue, "created_at") or "1970-01-01T00:00:00Z") >= cutoff
         )
         and not issue_has_label(issue, triaged_label)
+        and not any(issue_has_label(issue, label_name) for label_name in exempt_labels)
     ]
     selected.sort(
         key=lambda issue: (

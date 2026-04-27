@@ -194,6 +194,30 @@ class SelectRecentUntriagedIssuesTest(unittest.TestCase):
             [4],
         )
 
+    def test_skips_ready_to_spec_and_ready_to_implement_labels(self) -> None:
+        cutoff = datetime(2026, 3, 24, 1, 0, tzinfo=timezone.utc)
+        issues = [
+            {
+                "number": 4,
+                "created_at": "2026-03-24T01:25:00Z",
+                "labels": [{"name": "bug"}],
+            },
+            {
+                "number": 5,
+                "created_at": "2026-03-24T01:30:00Z",
+                "labels": [{"name": "ready-to-spec"}],
+            },
+            {
+                "number": 6,
+                "created_at": "2026-03-24T01:35:00Z",
+                "labels": [{"name": "ready-to-implement"}],
+            },
+        ]
+        self.assertEqual(
+            [issue["number"] for issue in select_recent_untriaged_issues(issues, cutoff=cutoff)],
+            [4],
+        )
+
 
 class DiscoverIssueTemplatesTest(unittest.TestCase):
     def test_discovers_config_template_and_legacy_template(self) -> None:
