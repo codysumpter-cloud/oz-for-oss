@@ -16,7 +16,10 @@ from typing import Any
 API_ROOT = "https://api.github.com"
 GRAPHQL_ROOT = f"{API_ROOT}/graphql"
 NO_SPEC_CONTEXT_MESSAGE = "No approved or repository spec context was found for this PR."
-REPO_ROOT = Path(__file__).resolve().parents[4]
+REPO_ROOT = Path(
+    (os.environ.get("OZ_REPO_ROOT") or "").strip()
+    or Path(__file__).resolve().parents[4]
+)
 
 _CLOSING_ISSUES_QUERY = (
     "query($owner: String!, $name: String!, $number: Int!, $after: String) {"

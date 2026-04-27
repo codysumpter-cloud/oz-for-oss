@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
+from pathlib import Path
+from unittest.mock import patch
 
 from review_pr import (
+    _container_companion_path,
     _build_diff_line_map,
     _commentable_lines_for_patch,
     _extract_suggestion_blocks,
+    _format_pr_diff,
     _format_review_completion_message,
     _is_non_member_pr,
+    _launch_review_agent,
     _line_content_for_patch,
     _normalize_review_path,
     _normalize_review_payload,
@@ -16,6 +21,7 @@ from review_pr import (
     _resolve_non_member_review_action,
     _stakeholder_logins,
     _validate_suggestion_blocks,
+    build_review_prompt,
 )
 
 
@@ -44,6 +50,80 @@ class NormalizeReviewPathTest(unittest.TestCase):
         for label, path, expected in cases:
             with self.subTest(label=label):
                 self.assertEqual(_normalize_review_path(path), expected)
+
+
+class BuildReviewPromptTest(unittest.TestCase):
+    def test_docker_prompt_includes_output_mount_handoff(self) -> None:
+        prompt = build_review_prompt(
+            owner="owner",
+            repo="repo",
+            pr_number=7,
+            pr_title="Title",
+            pr_body="Body",
+            base_branch="main",
+            head_branch="feature",
+            trigger_source="pull_request_target",
+            focus_line="Perform a general review of the pull request.",
+            issue_line="#42",
+            skill_name="review-pr",
+            supplemental_skill_line="Also apply security-review-pr.",
+        )
+        self.assertIn("Docker Workflow Requirements", prompt)
+        self.assertIn("/mnt/output/review.json", prompt)
+        self.assertIn("Do not run `oz artifact upload`", prompt)
+        self.assertIn("Read `pr_description.txt` and `pr_diff.txt`", prompt)
+        self.assertIn("does not receive `GH_TOKEN`", prompt)
+
+
+class ContainerCompanionPathTest(unittest.TestCase):
+    def test_rewrites_repo_local_skill_path_to_repo_mount(self) -> None:
+        result = _container_companion_path(
+            Path("/tmp/workspace/.agents/skills/review-pr-local/SKILL.md"),
+            host_workspace=Path("/tmp/workspace"),
+        )
+        self.assertEqual(
+            result,
+            Path("/mnt/repo/.agents/skills/review-pr-local/SKILL.md"),
+        )
+
+
+class FormatPrDiffTest(unittest.TestCase):
+    def test_annotates_patch_with_old_and_new_line_numbers(self) -> None:
+        diff_text = _format_pr_diff(
+            [
+                _FakeFile(
+                    "src/example.py",
+                    "@@ -10,3 +10,3 @@\n context\n-old_value\n+new_value\n unchanged\n",
+                )
+            ]
+        )
+        self.assertIn("diff --git a/src/example.py b/src/example.py", diff_text)
+        self.assertIn("[OLD:10,NEW:10] context", diff_text)
+        self.assertIn("[OLD:11] old_value", diff_text)
+        self.assertIn("[NEW:11] new_value", diff_text)
+        self.assertIn("[OLD:12,NEW:12] unchanged", diff_text)
+
+
+class LaunchReviewAgentTest(unittest.TestCase):
+    def test_uses_read_only_repo_mount_and_omits_github_token(self) -> None:
+        with patch("review_pr.run_agent_in_docker", return_value="sentinel") as mock_run:
+            result = _launch_review_agent(
+                prompt="prompt",
+                skill_name="review-pr",
+                pr_number=7,
+                image="oz-for-oss-review",
+                workspace_path=Path("/tmp/workspace"),
+                on_event=None,
+                model="gpt-5.4",
+            )
+        self.assertEqual(result, "sentinel")
+        self.assertEqual(mock_run.call_count, 1)
+        kwargs = mock_run.call_args.kwargs
+        self.assertTrue(kwargs["repo_read_only"])
+        self.assertEqual(
+            kwargs["forward_env_names"],
+            ("WARP_API_KEY", "WARP_API_BASE_URL"),
+        )
 
 
 class CommentableLinesForPatchTest(unittest.TestCase):
