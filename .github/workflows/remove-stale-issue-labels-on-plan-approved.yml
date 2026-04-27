@@ -15,10 +15,6 @@ jobs:
   remove_stale_labels:
     name: Remove stale issue labels
     runs-on: ubuntu-slim
-    env:
-      WORKFLOW_CODE_REPOSITORY: warpdotdev/oz-for-oss
-      WORKFLOW_CODE_REF: ${{ github.repository == 'warpdotdev/oz-for-oss' && github.sha || 'main' }}
-      WORKFLOW_CODE_PATH: __oz_shared
     permissions:
       contents: read
       issues: write
@@ -33,20 +29,10 @@ jobs:
           private-key: ${{ secrets.OZ_MGMT_GHA_PRIVATE_KEY }}
       - name: Checkout repo
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-      - name: Checkout workflow code
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-        with:
-          repository: ${{ env.WORKFLOW_CODE_REPOSITORY }}
-          ref: ${{ env.WORKFLOW_CODE_REF }}
-          path: ${{ env.WORKFLOW_CODE_PATH }}
-          token: ${{ steps.app_token.outputs.token }}
-      - name: Set up Oz Python environment
-        uses: warpdotdev/oz-for-oss/.github/actions/setup-oz-python@c2e69d7c5d50776282f796db6865d6ab3f34b429 # main
-        with:
-          requirements-path: ${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/requirements.txt
       - name: Remove stale issue labels
+        uses: warpdotdev/oz-for-oss/.github/actions/run-oz-python-script@main # main
+        with:
+          script-path: remove_stale_issue_labels_on_plan_approved.py
         env:
-          PYTHONPATH: ${{ env.WORKFLOW_CODE_PATH }}/.github/scripts
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           PR_NUMBER: ${{ inputs.pr_number }}
-        run: python "${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/remove_stale_issue_labels_on_plan_approved.py"

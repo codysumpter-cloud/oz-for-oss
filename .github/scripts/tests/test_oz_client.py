@@ -49,6 +49,8 @@ class SkillSpecTest(unittest.TestCase):
     def test_prefers_consuming_repo_skill_when_present(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             repo_root = Path(tempdir)
+            workflow_root = repo_root / "__oz_shared"
+            workflow_root.mkdir()
             skill_path = repo_root / ".agents/skills/implement-issue/SKILL.md"
             skill_path.parent.mkdir(parents=True)
             skill_path.write_text("# implement issue\n", encoding="utf-8")
@@ -58,10 +60,9 @@ class SkillSpecTest(unittest.TestCase):
                     "GITHUB_REPOSITORY": "warpdotdev/consumer-repo",
                     "GITHUB_WORKSPACE": str(repo_root),
                     "WORKFLOW_CODE_REPOSITORY": "warpdotdev/oz-for-oss",
-                    "WORKFLOW_CODE_PATH": "__oz_shared",
                 },
                 clear=False,
-            ):
+            ), patch.object(oz_client, "_workflow_code_root", return_value=workflow_root):
                 self.assertEqual(
                     skill_spec("implement-issue"),
                     "warpdotdev/consumer-repo:.agents/skills/implement-issue/SKILL.md",
@@ -74,7 +75,8 @@ class SkillSpecTest(unittest.TestCase):
     def test_falls_back_to_workflow_repo_skill_when_consumer_repo_lacks_it(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             repo_root = Path(tempdir)
-            skill_path = repo_root / "__oz_shared/.agents/skills/implement-issue/SKILL.md"
+            workflow_root = repo_root / "__oz_shared"
+            skill_path = workflow_root / ".agents/skills/implement-issue/SKILL.md"
             skill_path.parent.mkdir(parents=True)
             skill_path.write_text("# implement issue\n", encoding="utf-8")
             with patch.dict(
@@ -83,10 +85,9 @@ class SkillSpecTest(unittest.TestCase):
                     "GITHUB_REPOSITORY": "warpdotdev/consumer-repo",
                     "GITHUB_WORKSPACE": str(repo_root),
                     "WORKFLOW_CODE_REPOSITORY": "warpdotdev/oz-for-oss",
-                    "WORKFLOW_CODE_PATH": "__oz_shared",
                 },
                 clear=False,
-            ):
+            ), patch.object(oz_client, "_workflow_code_root", return_value=workflow_root):
                 self.assertEqual(
                     skill_spec("implement-issue"),
                     "warpdotdev/oz-for-oss:.agents/skills/implement-issue/SKILL.md",
@@ -125,32 +126,6 @@ class SkillSpecTest(unittest.TestCase):
 
 
 class WorkflowCodeRootTest(unittest.TestCase):
-    def test_honors_configured_absolute_path(self) -> None:
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            with patch.dict(
-                os.environ,
-                {"WORKFLOW_CODE_PATH": str(root)},
-                clear=False,
-            ):
-                self.assertEqual(_workflow_code_root(), root)
-
-    def test_resolves_relative_configured_path_against_workspace(self) -> None:
-        with tempfile.TemporaryDirectory() as tempdir:
-            workspace_root = Path(tempdir)
-            (workspace_root / "__oz_shared").mkdir()
-            with patch.dict(
-                os.environ,
-                {
-                    "GITHUB_WORKSPACE": str(workspace_root),
-                    "WORKFLOW_CODE_PATH": "__oz_shared",
-                },
-                clear=False,
-            ):
-                self.assertEqual(
-                    _workflow_code_root(), workspace_root / "__oz_shared"
-                )
-
     def test_walks_up_to_github_sentinel(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             repo_root = Path(tempdir).resolve()
@@ -158,14 +133,7 @@ class WorkflowCodeRootTest(unittest.TestCase):
             nested.mkdir(parents=True)
             fake_module = nested / "oz_client.py"
             fake_module.write_text("", encoding="utf-8")
-            env_without_override = {
-                key: value
-                for key, value in os.environ.items()
-                if key != "WORKFLOW_CODE_PATH"
-            }
-            with patch.dict(os.environ, env_without_override, clear=True), patch.object(
-                oz_client, "__file__", str(fake_module)
-            ):
+            with patch.object(oz_client, "__file__", str(fake_module)):
                 self.assertEqual(_workflow_code_root(), repo_root)
 
     def test_walks_up_when_module_is_nested_deeper(self) -> None:
@@ -182,14 +150,7 @@ class WorkflowCodeRootTest(unittest.TestCase):
             nested.mkdir(parents=True)
             fake_module = nested / "oz_client.py"
             fake_module.write_text("", encoding="utf-8")
-            env_without_override = {
-                key: value
-                for key, value in os.environ.items()
-                if key != "WORKFLOW_CODE_PATH"
-            }
-            with patch.dict(os.environ, env_without_override, clear=True), patch.object(
-                oz_client, "__file__", str(fake_module)
-            ):
+            with patch.object(oz_client, "__file__", str(fake_module)):
                 self.assertEqual(_workflow_code_root(), repo_root)
 
     def test_raises_when_no_github_sentinel_found(self) -> None:
@@ -198,14 +159,7 @@ class WorkflowCodeRootTest(unittest.TestCase):
             nested.mkdir(parents=True)
             fake_module = nested / "oz_client.py"
             fake_module.write_text("", encoding="utf-8")
-            env_without_override = {
-                key: value
-                for key, value in os.environ.items()
-                if key != "WORKFLOW_CODE_PATH"
-            }
-            with patch.dict(os.environ, env_without_override, clear=True), patch.object(
-                oz_client, "__file__", str(fake_module)
-            ):
+            with patch.object(oz_client, "__file__", str(fake_module)):
                 with self.assertRaises(RuntimeError) as ctx:
                     _workflow_code_root()
                 self.assertIn(".github", str(ctx.exception))

@@ -11,10 +11,6 @@ jobs:
     runs-on: ubuntu-slim
     permissions:
       issues: write
-    env:
-      WORKFLOW_CODE_REPOSITORY: warpdotdev/oz-for-oss
-      WORKFLOW_CODE_REF: ${{ github.workflow_sha }}
-      WORKFLOW_CODE_PATH: __oz_shared
     steps:
       - name: Create GitHub App token
         id: app_token
@@ -25,20 +21,10 @@ jobs:
           private-key: ${{ secrets.OZ_MGMT_GHA_PRIVATE_KEY }}
       - name: Checkout repo
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-      - name: Checkout workflow code
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-        with:
-          repository: ${{ env.WORKFLOW_CODE_REPOSITORY }}
-          ref: ${{ env.WORKFLOW_CODE_REF }}
-          path: ${{ env.WORKFLOW_CODE_PATH }}
-          token: ${{ steps.app_token.outputs.token }}
-      - name: Set up Oz Python environment
-        uses: warpdotdev/oz-for-oss/.github/actions/setup-oz-python@c2e69d7c5d50776282f796db6865d6ab3f34b429 # main
-        with:
-          requirements-path: ${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/requirements.txt
       - name: Run unready-assignment workflow
+        uses: warpdotdev/oz-for-oss/.github/actions/run-oz-python-script@main # main
+        with:
+          script-path: comment_on_unready_assigned_issue.py
         env:
-          PYTHONPATH: ${{ env.WORKFLOW_CODE_PATH }}/.github/scripts
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           GH_APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
-        run: python "${{ env.WORKFLOW_CODE_PATH }}/.github/scripts/comment_on_unready_assigned_issue.py"

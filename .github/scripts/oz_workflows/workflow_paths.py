@@ -2,25 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .env import optional_env, workspace
+from .env import workspace
 
 
 def workflow_code_root(start_path: str | Path | None = None) -> Path:
-    """Return the checked-out workflow code root when available."""
-    configured_path = optional_env("WORKFLOW_CODE_PATH")
-    if configured_path:
-        root = Path(configured_path)
-        if not root.is_absolute():
-            root = workspace() / root
-        return root
+    """Return the workflow code root by walking up to the nearest .github directory."""
     start = Path(start_path or __file__).resolve()
     for candidate in start.parents:
         if (candidate / ".github").is_dir():
             return candidate
     raise RuntimeError(
         "Unable to locate the workflow code root: no '.github' sentinel "
-        f"directory found while walking up from {start}. Set "
-        "WORKFLOW_CODE_PATH to override."
+        f"directory found while walking up from {start}."
     )
 
 
