@@ -53,7 +53,7 @@ to customize agent behavior:
 The reusable workflows in this repository are invoked via `workflow_call`. Your target repository needs thin local adapter workflows that map GitHub events to the reusable workflows.
 
 Use the `*-local.yml` files in this repository as reference adapters. Copy them into `.github/workflows/` in your target repository and change each `uses:` ref from `./.github/workflows/<workflow>.yml` to `warpdotdev/oz-for-oss/.github/workflows/<workflow>.yml@main`.
-The reusable workflows now delegate their shared helper logic through composite actions in `warpdotdev/oz-for-oss/.github/actions/` rather than doing a second checkout of this repository into the caller workspace.
+The reusable workflows delegate their shared helper logic through composite actions in `warpdotdev/oz-for-oss/.github/actions/` rather than doing a second checkout of this repository into the caller workspace.
 
 - **Issue triage** — [`triage-new-issues-local.yml`](.github/workflows/triage-new-issues-local.yml)
 - **Spec creation** — [`create-spec-from-issue-local.yml`](.github/workflows/create-spec-from-issue-local.yml)

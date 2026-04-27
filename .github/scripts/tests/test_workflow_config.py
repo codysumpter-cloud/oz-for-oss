@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import oz_workflows.workflow_paths
 from oz_workflows.workflow_config import (
     SelfImprovementConfig,
     TriageWorkflowConfig,
@@ -29,13 +30,8 @@ class ResolveRepoConfigPathTest(unittest.TestCase):
             workflow_root = workspace_root / "__oz_shared"
             consumer_config = _write_config(workspace_root, "version: 1\n")
             _write_config(workflow_root, "version: 1\n")
-            with patch.dict(
-                os.environ,
-                {
-                    "GITHUB_WORKSPACE": str(workspace_root),
-                    "WORKFLOW_CODE_PATH": "__oz_shared",
-                },
-                clear=False,
+            with patch.object(
+                oz_workflows.workflow_paths, "workflow_code_root", return_value=workflow_root
             ):
                 self.assertEqual(
                     resolve_repo_config_path(workspace_root),
@@ -47,13 +43,8 @@ class ResolveRepoConfigPathTest(unittest.TestCase):
             workspace_root = Path(tempdir)
             workflow_root = workspace_root / "__oz_shared"
             workflow_config = _write_config(workflow_root, "version: 1\n")
-            with patch.dict(
-                os.environ,
-                {
-                    "GITHUB_WORKSPACE": str(workspace_root),
-                    "WORKFLOW_CODE_PATH": "__oz_shared",
-                },
-                clear=False,
+            with patch.object(
+                oz_workflows.workflow_paths, "workflow_code_root", return_value=workflow_root
             ):
                 self.assertEqual(
                     resolve_repo_config_path(workspace_root),
