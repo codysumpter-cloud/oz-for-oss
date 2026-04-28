@@ -596,15 +596,29 @@ def _write_text_file(path: Path, content: str) -> None:
     path.write_text(content.rstrip() + "\n", encoding="utf-8")
 
 
-def _checkout_review_head_branch(*, workspace_path: Path, head_branch: str) -> None:
-    """Check out the PR head branch in the host workspace before starting Docker."""
+def _checkout_review_head_branch(*, workspace_path: Path, pr_number: int) -> None:
+    """Check out the PR head branch in the host workspace before starting Docker.
+
+    Resolves the head ref through ``refs/pull/<pr_number>/head`` rather than
+    assuming the branch lives on ``origin``. GitHub maintains that ref on the
+    base repository for every open PR, including PRs opened from forks where
+    the head branch never exists on ``origin`` and a plain
+    ``git fetch origin <head_branch>`` would fail with
+    ``couldn't find remote ref``.
+
+    Check out ``FETCH_HEAD`` in detached mode rather than writing the fetched
+    commit to a local branch named after the PR head ref. Fork authors control
+    the head branch name, and branch names like ``main`` could collide with an
+    existing local branch in the workflow checkout.
+    """
+    pr_ref = f"refs/pull/{pr_number}/head"
     subprocess.run(
-        ["git", "fetch", "origin", head_branch],
+        ["git", "fetch", "origin", pr_ref],
         cwd=str(workspace_path),
         check=True,
     )
     subprocess.run(
-        ["git", "checkout", head_branch],
+        ["git", "checkout", "--detach", "FETCH_HEAD"],
         cwd=str(workspace_path),
         check=True,
     )
@@ -862,7 +876,7 @@ def main() -> None:
         )
         _checkout_review_head_branch(
             workspace_path=workspace_path,
-            head_branch=str(pr.head.ref),
+            pr_number=pr_number,
         )
         companion_path = resolve_repo_local_skill_path(workspace_path, skill_name)
         if companion_path is not None:
