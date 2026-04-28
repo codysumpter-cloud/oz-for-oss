@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from review_pr import (
     RETRIGGER_HINT,
+    _checkout_review_head_branch,
     _container_companion_path,
     _build_diff_line_map,
     _commentable_lines_for_patch,
@@ -129,6 +130,43 @@ class LaunchReviewAgentTest(unittest.TestCase):
             kwargs["forward_env_names"],
             ("WARP_API_KEY", "WARP_API_BASE_URL"),
         )
+
+
+class CheckoutReviewHeadBranchTest(unittest.TestCase):
+    def test_fetches_pr_head_ref_to_support_fork_prs(self) -> None:
+        """PRs from forks have their head branch on the fork, not on origin.
+
+        We must resolve the head ref through ``refs/pull/<n>/head`` (which
+        GitHub maintains on the base repository for every open PR) instead
+        of doing ``git fetch origin <head_branch>``, which fails for fork
+        PRs with ``couldn't find remote ref``.
+        """
+        with patch("review_pr.subprocess.run") as run_mock:
+            run_mock.return_value = SimpleNamespace(returncode=0)
+            _checkout_review_head_branch(
+                workspace_path=Path("/tmp/workspace"),
+                pr_number=9242,
+                head_branch="orbit/remove-fake-file",
+            )
+        self.assertEqual(run_mock.call_count, 2)
+        fetch_args, _ = run_mock.call_args_list[0]
+        checkout_args, _ = run_mock.call_args_list[1]
+        self.assertEqual(
+            fetch_args[0],
+            [
+                "git",
+                "fetch",
+                "origin",
+                "+refs/pull/9242/head:refs/heads/orbit/remove-fake-file",
+            ],
+        )
+        self.assertEqual(
+            checkout_args[0],
+            ["git", "checkout", "orbit/remove-fake-file"],
+        )
+        for call in run_mock.call_args_list:
+            self.assertEqual(call.kwargs["cwd"], "/tmp/workspace")
+            self.assertTrue(call.kwargs["check"])
 
 
 class MaterializeSpecContextTest(unittest.TestCase):

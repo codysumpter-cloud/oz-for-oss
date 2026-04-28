@@ -596,10 +596,21 @@ def _write_text_file(path: Path, content: str) -> None:
     path.write_text(content.rstrip() + "\n", encoding="utf-8")
 
 
-def _checkout_review_head_branch(*, workspace_path: Path, head_branch: str) -> None:
-    """Check out the PR head branch in the host workspace before starting Docker."""
+def _checkout_review_head_branch(
+    *, workspace_path: Path, pr_number: int, head_branch: str
+) -> None:
+    """Check out the PR head branch in the host workspace before starting Docker.
+
+    Resolves the head ref through ``refs/pull/<pr_number>/head`` rather than
+    assuming the branch lives on ``origin``. GitHub maintains that ref on the
+    base repository for every open PR, including PRs opened from forks where
+    the head branch never exists on ``origin`` and a plain
+    ``git fetch origin <head_branch>`` would fail with
+    ``couldn't find remote ref``.
+    """
+    pr_ref = f"refs/pull/{pr_number}/head"
     subprocess.run(
-        ["git", "fetch", "origin", head_branch],
+        ["git", "fetch", "origin", f"+{pr_ref}:refs/heads/{head_branch}"],
         cwd=str(workspace_path),
         check=True,
     )
@@ -862,6 +873,7 @@ def main() -> None:
         )
         _checkout_review_head_branch(
             workspace_path=workspace_path,
+            pr_number=pr_number,
             head_branch=str(pr.head.ref),
         )
         companion_path = resolve_repo_local_skill_path(workspace_path, skill_name)
