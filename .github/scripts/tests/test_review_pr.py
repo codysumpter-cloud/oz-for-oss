@@ -140,13 +140,16 @@ class CheckoutReviewHeadBranchTest(unittest.TestCase):
         GitHub maintains on the base repository for every open PR) instead
         of doing ``git fetch origin <head_branch>``, which fails for fork
         PRs with ``couldn't find remote ref``.
+
+        Checking out ``FETCH_HEAD`` in detached mode avoids writing a
+        user-controlled fork branch name to a local branch in the workflow
+        checkout.
         """
         with patch("review_pr.subprocess.run") as run_mock:
             run_mock.return_value = SimpleNamespace(returncode=0)
             _checkout_review_head_branch(
                 workspace_path=Path("/tmp/workspace"),
                 pr_number=9242,
-                head_branch="orbit/remove-fake-file",
             )
         self.assertEqual(run_mock.call_count, 2)
         fetch_args, _ = run_mock.call_args_list[0]
@@ -157,12 +160,12 @@ class CheckoutReviewHeadBranchTest(unittest.TestCase):
                 "git",
                 "fetch",
                 "origin",
-                "+refs/pull/9242/head:refs/heads/orbit/remove-fake-file",
+                "refs/pull/9242/head",
             ],
         )
         self.assertEqual(
             checkout_args[0],
-            ["git", "checkout", "orbit/remove-fake-file"],
+            ["git", "checkout", "--detach", "FETCH_HEAD"],
         )
         for call in run_mock.call_args_list:
             self.assertEqual(call.kwargs["cwd"], "/tmp/workspace")
