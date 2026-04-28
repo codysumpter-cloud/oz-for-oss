@@ -17,11 +17,6 @@ on:
         required: false
         default: ""
         type: string
-      focus:
-        description: Optional extra focus guidance for the review
-        required: false
-        default: ""
-        type: string
       comment_id:
         description: Issue comment ID to react to for slash-command reviews
         required: false
@@ -62,7 +57,6 @@ jobs:
           INPUT_PR_NUMBER: ${{ inputs.pr_number || '' }}
           INPUT_TRIGGER_SOURCE: ${{ inputs.trigger_source || '' }}
           INPUT_REQUESTER: ${{ inputs.requester || '' }}
-          INPUT_FOCUS: ${{ inputs.focus || '' }}
           INPUT_COMMENT_ID: ${{ inputs.comment_id || '' }}
           GITHUB_ACTOR_LOGIN: ${{ github.actor }}
         run: |
@@ -80,7 +74,6 @@ jobs:
           has_pr_hooks = Path(".github/workflows/pr-hooks.yml").exists()
           trigger_source = os.environ.get("INPUT_TRIGGER_SOURCE", "").strip() or event_name
           requester = os.environ.get("INPUT_REQUESTER", "").strip() or os.environ.get("GITHUB_ACTOR_LOGIN", "")
-          focus = os.environ.get("INPUT_FOCUS", "")
           comment_id = os.environ.get("INPUT_COMMENT_ID", "")
           pr_number = input_pr_number or str(pr.get("number") or "")
           matches_direct_trigger = (
@@ -100,9 +93,6 @@ jobs:
               fh.write(f"pr_number={pr_number}\n")
               fh.write(f"trigger_source={trigger_source}\n")
               fh.write(f"requester={requester}\n")
-              fh.write("focus<<__EOF__\n")
-              fh.write(focus)
-              fh.write("\n__EOF__\n")
               fh.write(f"comment_id={comment_id}\n")
               if has_pr_hooks and event_name == "pull_request_target" and not input_pr_number:
                   fh.write("skip_reason=pr-hooks-present\n")
@@ -131,7 +121,6 @@ jobs:
           PR_NUMBER: ${{ steps.resolve.outputs.pr_number }}
           TRIGGER_SOURCE: ${{ steps.resolve.outputs.trigger_source }}
           REQUESTER: ${{ steps.resolve.outputs.requester }}
-          REVIEW_FOCUS: ${{ steps.resolve.outputs.focus }}
           COMMENT_ID: ${{ steps.resolve.outputs.comment_id }}
           REVIEW_IMAGE: ${{ env.REVIEW_IMAGE }}
           WARP_API_KEY: ${{ secrets.OSS_WARP_API_KEY }}

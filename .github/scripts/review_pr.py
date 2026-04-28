@@ -453,6 +453,23 @@ def _normalize_review_payload(
     return summary.strip(), normalized_comments
 
 
+# Hint appended to review-related comments so reviewers know they can
+# request another review by commenting ``/oz-review`` on the PR, subject
+# to the per-PR throttle enforced by ``resolve_review_context``.
+RETRIGGER_HINT = (
+    "Comment `/oz-review` on this pull request to retrigger a review "
+    "(up to 3 times on the same pull request)."
+)
+
+
+def _with_retrigger_hint(message: str) -> str:
+    """Append the ``/oz-review`` retrigger hint to a progress message."""
+    base = message.rstrip()
+    if not base:
+        return RETRIGGER_HINT
+    return f"{base}\n\n{RETRIGGER_HINT}"
+
+
 def _format_review_completion_message(
     event: str,
     recommended_reviewers: list[str],
@@ -461,17 +478,20 @@ def _format_review_completion_message(
     if event == "APPROVE":
         if recommended_reviewers:
             mentions = ", ".join(f"@{login}" for login in recommended_reviewers)
-            return (
+            base = (
                 "I approved this pull request and requested human review from: "
                 f"{mentions}."
             )
-        return (
-            "I approved this pull request. No matching stakeholder was found "
-            "for the changed files, so no human reviewers were requested."
-        )
-    if event == "REQUEST_CHANGES":
-        return "I requested changes on this pull request and posted feedback."
-    return "I completed the review and posted feedback on this pull request."
+        else:
+            base = (
+                "I approved this pull request. No matching stakeholder was found "
+                "for the changed files, so no human reviewers were requested."
+            )
+    elif event == "REQUEST_CHANGES":
+        base = "I requested changes on this pull request and posted feedback."
+    else:
+        base = "I completed the review and posted feedback on this pull request."
+    return _with_retrigger_hint(base)
 
 
 def _container_companion_path(
@@ -781,7 +801,6 @@ def main() -> None:
     pr_number = int(require_env("PR_NUMBER"))
     trigger_source = require_env("TRIGGER_SOURCE")
     requester = require_env("REQUESTER")
-    focus = optional_env("REVIEW_FOCUS")
     comment_id_raw = optional_env("COMMENT_ID")
     with closing(Github(auth=Auth.Token(require_env("GH_TOKEN")))) as client:
         workspace_path = Path(workspace())
@@ -821,7 +840,6 @@ def main() -> None:
             format_review_start_line(
                 spec_only=spec_only,
                 is_rereview=is_rereview,
-                focus=focus,
             )
         )
         issue_line = (
@@ -833,13 +851,9 @@ def main() -> None:
         skill_name = "review-spec" if spec_only else "review-pr"
 
         focus_line = (
-            f"Additional focus from @{requester}: {focus}"
-            if focus
-            else (
-                f"The review was requested by @{requester} via a review command. Perform a general review if no extra guidance was provided."
-                if trigger_source == "issue_comment"
-                else "Perform a general review of the pull request."
-            )
+            f"The review was requested by @{requester} via a review command. Perform a general review."
+            if trigger_source == "issue_comment"
+            else "Perform a general review of the pull request."
         )
         supplemental_skill_line = (
             "Also apply the repository's local `security-review-spec` skill as a supplemental high-level security pass and fold any security findings into the same combined `review.json`. Do not produce a separate security review output."
@@ -999,9 +1013,15 @@ def main() -> None:
                 # agent had nothing to say, skip posting an empty review.
                 # Non-member PRs always post so the verdict lands on the
                 # PR even when the agent has no inline comments.
-                progress.complete("I completed the review and did not identify any actionable feedback for this pull request.")
+                progress.complete(
+                    _with_retrigger_hint(
+                        "I completed the review and did not identify any actionable feedback for this pull request."
+                    )
+                )
                 return
-            review_body = f"{summary or 'Automated review'}\n\n{POWERED_BY_SUFFIX}"
+            review_body = (
+                f"{summary or 'Automated review'}\n\n{RETRIGGER_HINT}\n\n{POWERED_BY_SUFFIX}"
+            )
             if comments:
                 pr.create_review(body=review_body, event=event, comments=comments)
             else:

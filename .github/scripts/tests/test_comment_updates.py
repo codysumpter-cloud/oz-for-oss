@@ -1471,14 +1471,6 @@ class StateAwareStartLineTest(unittest.TestCase):
             format_review_start_line(spec_only=False, is_rereview=True),
         )
 
-    def test_review_start_line_includes_focus(self) -> None:
-        self.assertIn(
-            "Focus: security",
-            format_review_start_line(
-                spec_only=False, is_rereview=True, focus="security"
-            ),
-        )
-
     def test_pr_comment_start_line_distinguishes_thread_source(self) -> None:
         self.assertIn(
             "an inline review-thread comment",
