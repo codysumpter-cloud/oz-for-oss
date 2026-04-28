@@ -28,6 +28,13 @@ jobs:
         )
       )
     runs-on: ubuntu-slim
+    permissions:
+      # ``resolve_review_context.py`` reads PR comments to throttle
+      # explicit ``/oz-review`` invocations; it does not post anything
+      # back to the PR.
+      contents: read
+      pull-requests: read
+      issues: read
     outputs:
       should_review: ${{ steps.resolve.outputs.should_review }}
       pr_number: ${{ steps.resolve.outputs.pr_number }}
@@ -48,6 +55,10 @@ jobs:
           PYTHONPATH: .github/scripts
           DISPATCH_PR_NUMBER: ${{ inputs.pr_number || '' }}
           DISPATCH_FOCUS: ${{ inputs.focus || '' }}
+          # Lets ``resolve_review_context.py`` count prior ``/oz-review``
+          # invocations on the PR so the workflow can cap explicit
+          # invocations at ``MAX_EXPLICIT_INVOCATIONS_PER_PR`` per PR.
+          GH_TOKEN: ${{ github.token }}
         run: python .github/scripts/resolve_review_context.py
   enforce_issue_state:
     if: >-

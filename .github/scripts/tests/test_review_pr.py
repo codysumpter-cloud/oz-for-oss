@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from review_pr import (
+    RETRIGGER_HINT,
     _container_companion_path,
     _build_diff_line_map,
     _commentable_lines_for_patch,
@@ -24,6 +25,7 @@ from review_pr import (
     _resolve_non_member_review_action,
     _stakeholder_logins,
     _validate_suggestion_blocks,
+    _with_retrigger_hint,
     build_review_prompt,
 )
 
@@ -971,23 +973,44 @@ class FormatReviewCompletionMessageTest(unittest.TestCase):
         message = _format_review_completion_message("APPROVE", ["alice", "bob"])
         self.assertIn("approved", message)
         self.assertIn("@alice, @bob", message)
+        self.assertIn(RETRIGGER_HINT, message)
 
     def test_approve_without_reviewers(self) -> None:
         message = _format_review_completion_message("APPROVE", [])
         self.assertIn("approved", message)
         self.assertIn("No matching stakeholder", message)
+        self.assertIn(RETRIGGER_HINT, message)
 
     def test_request_changes(self) -> None:
-        self.assertIn(
-            "requested changes",
-            _format_review_completion_message("REQUEST_CHANGES", []),
-        )
+        message = _format_review_completion_message("REQUEST_CHANGES", [])
+        self.assertIn("requested changes", message)
+        self.assertIn(RETRIGGER_HINT, message)
 
     def test_comment_default(self) -> None:
-        self.assertIn(
-            "posted feedback",
-            _format_review_completion_message("COMMENT", []),
-        )
+        message = _format_review_completion_message("COMMENT", [])
+        self.assertIn("posted feedback", message)
+        self.assertIn(RETRIGGER_HINT, message)
+
+
+class WithRetriggerHintTest(unittest.TestCase):
+    """``_with_retrigger_hint`` tells reviewers how to retrigger a review."""
+
+    def test_appends_hint_after_existing_message(self) -> None:
+        result = _with_retrigger_hint("All done.")
+        self.assertTrue(result.startswith("All done."))
+        self.assertIn(RETRIGGER_HINT, result)
+        self.assertIn("`/oz-review`", result)
+        self.assertIn("retrigger", result)
+
+    def test_returns_hint_alone_when_message_is_empty(self) -> None:
+        self.assertEqual(_with_retrigger_hint(""), RETRIGGER_HINT)
+        self.assertEqual(_with_retrigger_hint("   "), RETRIGGER_HINT)
+
+    def test_separates_hint_with_blank_line(self) -> None:
+        result = _with_retrigger_hint("Done.")
+        # The hint is rendered as a separate paragraph so it stays
+        # visually distinct from the summary text.
+        self.assertIn("Done.\n\n", result)
 
 
 if __name__ == "__main__":
