@@ -6,7 +6,7 @@ on:
         required: true
       OZ_MGMT_GHA_PRIVATE_KEY:
         required: true
-      WARP_API_KEY:
+      OSS_WARP_API_KEY:
         required: true
 jobs:
   trigger_implementation:
