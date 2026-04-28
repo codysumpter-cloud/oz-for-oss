@@ -454,9 +454,11 @@ def _normalize_review_payload(
 
 
 # Hint appended to review-related comments so reviewers know they can
-# request another review by commenting ``/oz-review`` on the PR.
+# request another review by commenting ``/oz-review`` on the PR, subject
+# to the per-PR throttle enforced by ``resolve_review_context``.
 RETRIGGER_HINT = (
-    "Comment `/oz-review` on this pull request to retrigger a review at any time."
+    "Comment `/oz-review` on this pull request to retrigger a review "
+    "(up to 3 times on the same pull request)."
 )
 
 

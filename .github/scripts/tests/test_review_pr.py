@@ -1001,6 +1001,8 @@ class WithRetriggerHintTest(unittest.TestCase):
         self.assertIn(RETRIGGER_HINT, result)
         self.assertIn("`/oz-review`", result)
         self.assertIn("retrigger", result)
+        self.assertIn("up to 3 times", result)
+        self.assertIn("same pull request", result)
 
     def test_returns_hint_alone_when_message_is_empty(self) -> None:
         self.assertEqual(_with_retrigger_hint(""), RETRIGGER_HINT)
