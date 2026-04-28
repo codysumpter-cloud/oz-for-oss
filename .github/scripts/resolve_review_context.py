@@ -67,10 +67,12 @@ def _resolve_comment_match(
     Returns ``(matched, pr_number, requester, comment_id)`` where
     ``matched`` indicates that the comment carries an explicit
     ``/oz-review`` (or equivalent ``@oz-agent /review``) invocation
-    from a non-automation user. The PR number is empty when there is
-    no associated pull request. Any text following the slash command
-    is intentionally discarded so commenters cannot supply a free-form
-    prompt to the review agent.
+    from a non-automation user on a PR with a valid positive number.
+    The PR number is empty when there is no associated pull request.
+    ``comment_id`` is only populated for PR conversation comments
+    because downstream reaction handling uses the issue-comment API.
+    Any text following the slash command is intentionally discarded so
+    commenters cannot supply a free-form prompt to the review agent.
     """
     if event_name == "issue_comment":
         issue = event.get("issue") or {}
@@ -87,9 +89,15 @@ def _resolve_comment_match(
     body = comment.get("body") or ""
     match = SLASH_COMMAND_PATTERN.search(body)
     requester = (comment.get("user") or {}).get("login") or ""
-    comment_id = str(comment.get("id") or "")
+    comment_id = (
+        str(comment.get("id") or "")
+        if event_name == "issue_comment"
+        else ""
+    )
+    has_valid_pr_number = pr_number.isdigit() and int(pr_number) > 0
     matched = (
         is_pr
+        and has_valid_pr_number
         and bool(match)
         and not is_automation_user(comment.get("user"))
     )

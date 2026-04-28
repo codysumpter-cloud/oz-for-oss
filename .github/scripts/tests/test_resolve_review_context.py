@@ -99,11 +99,13 @@ class ResolveCommentMatchTest(unittest.TestCase):
         *,
         body: str,
         association: str,
+        pr_number: int | str | None = 7,
         user_login: str = "external-contributor",
         user_type: str = "User",
     ) -> dict:
+        pull_request = {} if pr_number is None else {"number": pr_number}
         return {
-            "pull_request": {"number": 7},
+            "pull_request": pull_request,
             "comment": {
                 "id": 200,
                 "body": body,
@@ -136,7 +138,38 @@ class ResolveCommentMatchTest(unittest.TestCase):
         self.assertTrue(matched)
         self.assertEqual(pr_number, "7")
         self.assertEqual(requester, "external-contributor")
-        self.assertEqual(comment_id, "200")
+        # Inline review-thread comment IDs are not issue comment IDs, so
+        # they are intentionally not forwarded to the downstream reaction
+        # path that uses GitHub's issue-comment API.
+        self.assertEqual(comment_id, "")
+
+    def test_review_comment_without_pr_number_does_not_match(self) -> None:
+        event = self._build_review_comment_event(
+            body="/oz-review",
+            association="MEMBER",
+            pr_number=None,
+        )
+        matched, pr_number, requester, comment_id = _resolve_comment_match(
+            event, "pull_request_review_comment"
+        )
+        self.assertFalse(matched)
+        self.assertEqual(pr_number, "")
+        self.assertEqual(requester, "external-contributor")
+        self.assertEqual(comment_id, "")
+
+    def test_review_comment_with_invalid_pr_number_does_not_match(self) -> None:
+        event = self._build_review_comment_event(
+            body="/oz-review",
+            association="MEMBER",
+            pr_number="not-a-number",
+        )
+        matched, pr_number, requester, comment_id = _resolve_comment_match(
+            event, "pull_request_review_comment"
+        )
+        self.assertFalse(matched)
+        self.assertEqual(pr_number, "not-a-number")
+        self.assertEqual(requester, "external-contributor")
+        self.assertEqual(comment_id, "")
 
     def test_collaborator_still_matches(self) -> None:
         event = self._build_issue_comment_event(
