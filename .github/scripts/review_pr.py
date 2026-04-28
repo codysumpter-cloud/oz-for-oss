@@ -596,10 +596,24 @@ def _write_text_file(path: Path, content: str) -> None:
     path.write_text(content.rstrip() + "\n", encoding="utf-8")
 
 
-def _checkout_review_head_branch(*, workspace_path: Path, head_branch: str) -> None:
-    """Check out the PR head branch in the host workspace before starting Docker."""
+def _checkout_review_head_branch(
+    *, workspace_path: Path, head_branch: str, pr_number: int
+) -> None:
+    """Check out the PR head branch in the host workspace before starting Docker.
+
+    Fetches via GitHub's ``refs/pull/<n>/head`` ref so this works for PRs
+    opened from forks too, where ``head_branch`` (for example
+    ``feature/foo``) does not exist as a ref on ``origin``. The ``+`` in
+    the refspec lets us force-update the local branch if a stale copy
+    already exists from a previous run.
+    """
     subprocess.run(
-        ["git", "fetch", "origin", head_branch],
+        [
+            "git",
+            "fetch",
+            "origin",
+            f"+refs/pull/{pr_number}/head:refs/heads/{head_branch}",
+        ],
         cwd=str(workspace_path),
         check=True,
     )
@@ -863,6 +877,7 @@ def main() -> None:
         _checkout_review_head_branch(
             workspace_path=workspace_path,
             head_branch=str(pr.head.ref),
+            pr_number=pr_number,
         )
         companion_path = resolve_repo_local_skill_path(workspace_path, skill_name)
         if companion_path is not None:

@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from review_pr import (
     RETRIGGER_HINT,
+    _checkout_review_head_branch,
     _container_companion_path,
     _build_diff_line_map,
     _commentable_lines_for_patch,
@@ -182,6 +183,46 @@ class MaterializeSpecContextTest(unittest.TestCase):
                 )
 
             self.assertFalse((workspace / "spec_context.md").exists())
+
+
+class CheckoutReviewHeadBranchTest(unittest.TestCase):
+    """``_checkout_review_head_branch`` must work for fork PRs too.
+
+    For PRs opened from a fork, the head branch (e.g. ``feature/foo``)
+    does not exist as a ref on ``origin``; only ``refs/pull/<n>/head``
+    does. The function should fetch via that ref so a plain ``git
+    fetch origin <branch>`` failure on fork PRs no longer breaks the
+    review workflow.
+    """
+
+    def test_fetches_via_pull_request_ref_and_checks_out_branch(self) -> None:
+        with patch("review_pr.subprocess.run") as run_mock:
+            run_mock.return_value = SimpleNamespace(returncode=0)
+            _checkout_review_head_branch(
+                workspace_path=Path("/tmp/workspace"),
+                head_branch="feature/foo",
+                pr_number=42,
+            )
+        self.assertEqual(run_mock.call_count, 2)
+        fetch_call, checkout_call = run_mock.call_args_list
+        self.assertEqual(
+            fetch_call.args[0],
+            [
+                "git",
+                "fetch",
+                "origin",
+                "+refs/pull/42/head:refs/heads/feature/foo",
+            ],
+        )
+        self.assertEqual(fetch_call.kwargs["cwd"], "/tmp/workspace")
+        self.assertTrue(fetch_call.kwargs["check"])
+        self.assertEqual(
+            checkout_call.args[0],
+            ["git", "checkout", "feature/foo"],
+        )
+        self.assertEqual(checkout_call.kwargs["cwd"], "/tmp/workspace")
+        self.assertTrue(checkout_call.kwargs["check"])
+
 
 class CommentableLinesForPatchTest(unittest.TestCase):
     def test_commentable_lines_table(self) -> None:
