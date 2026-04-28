@@ -32,7 +32,7 @@ Add the following **secrets** to each target repository (or at the organization 
 |---|---|
 | `OZ_MGMT_GHA_APP_ID` | The numeric App ID of the GitHub App created above. |
 | `OZ_MGMT_GHA_PRIVATE_KEY` | The PEM-encoded private key for that App. |
-| `WARP_API_KEY` | Your Warp API key, used to invoke Oz agents. |
+| `OSS_WARP_API_KEY` | Your Warp API key, used to invoke Oz agents. |
 
 Set the following **repository variable** (not a secret) for reusable workflows
 that invoke Oz cloud agents directly:

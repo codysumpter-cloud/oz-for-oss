@@ -57,6 +57,6 @@ jobs:
           GH_APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
           LOOKBACK_MINUTES: ${{ inputs.lookback_minutes || '60' }}
           TRIAGE_ISSUE_NUMBER: ${{ inputs.issue_number || '' }}
-          WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
+          WARP_API_KEY: ${{ secrets.OSS_WARP_API_KEY }}
           WARP_AGENT_MODEL: ${{ vars.WARP_AGENT_MODEL || '' }}
           WARP_API_BASE_URL: https://app.warp.dev/api/v1

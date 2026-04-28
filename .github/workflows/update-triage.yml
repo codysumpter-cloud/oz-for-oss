@@ -37,7 +37,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           LOOKBACK_DAYS: ${{ inputs.lookback_days || '7' }}
-          WARP_API_KEY: ${{ secrets.WARP_API_KEY }}
+          WARP_API_KEY: ${{ secrets.OSS_WARP_API_KEY }}
           WARP_AGENT_MODEL: ${{ vars.WARP_AGENT_MODEL || '' }}
           WARP_ENVIRONMENT_ID: ${{ vars.WARP_ENVIRONMENT_ID || '' }}
           WARP_API_BASE_URL: https://app.warp.dev/api/v1
