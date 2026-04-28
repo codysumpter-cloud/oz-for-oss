@@ -500,18 +500,13 @@ def format_implementation_complete_line(
 
 
 def format_review_start_line(
-    *, spec_only: bool, is_rereview: bool, focus: str = ""
+    *, spec_only: bool, is_rereview: bool
 ) -> str:
     """State-aware opening line for the review-pull-request workflow."""
     kind = "spec-only pull request" if spec_only else "pull request"
     if is_rereview:
-        base = f"I'm re-reviewing this {kind} in response to a review request."
-    else:
-        base = f"I'm starting a first review of this {kind}."
-    focus_text = (focus or "").strip()
-    if focus_text:
-        return f"{base} Focus: {focus_text}"
-    return base
+        return f"I'm re-reviewing this {kind} in response to a review request."
+    return f"I'm starting a first review of this {kind}."
 
 
 def format_pr_comment_start_line(

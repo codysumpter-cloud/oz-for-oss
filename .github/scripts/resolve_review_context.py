@@ -11,8 +11,11 @@ from oz_workflows.env import load_event, optional_env, repo_slug
 from oz_workflows.helpers import is_automation_user
 
 
+# The slash command intentionally has no capture group: any text after
+# ``/oz-review`` (or ``@oz-agent /review``) is ignored so commenters
+# cannot inject a free-form prompt into the agent's review run.
 SLASH_COMMAND_PATTERN = re.compile(
-    r"(?:^|\s)(?:/oz-review|@oz-agent\s+/review)\b([\s\S]*)", re.IGNORECASE
+    r"(?:^|\s)(?:/oz-review|@oz-agent\s+/review)\b", re.IGNORECASE
 )
 
 # Maximum number of explicit ``/oz-review`` invocations the workflow will
@@ -32,32 +35,42 @@ def _count_explicit_invocations(
     Counts both PR conversation (issue) comments and inline review
     comments. The triggering comment that just landed is included in
     this count because GitHub has already persisted it by the time the
-    workflow runs.
+    workflow runs. Comments authored by automation accounts (bots) are
+    excluded so a chatty bot cannot exhaust the per-PR throttle on
+    behalf of human reviewers.
     """
     repo = client.get_repo(repo_full_name)
     pr = repo.get_pull(pr_number)
     count = 0
     for comment in pr.get_issue_comments():
         body = getattr(comment, "body", "") or ""
-        if SLASH_COMMAND_PATTERN.search(body):
-            count += 1
+        if not SLASH_COMMAND_PATTERN.search(body):
+            continue
+        if is_automation_user(getattr(comment, "user", None)):
+            continue
+        count += 1
     for comment in pr.get_review_comments():
         body = getattr(comment, "body", "") or ""
-        if SLASH_COMMAND_PATTERN.search(body):
-            count += 1
+        if not SLASH_COMMAND_PATTERN.search(body):
+            continue
+        if is_automation_user(getattr(comment, "user", None)):
+            continue
+        count += 1
     return count
 
 
 def _resolve_comment_match(
     event: dict[str, Any], event_name: str
-) -> tuple[bool, str, str, str, str]:
+) -> tuple[bool, str, str, str]:
     """Resolve the slash-command intent for a comment-based event.
 
-    Returns ``(matched, pr_number, focus, requester, comment_id)``
-    where ``matched`` indicates that the comment carries an explicit
+    Returns ``(matched, pr_number, requester, comment_id)`` where
+    ``matched`` indicates that the comment carries an explicit
     ``/oz-review`` (or equivalent ``@oz-agent /review``) invocation
     from a non-automation user. The PR number is empty when there is
-    no associated pull request.
+    no associated pull request. Any text following the slash command
+    is intentionally discarded so commenters cannot supply a free-form
+    prompt to the review agent.
     """
     if event_name == "issue_comment":
         issue = event.get("issue") or {}
@@ -68,20 +81,19 @@ def _resolve_comment_match(
         is_pr = True
         pr_number = str(pull_request.get("number") or "")
     else:
-        return False, "", "", "", ""
+        return False, "", "", ""
 
     comment = event.get("comment") or {}
     body = comment.get("body") or ""
     match = SLASH_COMMAND_PATTERN.search(body)
     requester = (comment.get("user") or {}).get("login") or ""
     comment_id = str(comment.get("id") or "")
-    focus = match.group(1).strip() if match else ""
     matched = (
         is_pr
         and bool(match)
         and not is_automation_user(comment.get("user"))
     )
-    return matched, pr_number, focus, requester, comment_id
+    return matched, pr_number, requester, comment_id
 
 
 def main() -> None:
@@ -92,24 +104,21 @@ def main() -> None:
     pr_number = ""
     trigger_source = github_event_name
     requester = optional_env("GITHUB_ACTOR")
-    focus = ""
     comment_id = ""
     is_explicit_invocation = False
 
     if github_event_name == "workflow_dispatch":
         candidate = optional_env("DISPATCH_PR_NUMBER")
-        focus = optional_env("DISPATCH_FOCUS")
         if candidate.isdigit() and int(candidate) > 0:
             should_review = True
             pr_number = candidate
     elif github_event_name in {"issue_comment", "pull_request_review_comment"}:
-        matched, candidate_pr, candidate_focus, candidate_requester, candidate_comment_id = (
+        matched, candidate_pr, candidate_requester, candidate_comment_id = (
             _resolve_comment_match(event, github_event_name)
         )
         if candidate_requester:
             requester = candidate_requester
         comment_id = candidate_comment_id
-        focus = candidate_focus
         if matched:
             should_review = True
             pr_number = candidate_pr
@@ -148,7 +157,6 @@ def main() -> None:
     set_output("pr_number", pr_number if should_review else "")
     set_output("trigger_source", trigger_source)
     set_output("requester", requester)
-    set_output("focus", focus)
     set_output("comment_id", comment_id)
     if not should_review:
         notice("PR review orchestration skipped after context resolution.")

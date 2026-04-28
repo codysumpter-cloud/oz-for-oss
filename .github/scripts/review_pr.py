@@ -801,7 +801,6 @@ def main() -> None:
     pr_number = int(require_env("PR_NUMBER"))
     trigger_source = require_env("TRIGGER_SOURCE")
     requester = require_env("REQUESTER")
-    focus = optional_env("REVIEW_FOCUS")
     comment_id_raw = optional_env("COMMENT_ID")
     with closing(Github(auth=Auth.Token(require_env("GH_TOKEN")))) as client:
         workspace_path = Path(workspace())
@@ -841,7 +840,6 @@ def main() -> None:
             format_review_start_line(
                 spec_only=spec_only,
                 is_rereview=is_rereview,
-                focus=focus,
             )
         )
         issue_line = (
@@ -853,13 +851,9 @@ def main() -> None:
         skill_name = "review-spec" if spec_only else "review-pr"
 
         focus_line = (
-            f"Additional focus from @{requester}: {focus}"
-            if focus
-            else (
-                f"The review was requested by @{requester} via a review command. Perform a general review if no extra guidance was provided."
-                if trigger_source == "issue_comment"
-                else "Perform a general review of the pull request."
-            )
+            f"The review was requested by @{requester} via a review command. Perform a general review."
+            if trigger_source == "issue_comment"
+            else "Perform a general review of the pull request."
         )
         supplemental_skill_line = (
             "Also apply the repository's local `security-review-spec` skill as a supplemental high-level security pass and fold any security findings into the same combined `review.json`. Do not produce a separate security review output."

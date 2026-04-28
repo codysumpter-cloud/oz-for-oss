@@ -12,11 +12,6 @@ on:
         description: Pull request number to review
         required: true
         type: string
-      focus:
-        description: Optional extra focus guidance for the review
-        required: false
-        default: ""
-        type: string
 jobs:
   resolve_review_context:
     if: >-
@@ -40,7 +35,6 @@ jobs:
       pr_number: ${{ steps.resolve.outputs.pr_number }}
       trigger_source: ${{ steps.resolve.outputs.trigger_source }}
       requester: ${{ steps.resolve.outputs.requester }}
-      focus: ${{ steps.resolve.outputs.focus }}
       comment_id: ${{ steps.resolve.outputs.comment_id }}
     steps:
       - name: Checkout repo
@@ -54,7 +48,6 @@ jobs:
         env:
           PYTHONPATH: .github/scripts
           DISPATCH_PR_NUMBER: ${{ inputs.pr_number || '' }}
-          DISPATCH_FOCUS: ${{ inputs.focus || '' }}
           # Lets ``resolve_review_context.py`` count prior ``/oz-review``
           # invocations on the PR so the workflow can cap explicit
           # invocations at ``MAX_EXPLICIT_INVOCATIONS_PER_PR`` per PR.
@@ -121,6 +114,5 @@ jobs:
       pr_number: ${{ needs.resolve_review_context.outputs.pr_number }}
       trigger_source: ${{ needs.resolve_review_context.outputs.trigger_source }}
       requester: ${{ needs.resolve_review_context.outputs.requester }}
-      focus: ${{ needs.resolve_review_context.outputs.focus }}
       comment_id: ${{ needs.resolve_review_context.outputs.comment_id }}
     secrets: inherit
