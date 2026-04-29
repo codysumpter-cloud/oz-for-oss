@@ -4,6 +4,12 @@ Oz for OSS contains a set of workflows to help manage the overhead of maintainin
 
 The automation is organized as GitHub Actions workflows under `.github/workflows/` that invoke Python entrypoints in `.github/scripts/` (with shared helpers in `.github/scripts/oz_workflows/`), backed by triage label definitions in `.github/issue-triage/`, a CODEOWNERS-style stakeholder map in `.github/STAKEHOLDERS`, and committed spec artifacts under `specs/GH{number}/product.md` and `specs/GH{number}/tech.md`. Together these cover issue triage, product and tech spec creation, issue implementation scaffolding, PR issue-state enforcement, PR review orchestration, and unready-assignment guidance for Oz.
 
+## Have an open-source project?
+
+Actively maintained open-source projects can apply for the [Oz Open Source Partnership](https://docs.warp.dev/support-and-community/community/open-source-partnership) to receive free Oz credits for using these workflows. Accepted projects can use Oz agents for tasks like issue triage, pull request review, documentation, and implementation support across their repositories.
+
+To apply, [fill out the application form](https://tally.so/r/LZWxqG) and we'll be in touch.
+
 ## How to use these workflows in your own repo
 
 To use the `oz-for-oss` reusable workflows in another repository, you need a GitHub App installation, a set of GitHub Actions secrets and variables, and local adapter workflows that call the reusable layer.
