@@ -45,5 +45,10 @@ jobs:
       - name: Run tests
         if: steps.filter.outputs.has_code_changes == 'true'
         env:
-          PYTHONPATH: .github/scripts
+          # Include `lib` so PRs that have already moved
+          # `oz_workflows` to the new top-level `lib/` location
+          # (per the webhook control-plane migration) can still
+          # import it. Non-existent path entries are ignored, so
+          # this stays safe for PRs that have not migrated yet.
+          PYTHONPATH: lib:.github/scripts
         run: python -m unittest discover -s .github/scripts/tests
